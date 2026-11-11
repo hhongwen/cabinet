@@ -491,3 +491,17 @@ STDERR: {"ok":false,"error":{"code":99992354,"message":"...not a valid {open_mes
 
 和 `im.message.receive_v1` 是两条独立的订阅，必须分别加。
 用户已加。
+
+## 重试
+
+飞书 API 会抖（实测遇到过 3 次 `dial tcp ... connectex` 超时）。
+`sendText` / `sendCard` / `patchCard` 都包了重试。
+
+**只重试网络类错误**（`error.type` 匹配 network / transport / timeout）。
+业务错误（ID 不存在、权限不足）重试无意义，只会让用户白等 ——
+实测业务错误 1120ms 返回，和正常路径 1175ms 差不多，没有白等重试。
+
+参数：3 次，间隔 800ms / 1600ms（递增）。
+
+**patch 失败不阻塞业务**：任务状态该变还是变，只是卡片会停在可点状态
+（这种极端情况宁可状态正确、卡片难看，也不要为了卡片好看把业务回滚）。

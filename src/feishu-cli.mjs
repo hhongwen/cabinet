@@ -258,6 +258,37 @@ export function createFeishuCliSender(opts = {}) {
     return profile ? ['--profile', profile] : [];
   }
 
+  /**
+   * 带重试的调用。
+   *
+   * 为什么需要：飞书 API 偶尔网络抖动（实测遇到 3 次 dial tcp 超时）。
+   * 对 patchCard 尤其重要 —— 一次失败，那张卡片就永远停在「可点」状态，
+   * 用户会反复点，产生重复操作。
+   *
+   * 只重试「网络类」错误。业务错误（ID 不存在、权限不足）重试无意义，
+   * 只会白等。
+   */
+  async function withRetry(fn, { attempts = 3, baseDelayMs = 800, label = 'call' } = {}) {
+    let last = null;
+    for (let i = 1; i <= attempts; i++) {
+      last = await fn();
+      if (last?.ok) return last;
+
+      // 业务错误不重试
+      const errType = last?.error?.type ?? '';
+      if (errType && !/network|transport|timeout/i.test(errType)) {
+        return last;
+      }
+      if (i < attempts) {
+        const wait = baseDelayMs * i;
+        log.warn(`${label} 第 ${i} 次失败（${errType || '未知'}），${wait}ms 后重试`);
+        await new Promise((r) => setTimeout(r, wait));
+      }
+    }
+    log.warn(`${label} 重试 ${attempts} 次仍失败`);
+    return last;
+  }
+
   return {
     /** 给某人（open_id）发文本。 */
     async sendText(text, openId) {
@@ -269,7 +300,10 @@ export function createFeishuCliSender(opts = {}) {
         '--msg-type', 'text',
         '--content', JSON.stringify({ text: String(text ?? '') }),
       ];
-      const parsed = parseResult(await run(args));
+      const parsed = await withRetry(
+        async () => parseResult(await run(args)),
+        { label: 'sendText' },
+      );
       if (!parsed.ok) {
         log.warn(`发消息失败: ${JSON.stringify(parsed.error).slice(0, 200)}`);
       }
@@ -281,14 +315,13 @@ export function createFeishuCliSender(opts = {}) {
      * 防止同一张卡片被反复点。
      */
     async patchCard(messageId, card) {
-      const r = await run([
+      const parsed = await withRetry(async () => parseResult(await run([
         'im', 'messages', 'patch',
         ...baseArgs(),
         '--message-id', messageId,
         '--as', 'bot',
         '--data', '-',
-      ], JSON.stringify({ content: JSON.stringify(card) }));
-      const parsed = parseResult(r);
+      ], JSON.stringify({ content: JSON.stringify(card) }))), { label: 'patchCard' });
       if (!parsed.ok) {
         log.warn(`更新卡片失败: ${JSON.stringify(parsed.error).slice(0, 200)}`);
       }
@@ -305,7 +338,10 @@ export function createFeishuCliSender(opts = {}) {
         '--msg-type', 'interactive',
         '--content', JSON.stringify(card),
       ];
-      const parsed = parseResult(await run(args));
+      const parsed = await withRetry(
+        async () => parseResult(await run(args)),
+        { label: 'sendCard' },
+      );
       if (!parsed.ok) {
         log.warn(`发卡片失败: ${JSON.stringify(parsed.error).slice(0, 200)}`);
       }
