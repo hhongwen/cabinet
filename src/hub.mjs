@@ -18,6 +18,7 @@ import { createTaskRunner } from './runner-task.mjs';
 import { createScheduler } from './scheduler.mjs';
 import { createMagpie } from './magpie.mjs';
 import { handleTaskRoutes } from './hub-tasks.mjs';
+import { createFeishuBridge } from './feishu-bridge.mjs';
 import { createIngest } from './ingest.mjs';
 import { createPlanner } from './planner.mjs';
 
@@ -83,9 +84,16 @@ export function createRuntime(cfg, { logger = log } = {}) {
   });
   const ingest = createIngest({ tasks, planner, magpie, sched });
 
+  // 飞书：走 lark-cli 长连接，不需要公网地址
+  const feishuCfg = cfg.feishu ?? {};
+  const feishuBridge = feishuCfg.enabled
+    ? createFeishuBridge({ tasks, ingest, sched, cfg: feishuCfg })
+    : null;
+
+
   return {
     cfg: runtimeCfg, store, ruleStore, runner, notifier, queue, agents, rulesResult, logger,
-    tasks, taskRunner, sched, magpie, groups, planner, ingest,
+    tasks, taskRunner, sched, magpie, groups, planner, ingest, feishuBridge,
   };
 }
 
@@ -190,7 +198,8 @@ function jobView(job, store, { full = false } = {}) {
  */
 export async function startHub(cfg, { port } = {}) {
   const rt = createRuntime(cfg);
-  const { store, ruleStore, runner, queue, notifier, tasks, sched, taskRunner, magpie, planner, ingest } = rt;
+  const { store, ruleStore, runner, queue, notifier, tasks, sched, taskRunner, magpie,
+          planner, ingest, feishuBridge } = rt;
 
   // 启动清理：上次没跑完的 running 一律标 interrupted（单机版没有别的进程在跑它们）
   const cleaned = store.markRunningInterrupted('进程重启，任务被中断');
@@ -241,6 +250,20 @@ export async function startHub(cfg, { port } = {}) {
 
     try {
       // --- 静态资源 ---
+      // --- 公网入口白名单 ---
+      // Funnel / 反代会把请求打到本机。只有明确放行的路径才允许从非本机地址进来。
+      // 面板、/api/state 之类一律只认 127.0.0.1。
+      const remote = req.socket.remoteAddress ?? '';
+      const isLocal = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
+      if (!isLocal) {
+        const publicPaths = cfg.publicPaths ?? [];
+        if (!publicPaths.includes(pathname)) {
+          log.warn(`拒绝外部访问 ${method} ${pathname}（来自 ${remote}）`);
+          sendText(res, 403, 'forbidden');
+          return;
+        }
+      }
+
       if (method === 'GET' && !pathname.startsWith('/api/')) {
         serveStatic(res, pathname);
         return;
@@ -410,6 +433,12 @@ export async function startHub(cfg, { port } = {}) {
     }
   }
 
+  // 飞书长连接：常驻，断了自己重连
+  if (feishuBridge) {
+    feishuBridge.start();
+    log.info('飞书长连接已启动（走 lark-cli，不需要公网地址）');
+  }
+
   tickTimer = setInterval(safeTick, Number(cfg.tickMs) > 0 ? Number(cfg.tickMs) : 1000);
   tickTimer.unref?.();
   safeTick(); // 启动就把队列里的活拉起来
@@ -437,6 +466,11 @@ export async function startHub(cfg, { port } = {}) {
       } catch (err) {
         log.warn(`${s.name} 停止失败: ${err.message}`);
       }
+    }
+
+    // 停飞书长连接
+    if (feishuBridge) {
+      try { feishuBridge.stop(); } catch (err) { log.warn(`停飞书失败: ${err.message}`); }
     }
 
     // 2. 先把 running 标 interrupted —— 必须在 killAll 之前，

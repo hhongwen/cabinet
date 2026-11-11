@@ -325,3 +325,79 @@ hub 的 tick 现在同时驱动事件队列和任务调度器。额度刹车命�
     接着抛 `database is not open` 未捕获异常。
     和原 queue.mjs 修过的 bug #4 是同一类。
     现在加了 `safe()` 守卫：库关了就当正常放弃，只 warn 不崩。
+
+# 四期：飞书（走 lark-cli 长连接）
+
+## 方案选型：走错了两次才对
+
+1. **第一版：Webhook**。我查到官方 SDK 依赖 protobufjs，判断「长连接要手写 protobuf」，
+   于是退回 Webhook，还让用户去开 Tailscale Funnel。
+2. **第二版：自己写 pbbp2 protobuf**。查了协议（Frame{SeqID,LogID,service,method,
+   headers[],payload}），技术上可行但要维护约 200 行协议代码，
+   出错表现为「消息随机丢」，很难查。
+3. **最终：调 lark-cli 子进程**。这是参考实现 `plugins/feishu/channel.ts` 的做法：
+   ```ts
+   spawn("lark-cli", ["event", "consume", "card.action.trigger", "--as", "bot"])
+   ```
+   CLI 挡住 protobuf，我们只读它的 stdout（一行一个 JSON）。
+
+**关键认知**：零 npm 依赖 ≠ 零外部依赖。依赖一个外部 CLI 是完全可接受的，
+依赖一个 npm 包会破坏 `git clone` 即跑。这两件事不是一回事。
+
+**收益**：不需要公网地址、不需要 Funnel、不需要手写协议。
+
+## 配置要点
+
+`lark-cli` 用 profile 区分不同 app：
+
+```
+lark-cli config init --app-id cli_xxx --app-secret-stdin --brand feishu --name cabinet
+lark-cli auth login --profile cabinet --domain im,event
+```
+
+`cabinet.config.json` 里 **不存 appSecret**，只存 appId 和 profile 名。
+真凭据在 lark-cli 自己的存储里（`~/.lark-cli/config.json`）。
+
+## 踩到的坑（补充）
+
+16. **Windows 上 spawn('lark-cli') 报 ENOENT。**
+    它是个 .cmd 包装脚本。照项目一贯做法绕开：直接调
+    `node <npm-root>/node_modules/@larksuite/cli/scripts/run.js`。
+    见 `resolveCli()`。这和 config 里 codex 的处理方式一致。
+
+17. **lark-cli 把 stdin EOF 当成退出信号。**
+    用 `stdio: ['pipe',...]` 并且**不要 `stdin.end()`**，只 write 一个空串保持打开。
+
+18. **同一时刻只能有一个消费者拿到事件。**
+    调试时开了多个进程，事件被随机一个吃掉，表现为「明明发了却收不到」。
+    测之前一定要 `lark-cli event stop --profile <name>`。
+
+19. **`stats: conn.stats` 存的是快照。**
+    在 return 对象里这样写会把构建那一刻的值固化，之后永远不变。
+    必须写成 `get stats() { return conn.stats; }`。
+
+## 联调验证
+
+真实链路跑通（2026-11-11 21:39）：
+
+```
+飞书发「整理一下我今天的笔记」
+  → fs-bridge 收到事件 → 建任务 task_mwc60qt8d97a42
+  → planner 拆解：kind=plan 子任务=2 需人审=false
+  → 调度器接管
+```
+
+`examples/feishucli-test.mjs` 是可重复的联调脚本（需要真账号，会等用户发消息）。
+
+## 测试
+
+| 测试 | 项数 | 需要什么 |
+|---|---|---|
+| `examples/feishutest.mjs` | 27 | 无（离线） |
+| `examples/feishucli-test.mjs` | 4 | 真账号 + 有人在窗口内发消息 |
+
+## 还没做
+
+- 卡片按钮回调没做端到端验证（离线测了逻辑，没真点过）。
+  需要 `card.action.trigger` 也起一个消费者。
+- 消息去重：飞书会重推事件，目前靠 `message_id` 没做幂等。

@@ -7,21 +7,49 @@
   "workers": 2,
   "sources": {
     "cron": [
-      { "id": "morning-brief", "type": "schedule.daily", "at": "08:30" }
+      {
+        "id": "morning-brief",
+        "type": "schedule.daily",
+        "at": "08:30"
+      }
     ],
     "watch": [
-      { "subject": "han_kl/00_Inbox", "path": "D:/WorkFiles/code/04_own_github/han_kl/00_Inbox", "ignore": ["**/README.md", "**/.git/**"] }
+      {
+        "subject": "han_kl/00_Inbox",
+        "path": "D:/WorkFiles/code/04_own_github/han_kl/00_Inbox",
+        "ignore": [
+          "**/README.md",
+          "**/.git/**"
+        ]
+      }
     ],
-    "http": { "enabled": true }
+    "http": {
+      "enabled": true
+    }
   },
   "notify": {
     "panel": true,
-    "webhook": { "url": null }
+    "webhook": {
+      "url": null
+    }
   },
   "agents": {
     "codex": {
       "command": "node",
-      "args": ["%APPDATA%/npm/node_modules/@openai/codex/bin/codex.js", "exec", "--skip-git-repo-check", "--json", "-C", "{cwd}", "-s", "{sandbox}", "-m", "{model}", "-o", "{lastMessageFile}"],
+      "args": [
+        "%APPDATA%/npm/node_modules/@openai/codex/bin/codex.js",
+        "exec",
+        "--skip-git-repo-check",
+        "--json",
+        "-C",
+        "{cwd}",
+        "-s",
+        "{sandbox}",
+        "-m",
+        "{model}",
+        "-o",
+        "{lastMessageFile}"
+      ],
       "promptViaStdin": true
     },
     "opencode": {
@@ -29,5 +57,20 @@
       "args": [],
       "promptViaStdin": false
     }
+  },
+  "feishu": {
+    "enabled": true,
+    "profile": "cabinet",
+    "cliPath": "lark-cli",
+    "openId": "ou_f8cc50ae83fcae3141342affb110d4a6",
+    "allowedOpenIds": [
+      "ou_f8cc50ae83fcae3141342affb110d4a6"
+    ],
+    "defaultCwd": "D:/WorkFiles/code/04_own_github/han_kl",
+    "appId": "cli_aa7edc94fff85c00"
+  },
+  "planner": {
+    "model": "group/smart-split",
+    "timeoutMs": 180000
   }
 }
