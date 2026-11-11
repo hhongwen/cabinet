@@ -13,6 +13,13 @@ import { createNotifier } from './notify.mjs';
 import { createCronSource } from './sources/cron.mjs';
 import { createWatchSource } from './sources/watch.mjs';
 import { createHttpSource } from './sources/http.mjs';
+import { ensureTaskSchema, createTaskStore } from './tasks.mjs';
+import { createTaskRunner } from './runner-task.mjs';
+import { createScheduler } from './scheduler.mjs';
+import { createMagpie } from './magpie.mjs';
+import { handleTaskRoutes } from './hub-tasks.mjs';
+import { createIngest } from './ingest.mjs';
+import { createPlanner } from './planner.mjs';
 
 const log = createLogger('hub');
 
@@ -40,7 +47,46 @@ export function createRuntime(cfg, { logger = log } = {}) {
   const notifier = createNotifier(cfg);
   const queue = createQueue({ cfg: runtimeCfg, store, ruleStore, runner, notifier });
 
-  return { cfg: runtimeCfg, store, ruleStore, runner, notifier, queue, agents, rulesResult, logger };
+  // ---- 任务层：和事件层共用同一个 db，表是分开的 ----
+  ensureTaskSchema(store.raw);
+  const tasks = createTaskStore(store.raw);
+  const magpie = createMagpie({ gateway: cfg.magpie?.gateway, cliPath: cfg.magpie?.cliPath });
+  const taskRunner = createTaskRunner(runtimeCfg);
+
+  // 群助手：项目群 / 任务群。scope 决定复用哪一条群记录。
+  const groups = {
+    project(task) {
+      const proj = task.project_id ? tasks.getProject(task.project_id) : null;
+      return tasks.upsertGroup({
+        kind: 'project',
+        scope_id: task.project_id ?? 'noproj',
+        name: proj ? proj.name + ' 项目群' : '未分组项目群',
+      });
+    },
+    task(task) {
+      const root = tasks.getTask(task.root_id ?? task.id);
+      return tasks.upsertGroup({
+        kind: 'task',
+        scope_id: task.root_id ?? task.id,
+        name: root ? root.title : task.title,
+      });
+    },
+  };
+
+  const sched = createScheduler({ tasks, runner: taskRunner, cfg: runtimeCfg, magpie, groups });
+
+  // 拆解器 + 入口：面板/飞书收下的任务在这里变成任务图
+  const planner = createPlanner({
+    magpie,
+    model: cfg.planner?.model ?? null,
+    timeoutMs: Number(cfg.planner?.timeoutMs) > 0 ? Number(cfg.planner.timeoutMs) : 180000,
+  });
+  const ingest = createIngest({ tasks, planner, magpie, sched });
+
+  return {
+    cfg: runtimeCfg, store, ruleStore, runner, notifier, queue, agents, rulesResult, logger,
+    tasks, taskRunner, sched, magpie, groups, planner, ingest,
+  };
 }
 
 function readBody(req, limit = 1024 * 1024) {
@@ -144,7 +190,7 @@ function jobView(job, store, { full = false } = {}) {
  */
 export async function startHub(cfg, { port } = {}) {
   const rt = createRuntime(cfg);
-  const { store, ruleStore, runner, queue, notifier } = rt;
+  const { store, ruleStore, runner, queue, notifier, tasks, sched, taskRunner, magpie, planner, ingest } = rt;
 
   // 启动清理：上次没跑完的 running 一律标 interrupted（单机版没有别的进程在跑它们）
   const cleaned = store.markRunningInterrupted('进程重启，任务被中断');
@@ -172,6 +218,14 @@ export async function startHub(cfg, { port } = {}) {
       // 先热加载规则，再调度
       ruleStore.maybeReload();
       queue.tick();
+      // 任务层：同一节奏驱动
+      try {
+        const r = sched.tick();
+        if (r.started > 0) log.info(`任务调度：起了 ${r.started} 个`);
+        if (r.throttle) log.warn(`额度刹车：${r.throttle}，并发降到 1`);
+      } catch (err) {
+        log.error(`任务调度出错: ${err.stack ?? err.message}`);
+      }
     } catch (err) {
       log.error(`tick 出错: ${err.stack ?? err.message}`);
     } finally {
@@ -306,6 +360,15 @@ export async function startHub(cfg, { port } = {}) {
           rulesError: ruleStore.error,
         });
         return;
+      }
+
+      // --- 任务层路由（/api/tasks*, /api/groups*）---
+      if (pathname.startsWith('/api/tasks') || pathname.startsWith('/api/groups') ||
+          pathname.startsWith('/api/todos')) {
+        const handled = await handleTaskRoutes({
+          req, res, method, pathname, url, tasks, sched, readBody, ingest, planner, magpie, cfg,
+        });
+        if (handled) return;
       }
 
       sendJson(res, 404, { ok: false, error: `没有这个接口: ${method} ${pathname}` });

@@ -38,8 +38,9 @@ await t('GET / 返回面板 HTML（内嵌样式，无外部依赖）', async () 
   assert(html.includes('<title>Cabinet'), '缺少标题');
   assert(!/https?:\/\/(cdn|unpkg|jsdelivr|cdnjs)/i.test(html), '不能引用外部 CDN');
   assert(!/<script[^>]+src=/.test(html), '不应有外链脚本');
-  assert(html.includes('手动触发'), '缺少手动触发表单');
-  assert(html.includes('/api/state'), '面板应轮询 /api/state');
+  assert(html.includes('+ 新任务'), '缺少新建任务入口');
+  assert(html.includes('等你处理'), '缺少待办区');
+  assert(html.includes('/api/tasks/state'), '面板应轮询 /api/tasks/state');
 });
 
 await t('GET /api/state 返回 jobs/stats/config', async () => {

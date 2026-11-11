@@ -198,3 +198,130 @@ scheduler 会往群里发「▶ 开始执行」，然后再读未读消息拼 pr
 | `examples/sourcetest.mjs` | 21 | 无 |
 | `examples/httptest.mjs` | 13 | hub 已在 8891 跑 |
 | `examples/e2etest.mjs` | 端到端 | 真 codex + Magpie，约 3 分钟 |
+
+# 三期：面板（public/index.html）
+
+旧面板是三栏 jobs 界面，保留为 `public/jobs.html` 备查。
+新的 `index.html` 是任务版：左树 / 中详情+群消息 / 右待办。
+
+## 新增
+
+| 文件 | 作用 |
+|---|---|
+| `src/hub-tasks.mjs` | 任务层 API 路由，从 hub.mjs 拆出来 |
+| `public/index.html` | 新面板 |
+| `public/jobs.html` | 旧面板备份 |
+| `examples/paneltest.mjs` | 面板 API 测试（21 项） |
+
+## API
+
+| 路由 | 作用 |
+|---|---|
+| `GET  /api/tasks/state` | 任务列表 + 统计 + 待办 + 群 + 项目 |
+| `GET  /api/tasks/:id` | 单任务详情（含 runs / children / timeline / 群消息） |
+| `POST /api/tasks` | 新建任务 |
+| `POST /api/tasks/:id/approve\|reject\|rerun` | 审批 / 重跑 |
+| `POST /api/tasks/:id/priority` | 改优先级 |
+| `GET  /api/groups/:id/messages` | 群消息 |
+| `POST /api/groups/:id/messages` | 往群里说话 |
+| `POST /api/todos/:id/resolve` | 处理待办 |
+
+hub 的 tick 现在同时驱动事件队列和任务调度器。额度刹车命中时并发降到 1。
+
+## 面板验证方式（这次没偷懒）
+
+不只看截图，用 Chrome 无头 + CDP 真的点了：
+
+- 弹窗打开 → 填中文 → 提交 → 服务端标题正确
+- 点任务树 → 详情渲染 → 依赖区 1 项（「识别待归位文件 · done」）
+- 群消息 7 条、时间线 5 条都渲染出来
+- 全程 JS 运行时错误 0
+
+截图：`p3.png`（初始）、`p5.png`（依赖+群消息展开）。
+
+## 踩到的坑（补充）
+
+8. **curl 在 Windows 下发的请求体不是 UTF-8。**
+   中文标题存进库变成 `������`。这不是显示问题，是数据被写坏了。
+   现在 API 加了编码校验：请求体里出现 U+FFFD 直接 400，
+   宁可拒绝也不落库。
+
+9. **演示数据里写 `status: 'ready'` 会被调度器真的拉起来跑。**
+   造 mock 数据时要避开会被调度的状态，否则截图期间会有真实 codex 在干活。
+   用 `awaiting_plan`（等人审）这类状态安全。
+
+10. **面板挂载路由时，`/api/todos` 漏了分派。**
+    路由函数写了但 hub 的分派条件只认 `/api/tasks` 和 `/api/groups`，
+    待办 resolve 一直 404。加了 `/api/todos` 前缀才通。
+
+11. **旧 httptest 的两条断言绑定了旧面板。**
+    「有手动触发表单」和「轮询 /api/state」都要改成新版
+    （「+ 新任务」按钮、轮询 /api/tasks/state）。这不是代码 bug。
+
+## 测试矩阵（更新）
+
+| 测试 | 项数 | 需要什么 |
+|---|---|---|
+| `examples/tasktest.mjs` | 48 | 无 |
+| `examples/plannertest.mjs` | 31 | 无 |
+| `examples/schedtest.mjs` | 39 | 无（假 agent） |
+| `examples/selftest.mjs` | 44 | 无（假 agent） |
+| `examples/sourcetest.mjs` | 21 | 无 |
+| `examples/httptest.mjs` | 13 | hub 在跑 |
+| `examples/paneltest.mjs` | 21 | hub 在跑 |
+| `examples/e2etest.mjs` | 端到端 | 真 codex + Magpie，约 3 分钟 |
+
+离线合计 183 项，在线 34 项。
+
+## 面板还没做的事
+
+- **飞书没接**。长连接方案验证过可行，一行代码没写。
+- **拆解没接到面板**。现在面板建的任务停在 `inbox`，
+  没有任何东西会去拆它 —— 拆解器写好了但没接进入口。
+  这是当前最大的断点。
+- **SSE 没做**，还是 3 秒轮询。
+- **重跑不清理旧 run**，只在 task_runs 里累加。
+
+## 入口层（src/ingest.mjs）
+
+补上了最关键的断点：面板建的任务原本停在 `inbox` 没人拆。
+
+现在：`POST /api/tasks` → 立刻返回 inbox（实测 **82ms**）→ 后台拆解 → 落库 → 调度器接管。
+串行等拆解要 7~25 秒，入口上不能这么干。
+
+实测完整链路（真实 codex，在 han_kl 上）：
+```
+新建 → 82ms 返回 inbox → 后台拆出 3 个子任务 → 调度器自动拉起第 1 个
+```
+
+## 判模糊的落地
+
+`ingesttest.mjs` 26 项覆盖了三条分支：
+- 原子任务 → 直接 ready
+- 确定计划 → 自动 ready，不等
+- 含 external → 全部 `awaiting_plan` + 生成 `plan_review` 待办
+
+`approvePlan` 放行后才变 ready，依赖关系依然生效。
+
+## 踩到的坑（补充）
+
+12. **`renderDetail` 里替换按钮区时留下了一个多余的 `}`。**
+    语法检查报 `Unexpected token '}'`，但逐行看结构都正常 ——
+    因为括号深度在第 277 行变成负数，前面某处少了一个 `{` 的配对。
+    用「按行累加括号深度、找第一个负深度」的方式才定位到。
+    以后改这块建议每次改完都跑一次括号平衡检查。
+
+13. **heredoc 里的 `\'` 会被吃成 `'`。**
+    面板里那一堆 `onclick="fn('id')"` 拼接，用 heredoc 写入时
+    反斜杠会被剥一层，生成非法 JS。
+    对策：这类含嵌套引号的代码用 Python `io.open` 写，不用 bash heredoc。
+
+14. **`ingest` 没解构进 startHub。**
+    路由传参加了 `ingest`，但 `const { ... } = rt` 那行漏了，
+    调用时报 `ingest is not defined`。新增依赖时两处都要改。
+
+15. **后台拆解在库关闭后仍会写库。**
+    `accept` 起的是后台 promise，进程退出时 db 已关，
+    接着抛 `database is not open` 未捕获异常。
+    和原 queue.mjs 修过的 bug #4 是同一类。
+    现在加了 `safe()` 守卫：库关了就当正常放弃，只 warn 不崩。
