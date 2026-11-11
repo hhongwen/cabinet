@@ -1,0 +1,17 @@
+{
+  "name": "cabinet",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "单机版个人 Agent 自动化中台：事件 → 规则派发 → 无头 Agent → 批奏折",
+  "bin": {
+    "cabinet": "bin/cabinet.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "doctor": "node bin/cabinet.mjs doctor",
+    "start": "node bin/cabinet.mjs start"
+  }
+}

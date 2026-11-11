@@ -1,0 +1,33 @@
+{
+  "port": 8787,
+  "host": "127.0.0.1",
+  "dbPath": "~/.cabinet/cabinet.db",
+  "logsDir": "~/.cabinet/logs",
+  "rulesPath": "./rules.json",
+  "workers": 2,
+  "sources": {
+    "cron": [
+      { "id": "morning-brief", "type": "schedule.daily", "at": "08:30" }
+    ],
+    "watch": [
+      { "subject": "han_kl/00_Inbox", "path": "D:/WorkFiles/code/04_own_github/han_kl/00_Inbox", "ignore": ["**/README.md", "**/.git/**"] }
+    ],
+    "http": { "enabled": true }
+  },
+  "notify": {
+    "panel": true,
+    "webhook": { "url": null }
+  },
+  "agents": {
+    "codex": {
+      "command": "node",
+      "args": ["%APPDATA%/npm/node_modules/@openai/codex/bin/codex.js", "exec", "--skip-git-repo-check", "--json", "-C", "{cwd}", "-s", "{sandbox}", "-m", "{model}", "-o", "{lastMessageFile}"],
+      "promptViaStdin": true
+    },
+    "opencode": {
+      "command": "node",
+      "args": [],
+      "promptViaStdin": false
+    }
+  }
+}

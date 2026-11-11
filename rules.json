@@ -1,0 +1,49 @@
+{
+  "$comment": "规则从上往下匹配，第一条命中即止。match 里留空表示不限制该字段。",
+  "rules": [
+    {
+      "id": "inbox-triage",
+      "match": { "source": "watch", "type": "file.created", "subject": "han_kl/00_Inbox" },
+      "agent": "codex",
+      "cwd": "D:/WorkFiles/code/04_own_github/han_kl",
+      "model": null,
+      "reasoning": "medium",
+      "sandbox": "workspace-write",
+      "prompt": "这是知识库的 Inbox 收件区。按 AGENTS.md 的规则处理新文件：\n1. 读 _System/SCHEMA.md 和 KNOWLEDGE_STRUCTURE.md 确认归位规则；\n2. 判断该去 10_Projects / 20_Areas / 30_Knowledge 的哪一处；\n3. 移动文件并补 frontmatter；\n4. 在 00_Inbox/README.md 留一行处理记录。\n拿不准归到哪就停下来问我，不要瞎猜。",
+      "approval": "before",
+      "concurrency": { "key": "inbox", "max": 1 },
+      "notifyWhen": ["needs_decision", "failed"]
+    },
+    {
+      "id": "daily-brief",
+      "match": { "source": "cron", "type": "schedule.daily", "subject": "morning-brief" },
+      "agent": "codex",
+      "cwd": "D:/WorkFiles/code/04_own_github/han_kl",
+      "reasoning": "high",
+      "sandbox": "workspace-write",
+      "prompt": "生成今天的晨间简报：\n1. 扫 00_Inbox 未处理条目；\n2. 扫 10_Projects/**/README.md 里 status: in_progress 的项目，各写一句进展/卡点；\n3. 扫 git log --since='24 hours ago' 汇总昨天做了什么；\n4. 输出到 _System/Generated/brief-<今天日期>.md。\n只报事实，不要编造。",
+      "approval": "never",
+      "notifyWhen": ["done", "failed"]
+    },
+    {
+      "id": "gh-check",
+      "match": { "source": "http", "type": "github.issue", "subject": "*" },
+      "agent": "codex",
+      "cwd": "D:/WorkFiles/code/04_own_github/han_kl",
+      "sandbox": "read-only",
+      "prompt": "分析这条 GitHub issue：判断是 bug / 需求 / 疑问，给出是否值得做的评估和大致工作量。不要改代码。",
+      "approval": "never",
+      "notifyWhen": ["done"]
+    },
+    {
+      "id": "catch-all",
+      "match": {},
+      "agent": "codex",
+      "cwd": "D:/WorkFiles/code/04_own_github/han_kl",
+      "sandbox": "read-only",
+      "prompt": "处理这个事件，给出结论。如果必须我拍板，在结论里明确写出「需要决策：」和选项。",
+      "approval": "before",
+      "notifyWhen": ["needs_decision", "failed"]
+    }
+  ]
+}
