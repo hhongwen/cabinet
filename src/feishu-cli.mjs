@@ -277,6 +277,25 @@ export function createFeishuCliSender(opts = {}) {
       return parsed;
     },
 
+    /**
+     * 更新一张已发出的卡片。用于「点完之后把按钮换成结果」，
+     * 防止同一张卡片被反复点。
+     */
+    async patchCard(messageId, card) {
+      const r = await run([
+        'im', 'messages', 'patch',
+        ...baseArgs(),
+        '--message-id', messageId,
+        '--as', 'bot',
+        '--data', '-',
+      ], JSON.stringify({ content: JSON.stringify(card) }));
+      const parsed = tryJson(r.out);
+      if (parsed && parsed.ok === false) {
+        log.warn(`更新卡片失败: ${JSON.stringify(parsed.error).slice(0, 200)}`);
+      }
+      return parsed;
+    },
+
     /** 发交互卡片（JSON 字符串作为 content）。 */
     async sendCard(card, openId) {
       const args = [

@@ -2,7 +2,7 @@
 // 不需要网络，不需要真账号。
 import { openDb } from '../src/db.mjs';
 import { ensureTaskSchema, createTaskStore } from '../src/tasks.mjs';
-import { createFeishuBridge, buildCard } from '../src/feishu-bridge.mjs';
+import { createFeishuBridge, buildCard, settledCard } from '../src/feishu-bridge.mjs';
 
 let pass = 0, fail = 0;
 const errors = [];
@@ -141,6 +141,43 @@ console.log('\n=== 拆解审批复用卡片 ===');
     operator_id: 'ou_owner',
   });
   ok(actions.some((a) => a[0] === 'approvePlan' && a[1] === tid), 'awaiting_plan 走 approvePlan');
+}
+
+console.log('\n=== 重复点击被忽略 ===');
+{
+  const { b, actions } = mkBridge();
+  const proj = tasks.upsertProject({ name: 'pdup', cwd: 'D:/pdup' });
+  const tid = tasks.insertTask({ project_id: proj.id, title: '防连点', status: 'review', cwd: 'D:/pdup' });
+  const evt = {
+    action_value: JSON.stringify({ action: 'approve', taskId: tid }),
+    operator_id: 'ou_owner',
+    message_id: 'om_same_message',
+  };
+  b._handleCardEvent(evt);
+  const first = actions.filter((a) => a[0] === 'approve').length;
+  b._handleCardEvent(evt);
+  const second = actions.filter((a) => a[0] === 'approve').length;
+  eq(first, 1, '第一次点击触发一次');
+  eq(second, 1, '重复点击被忽略');
+}
+
+console.log('\n=== 已完成的任务不重复动作 ===');
+{
+  const { b, actions } = mkBridge();
+  const proj = tasks.upsertProject({ name: 'pdone', cwd: 'D:/pdone' });
+  const tid = tasks.insertTask({ project_id: proj.id, title: '已完成的', status: 'done', cwd: 'D:/pdone' });
+  const before = actions.length;
+  b._handleCardEvent({ action_value: { action: 'approve', taskId: tid }, operator_id: 'ou_owner', message_id: 'om_done' });
+  eq(actions.length, before, '已完成任务不再调 approve');
+}
+
+console.log('\n=== 已处理卡片没有按钮 ===');
+{
+  const c = settledCard({ title: '原标题', result: '已通过', ok: true });
+  eq(c.header.title.content, '原标题', '保留原标题');
+  eq(c.header.template, 'green', '成功用绿色');
+  ok(!JSON.stringify(c).includes('button'), '结果卡片里没有按钮');
+  eq(settledCard({ title: 'x', result: 'y', ok: false }).header.template, 'grey', '失败用灰色');
 }
 
 console.log('\n=== 卡片结构 ===');

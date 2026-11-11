@@ -20,6 +20,9 @@ export function createFeishuBridge({ tasks, ingest, sched = null, cfg = {} }) {
     ? new Set(cfg.allowedOpenIds) : null;
   let ownerOpenId = cfg.openId ?? null;
 
+  // 已处理过的卡片消息，防止重复点击触发两次（飞书可能重推事件）
+  const handledMessages = new Set();
+
   // 会话 id 缓存：open_id → chat_id（回消息用）
   const chatOf = new Map();
 
@@ -145,43 +148,81 @@ export function createFeishuBridge({ tasks, ingest, sched = null, cfg = {} }) {
       try { value = JSON.parse(value); } catch { value = null; }
     }
     const operator = evt.operator_id ?? null;
+    const messageId = evt.message_id ?? null;
     const verb = value?.action;
     const taskId = value?.taskId;
     const todoId = value?.todoId;
 
-    log.info(`卡片操作: ${verb} task=${taskId}`);
+    log.info(`卡片操作: ${verb} task=${taskId} msg=${messageId}`);
+
+    // 幂等：同一条卡片消息只处理一次，防止连点
+    if (messageId && handledMessages.has(messageId)) {
+      log.warn(`卡片 ${messageId} 已经处理过了，忽略重复点击`);
+      return;
+    }
+
     if (!verb || !taskId) return;
-    if (operator && !isAllowed(operator)) return;
+    if (operator && !isAllowed(operator)) {
+      log.warn(`非白名单用户点了卡片: ${operator}`);
+      return;
+    }
+    if (messageId) handledMessages.add(messageId);
+
+    let resultText = '';
+    let okFlag = true;
 
     try {
       const t = tasks.getTask(taskId);
       if (!t) throw new Error('任务不存在');
 
-      if (verb === 'approve') {
+      // 已经处理过的任务：不重复动作，只把卡片刷新成现状
+      const alreadyDone = ['done', 'rejected', 'accepted'].includes(t.status);
+      if (alreadyDone) {
+        resultText = `这条已经是「${t.status}」了，不用再处理。`;
+        okFlag = false;
+      } else if (verb === 'approve') {
         if (t.status === 'awaiting_plan') {
           const n = ingest.approvePlan(taskId);
           if (todoId) tasks.resolveTodo(todoId, 'approve');
-          notify(`已放行 ${n} 个任务。`);
+          resultText = `已放行 ${n} 个任务。`;
         } else {
           sched?.approve(taskId, '飞书确认');
           if (todoId) tasks.resolveTodo(todoId, 'approve');
-          notify(`已通过：${t.title}`);
+          resultText = `已通过：${t.title}`;
         }
       } else if (verb === 'reject') {
         if (t.status === 'awaiting_plan') {
           ingest.rejectPlan(taskId);
           if (todoId) tasks.dismissTodo(todoId);
-          notify(`已驳回整个拆解。`);
+          resultText = `已驳回整个拆解。`;
         } else {
           sched?.reject(taskId, '飞书驳回');
           if (todoId) tasks.dismissTodo(todoId);
-          notify(`已驳回：${t.title}`);
+          resultText = `已驳回：${t.title}`;
         }
+      } else {
+        resultText = `未知动作：${verb}`;
+        okFlag = false;
       }
     } catch (err) {
       log.warn(`卡片操作失败: ${err.message}`);
-      notify(`操作失败：${err.message}`);
+      resultText = `操作失败：${err.message}`;
+      okFlag = false;
     }
+
+    // 关键：把卡片改成「已处理」的样子，按钮消失。
+    // 不这么做的话，那张卡片还能一直被点。
+    if (messageId) {
+      const original = safeParse(evt.card_content);
+      const settled = settledCard({
+        title: original?.header?.title?.content ?? '已处理',
+        result: resultText,
+        ok: okFlag,
+      });
+      sender.patchCard?.(messageId, settled).catch?.(() => {});
+    }
+
+    notify(resultText);
   }
 
   // ---------- 长连接 ----------
@@ -199,13 +240,30 @@ export function createFeishuBridge({ tasks, ingest, sched = null, cfg = {} }) {
     restartDelayMs: cfg.restartDelayMs ?? 10_000,
   });
 
+  // 卡片回调单独一个消费者（同一时刻每种事件只能有一个消费者）
+  const cardConn = createFeishuLongConn({
+    cliPath: cfg.cliPath,
+    profile,
+    onEvent: (evt) => {
+      const type = evt.type ?? evt.event_type;
+      if (type === EVENT_CARD || evt.action_value) handleCardEvent(evt);
+    },
+    onError: (e) => log.warn(`[卡片] ${e}`),
+    restartDelayMs: cfg.restartDelayMs ?? 10_000,
+  });
+
   return {
     start() {
       log.info(`飞书长连接启动（profile=${profile ?? '默认'}）`);
-      return conn.start(EVENT_MESSAGE);
+      // 消息和卡片回调是两个独立的事件流，必须各起一个消费者。
+      // 只起消息那个的话，点卡片按钮不会触发任何动作。
+      const jobs = [conn.start(EVENT_MESSAGE)];
+      if (cfg.watchCards !== false) jobs.push(cardConn.start(EVENT_CARD));
+      return Promise.all(jobs);
     },
     stop() {
       conn.stop();
+      cardConn.stop();
     },
     notify,
     notifyCard,
@@ -230,7 +288,18 @@ export function createFeishuBridge({ tasks, ingest, sched = null, cfg = {} }) {
       if (run?.error) s += `\n\n错误：${String(run.error).slice(0, 300)}`;
       return notify(s);
     },
-    get stats() { return conn.stats; },
+    get stats() {
+      const a = conn.stats;
+      const b = cardConn.stats;
+      return {
+        running: a.running || b.running,
+        eventsSeen: a.eventsSeen + b.eventsSeen,
+        cardEvents: b.eventsSeen,
+        restarts: a.restarts + b.restarts,
+        lastEventAt: a.lastEventAt ?? b.lastEventAt,
+        lastError: a.lastError ?? b.lastError,
+      };
+    },
     get ownerOpenId() { return ownerOpenId; },
     _handleMessageEvent: handleMessageEvent,
     _handleCardEvent: handleCardEvent,
@@ -265,6 +334,34 @@ export function buildCard({ title, body, taskId, todoId }) {
           },
         ],
       },
+    ],
+  };
+}
+
+/** 安全解析 JSON 字符串，失败返回 null。 */
+function safeParse(text) {
+  if (typeof text !== 'string' || !text) return text ?? null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 处理完的卡片长什么样：按钮消失，只剩一句结果。
+ * 这是防重复点击的核心 —— 按钮不在了就没法再点。
+ */
+export function settledCard({ title, result, ok = true }) {
+  return {
+    config: { wide_screen_mode: true },
+    header: {
+      template: ok ? 'green' : 'grey',
+      title: { tag: 'plain_text', content: String(title || '已处理').slice(0, 100) },
+    },
+    elements: [
+      { tag: 'div', text: { tag: 'plain_text', content: String(result ?? '') } },
+      { tag: 'note', elements: [{ tag: 'plain_text', content: '已处理，这条不用再点' }] },
     ],
   };
 }

@@ -401,3 +401,41 @@ lark-cli auth login --profile cabinet --domain im,event
 - 卡片按钮回调没做端到端验证（离线测了逻辑，没真点过）。
   需要 `card.action.trigger` 也起一个消费者。
 - 消息去重：飞书会重推事件，目前靠 `message_id` 没做幂等。
+
+## 卡片回调：两个真问题（用户实测反馈）
+
+### 1. 点完按钮还能再点，第二张卡片报错
+
+**现象**：点「通过」之后卡片外观不变，按钮还在，可以反复点。
+
+**根因**：飞书不会因为按钮被点击就自动改变卡片样子。必须主动调
+`im messages patch` 把它换成「已处理」的样子。
+
+**修法**：
+- 新增 `sender.patchCard(messageId, card)`
+- 新增 `settledCard()`：绿色/灰色标题 + 结果文字 + note「已处理，这条不用再点」，
+  **不含任何 button 元素**。按钮不在了就没法再点。
+- 处理完立刻 `patchCard`。
+
+**顺带加的防御**：
+- `handledMessages` 集合：同一条 message_id 只处理一次（飞书可能重推事件）
+- 已完成的任务（done/rejected/accepted）不再执行动作，只把卡片刷新成现状
+
+### 2. 「目标回调服务当前在线」报错
+
+**根因**：`card.action.trigger` **必须在飞书开发者后台单独开启**。
+用户只开了 `im.message.receive_v1`。
+
+飞书的事件订阅和卡片回调是两套配置：
+- 事件订阅 → `im.message.receive_v1`（已开）
+- 卡片回调 → `card.action.trigger`（未开）
+
+**这不是代码问题，是后台配置。** 代码侧准备好后，去后台加这一条即可。
+
+### 双消费者
+
+`card.action.trigger` 和 `im.message.receive_v1` 是两个独立事件流，
+必须各起一个 lark-cli 消费者。之前只起了消息那个，
+所以点按钮根本没人听（日志里 `eventsSeen` 一直是 0）。
+
+现在 `bridge.start()` 会并行起两个，`stats` 里分开统计 `eventsSeen` 和 `cardEvents`。
