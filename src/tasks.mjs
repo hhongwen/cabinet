@@ -1,6 +1,6 @@
 // 任务存储层。只做 CRUD + 状态迁移，不含调度决策。
 // 调度在 scheduler.mjs，拆解在 planner.mjs。
-import { TASK_SCHEMA } from './schema-tasks.mjs';
+import { TASK_SCHEMA, IDEMPOTENCY_INDEX } from './schema-tasks.mjs';
 import { createLogger, nowIso, newId } from './util.mjs';
 
 const log = createLogger('tasks');
@@ -55,6 +55,13 @@ const TASK_COLUMNS = new Set([
 
 export function ensureTaskSchema(db) {
   db.exec(TASK_SCHEMA);
+  // 幂等索引单独建：老库里如果已有重复数据会失败，
+  // 那种情况降级成「没有约束」，不能把启动搞崩
+  try {
+    db.exec(IDEMPOTENCY_INDEX);
+  } catch (err) {
+    log.warn(`幂等索引建不了（老库里可能已有重复数据）: ${err.message}`);
+  }
 }
 
 export function createTaskStore(db) {
@@ -195,6 +202,18 @@ export function createTaskStore(db) {
   }
 
   /** 该任务的所有子任务（直接子级）。 */
+  /**
+   * 按外部消息查已建的任务。幂等的核心。
+   * @returns {object|null}
+   */
+  function findBySourceRef(source, sourceRef) {
+    if (!sourceRef) return null;
+    return get(
+      'SELECT * FROM tasks WHERE source = ? AND source_ref = ? ORDER BY created_at ASC LIMIT 1',
+      source, sourceRef,
+    );
+  }
+
   function listChildren(taskId) {
     return all('SELECT * FROM tasks WHERE parent_id = ? ORDER BY sort_key ASC', taskId);
   }
@@ -524,7 +543,7 @@ export function createTaskStore(db) {
     // projects
     upsertProject, getProject, listProjects,
     // tasks
-    insertTask, updateTask, claimTask, getTask, listTasks, listChildren,
+    insertTask, updateTask, claimTask, getTask, listTasks, listChildren, findBySourceRef,
     // deps
     addDep, listDeps, listDependents, depsSatisfied, wouldCycle,
     // runs

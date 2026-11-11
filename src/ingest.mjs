@@ -39,19 +39,42 @@ export function createIngest({ tasks, planner, magpie, sched = null }) {
    * @returns {{id: string, status: 'inbox'}}
    */
   function accept({ title, body = null, cwd = null, project = null, priority = 0, source = 'panel', sourceRef = null }) {
+    // 幂等：同一条外部消息只建一次任务。
+    // 飞书会重推事件（网络重试、客户端重连），没这一步就会建出重复任务。
+    if (sourceRef) {
+      const existing = tasks.findBySourceRef(source, sourceRef);
+      if (existing) {
+        log.info(`重复消息 ${sourceRef}，返回已有任务 ${existing.id}`);
+        return { id: existing.id, status: existing.status, duplicate: true };
+      }
+    }
+
     let proj = null;
     if (cwd) proj = tasks.upsertProject({ name: project ?? cwd, cwd: String(cwd) });
 
-    const id = tasks.insertTask({
-      project_id: proj?.id ?? null,
-      title: String(title ?? '').trim() || '(无标题)',
-      body,
-      cwd: cwd ?? proj?.cwd ?? null,
-      status: 'inbox',
-      priority: Number(priority) || 0,
-      source,
-      source_ref: sourceRef,
-    });
+    let id;
+    try {
+      id = tasks.insertTask({
+        project_id: proj?.id ?? null,
+        title: String(title ?? '').trim() || '(无标题)',
+        body,
+        cwd: cwd ?? proj?.cwd ?? null,
+        status: 'inbox',
+        priority: Number(priority) || 0,
+        source,
+        source_ref: sourceRef,
+      });
+    } catch (err) {
+      // 并发下两个请求同时通过上面的查询，靠唯一索引兜底
+      if (/UNIQUE constraint failed/i.test(err.message)) {
+        const existing = tasks.findBySourceRef(source, sourceRef);
+        if (existing) {
+          log.info(`并发重复消息 ${sourceRef}，返回已有任务 ${existing.id}`);
+          return { id: existing.id, status: existing.status, duplicate: true };
+        }
+      }
+      throw err;
+    }
 
     tasks.logEvent({
       task_id: id, actor: source === 'feishu' ? 'human' : 'human',

@@ -137,6 +137,14 @@ export function createFeishuBridge({ tasks, ingest, sched = null, cfg = {} }) {
       source: 'feishu',
       sourceRef: evt.message_id ?? null,
     });
+
+    // 重复投递：任务已经建过了，别再回一遍「收到」
+    // （飞书重推事件时如果回了，用户会看到两条一模一样的回复）
+    if (r.duplicate) {
+      log.info(`重复投递的消息 ${evt.message_id}，已忽略（任务 ${r.id}）`);
+      return;
+    }
+
     log.info(`飞书来任务 ${r.id}: ${text.slice(0, 40)}`);
     notify(`收到，开始拆解。\n\n「${text.slice(0, 80)}」\n\n拆完我告诉你。`, { openId });
   }

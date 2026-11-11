@@ -138,3 +138,15 @@ CREATE TABLE IF NOT EXISTS timeline (
 );
 CREATE INDEX IF NOT EXISTS idx_timeline_task ON timeline(task_id, seq);
 `;
+
+/**
+ * 幂等索引：同一个来源的同一条外部消息只允许建一个任务。
+ *
+ * 单独拿出来是因为它可能在老库上建失败 —— 如果历史上已经存在重复数据，
+ * 唯一索引建不下去。那种情况不能把整个启动搞崩，降级成「没有这个约束」，
+ * 应用层仍然会先查一次。
+ */
+export const IDEMPOTENCY_INDEX = `
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_source_ref
+  ON tasks(source, source_ref) WHERE source_ref IS NOT NULL;
+`;
