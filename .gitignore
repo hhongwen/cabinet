@@ -1,0 +1,21 @@
+# 运行数据不入库（db / transcript 含本地路径与结论）
+data/
+*.db
+*.db-wal
+*.db-shm
+logs/
+
+# 本地配置覆盖（真实 token、内网地址）
+cabinet.local.json
+.env
+.env.local
+
+# 依赖与系统文件
+node_modules/
+.DS_Store
+Thumbs.db
+*.log
+
+# 编辑器
+.vscode/
+.idea/

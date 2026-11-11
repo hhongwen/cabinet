@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cabinet — 批奏折</title>
+<style>
+  :root {
+    --bg: #14161a;
+    --bg-2: #1a1d23;
+    --bg-3: #21252c;
+    --line: #2b3038;
+    --fg: #d7dce3;
+    --fg-dim: #8b939f;
+    --fg-faint: #5f6874;
+    --accent: #6ea8fe;
+    --danger: #e5534b;
+    --warn: #d9a441;
+    --ok: #57ab5a;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font: 13px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  /* ---------- 顶栏 ---------- */
+  header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 9px 14px;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--line);
+    flex: 0 0 auto;
+  }
+  header h1 { font-size: 13px; font-weight: 600; margin: 0; letter-spacing: .3px; }
+  header .meta { color: var(--fg-faint); font-size: 11px; }
+  header .spacer { flex: 1; }
+  .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); margin-right: 5px; }
+  .dot.off { background: var(--danger); }
+
+  /* ---------- 手动触发 ---------- */
+  #emitForm { display: flex; gap: 6px; align-items: center; }
+  #emitForm input {
+    background: var(--bg-3); border: 1px solid var(--line); color: var(--fg);
+    border-radius: 4px; padding: 4px 7px; font-size: 12px; font-family: inherit;
+  }
+  #emitForm input:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+  #emitForm input.w-s { width: 76px; }
+  #emitForm input.w-m { width: 118px; }
+  #emitForm input.w-l { width: 240px; }
+  button {
+    background: var(--bg-3); border: 1px solid var(--line); color: var(--fg);
+    border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+    font-family: inherit;
+  }
+  button:hover { background: #2b3038; border-color: #3a4048; }
+  button.primary { background: #24384f; border-color: #33506f; color: #b9d4f5; }
+  button.primary:hover { background: #2b4561; }
+  button.danger { background: #43241f; border-color: #5f3129; color: #f0b3ac; }
+  button.danger:hover { background: #522b25; }
+  button:disabled { opacity: .4; cursor: default; }
+
+  /* ---------- 三栏 ---------- */
+  main { flex: 1; display: grid; grid-template-columns: 290px minmax(0, 1fr) 380px; min-height: 0; }
+  section { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); }
+  section:last-child { border-right: 0; }
+  .sec-head {
+    flex: 0 0 auto; padding: 7px 12px; font-size: 11px; font-weight: 600;
+    letter-spacing: .6px; text-transform: uppercase; color: var(--fg-faint);
+    background: var(--bg-2); border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .sec-head .count { color: var(--fg-dim); font-weight: 400; letter-spacing: 0; text-transform: none; }
+  .scroll { overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0; }
+  .scroll::-webkit-scrollbar { width: 9px; }
+  .scroll::-webkit-scrollbar-thumb { background: #31363e; border-radius: 5px; }
+  .scroll::-webkit-scrollbar-track { background: transparent; }
+
+  /* ---------- 队列卡片 ---------- */
+  .card {
+    padding: 7px 12px; border-bottom: 1px solid #23272e; cursor: pointer;
+    border-left: 2px solid transparent;
+  }
+  .card:hover { background: #1b1f25; }
+  .card.sel { background: #1e2833; border-left-color: var(--accent); }
+  .card.attention { border-left-color: var(--danger); }
+  .card.attention.sel { border-left-color: var(--danger); background: #2a1f1f; }
+  .card .row1 { display: flex; align-items: center; gap: 6px; }
+  .card .sum { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+  .card .row2 { display: flex; gap: 8px; color: var(--fg-faint); font-size: 11px; margin-top: 1px; font-family: var(--mono); }
+  .card .row2 .rule { color: var(--fg-dim); }
+  .badge {
+    font-size: 10px; padding: 0 5px; border-radius: 3px; white-space: nowrap;
+    border: 1px solid; line-height: 15px; font-family: var(--mono);
+  }
+  .badge.awaiting_approval, .badge.review { color: var(--warn); border-color: #4a3a1c; background: #2e2617; }
+  .badge.running { color: var(--accent); border-color: #24405f; background: #1a2836; }
+  .badge.queued { color: var(--fg-dim); border-color: #333941; background: #22262c; }
+  .badge.done, .badge.accepted { color: var(--ok); border-color: #2b432c; background: #1b291c; }
+  .badge.failed { color: var(--danger); border-color: #4d2925; background: #2c1d1b; }
+  .badge.rejected, .badge.interrupted { color: var(--fg-faint); border-color: #333941; background: #1e2228; }
+  .dup { color: var(--warn); font-size: 10px; }
+
+  /* ---------- 中间详情 ---------- */
+  .detail { padding: 12px 16px; }
+  .detail h2 { font-size: 14px; margin: 0 0 3px; font-weight: 600; line-height: 1.4; }
+  .kv { display: grid; grid-template-columns: 84px 1fr; gap: 2px 10px; margin: 10px 0; font-size: 12px; }
+  .kv dt { color: var(--fg-faint); font-family: var(--mono); font-size: 11px; padding-top: 1px; }
+  .kv dd { margin: 0; color: var(--fg-dim); word-break: break-all; font-family: var(--mono); font-size: 11px; }
+  .actions { display: flex; gap: 6px; margin: 12px 0; flex-wrap: wrap; align-items: center; }
+  .actions input {
+    flex: 1; min-width: 120px; background: var(--bg-3); border: 1px solid var(--line);
+    color: var(--fg); border-radius: 4px; padding: 4px 8px; font-size: 12px; font-family: inherit;
+  }
+  .block { margin: 14px 0; }
+  .block > .label {
+    font-size: 10px; font-weight: 600; letter-spacing: .7px; text-transform: uppercase;
+    color: var(--fg-faint); margin-bottom: 5px; display: flex; justify-content: space-between;
+  }
+  .block > .label button { font-size: 10px; padding: 1px 6px; }
+  pre {
+    margin: 0; padding: 9px 11px; background: var(--bg-2); border: 1px solid var(--line);
+    border-radius: 4px; font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
+    white-space: pre-wrap; word-break: break-word; color: #c3cad4;
+    max-height: 460px; overflow: auto;
+  }
+  pre.concl { border-left: 2px solid var(--ok); }
+  pre.err { border-left: 2px solid var(--danger); color: #e8a9a3; }
+  pre.collapsed { max-height: 110px; overflow: hidden; position: relative; cursor: pointer; }
+  pre.collapsed::after {
+    content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 42px;
+    background: linear-gradient(transparent, var(--bg-2));
+  }
+  .empty { color: var(--fg-faint); padding: 26px 16px; text-align: center; font-size: 12px; }
+
+  /* ---------- 右栏 ---------- */
+  .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); }
+  .stat { background: var(--bg-2); padding: 8px 10px; }
+  .stat .n { font-size: 17px; font-weight: 600; font-family: var(--mono); line-height: 1.2; }
+  .stat .l { font-size: 10px; color: var(--fg-faint); text-transform: uppercase; letter-spacing: .5px; }
+  .stat.att .n { color: var(--danger); }
+  .filters { display: flex; gap: 4px; flex-wrap: wrap; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+  .filters button { font-size: 11px; padding: 2px 7px; }
+  .filters button.on { background: #24384f; border-color: #33506f; color: #b9d4f5; }
+  table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  th {
+    text-align: left; color: var(--fg-faint); font-weight: 500; padding: 5px 8px;
+    border-bottom: 1px solid var(--line); position: sticky; top: 0;
+    background: var(--bg-2); font-size: 10px; text-transform: uppercase; letter-spacing: .5px;
+  }
+  td { padding: 4px 8px; border-bottom: 1px solid #202429; color: var(--fg-dim); }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: #1b1f25; }
+  tbody tr.sel { background: #1e2833; }
+  td.mono { font-family: var(--mono); }
+  td .id { color: var(--fg-dim); font-family: var(--mono); font-size: 10.5px; }
+  .rulebar { padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 11px; }
+  .rulebar .r { display: flex; justify-content: space-between; gap: 8px; color: var(--fg-faint); font-family: var(--mono); }
+  .rulebar .r b { color: var(--fg-dim); font-weight: 500; }
+  .toast {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    background: #2b3038; border: 1px solid #3c434c; color: var(--fg);
+    padding: 7px 14px; border-radius: 5px; font-size: 12px; opacity: 0;
+    transition: opacity .18s; pointer-events: none; z-index: 9;
+  }
+  .toast.show { opacity: 1; }
+  .toast.err { border-color: #5f3129; color: #f0b3ac; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Cabinet</h1>
+  <span class="meta"><span class="dot" id="connDot"></span><span id="connText">连接中</span></span>
+  <span class="meta" id="hubMeta"></span>
+  <span class="spacer"></span>
+  <form id="emitForm" autocomplete="off">
+    <input class="w-s" name="source" value="cli" placeholder="source" title="事件来源">
+    <input class="w-s" name="type" value="manual" placeholder="type" title="事件类型">
+    <input class="w-m" name="subject" placeholder="subject" title="主体">
+    <input class="w-l" name="summary" placeholder="摘要：要让 Agent 干什么" title="摘要">
+    <button class="primary" type="submit">手动触发</button>
+  </form>
+</header>
+
+<main>
+  <!-- 左：待处理队列 -->
+  <section>
+    <div class="sec-head">待处理 <span class="count" id="queueCount"></span></div>
+    <div class="scroll" id="queue"></div>
+  </section>
+
+  <!-- 中：详情 -->
+  <section>
+    <div class="sec-head">详情 <span class="count" id="detailId"></span></div>
+    <div class="scroll" id="detail"><div class="empty">左边选一条</div></div>
+  </section>
+
+  <!-- 右：统计 + 全部 -->
+  <section>
+    <div class="sec-head">统计</div>
+    <div class="stat-grid" id="stats"></div>
+    <div class="rulebar" id="ruleStats"></div>
+    <div class="sec-head">全部任务</div>
+    <div class="filters" id="filters"></div>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>ID</th><th>状态</th><th>规则</th><th>创建</th></tr></thead>
+        <tbody id="allJobs"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+const STATE = { jobs: [], stats: null, config: null, rules: [], selected: null, filter: '', detail: null };
+const POLL_MS = 2000;
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function toast(msg, isErr) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.className = 'toast show' + (isErr ? ' err' : '');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { el.className = 'toast'; }, 2600);
+}
+
+function fmtTime(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  if (isNaN(d)) return '-';
+  const p = (n) => String(n).padStart(2, '0');
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  return sameDay
+    ? p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds())
+    : p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+
+function fmtDur(ms) {
+  if (ms == null || isNaN(ms)) return '-';
+  if (ms < 1000) return Math.round(ms) + 'ms';
+  const s = ms / 1000;
+  if (s < 60) return s.toFixed(1) + 's';
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + 'm' + Math.round(s % 60) + 's';
+  return Math.floor(m / 60) + 'h' + (m % 60) + 'm';
+}
+
+// 需要人处理的排最前
+const ATTENTION = ['awaiting_approval', 'review'];
+const ACTIVE = ['awaiting_approval', 'review', 'running', 'queued'];
+function rank(j) {
+  const i = ATTENTION.indexOf(j.status);
+  if (i >= 0) return i;
+  if (j.status === 'running') return 10;
+  if (j.status === 'queued') return 11;
+  return 20;
+}
+
+// ---------- 渲染 ----------
+function renderQueue() {
+  const list = STATE.jobs
+    .filter((j) => ACTIVE.includes(j.status))
+    .sort((a, b) => rank(a) - rank(b) || String(b.created_at).localeCompare(String(a.created_at)));
+
+  $('queueCount').textContent = list.length ? '(' + list.length + ')' : '';
+  const el = $('queue');
+  if (!list.length) {
+    el.innerHTML = '<div class="empty">队列空 —— 都批完了</div>';
+    return;
+  }
+  el.innerHTML = list.map((j) => {
+    const att = ATTENTION.includes(j.status);
+    const cls = ['card', att ? 'attention' : '', STATE.selected === j.id ? 'sel' : ''].join(' ').trim();
+    const ev = j.event || {};
+    const title = j.summary || ev.subject || '(无摘要)';
+    return '<div class="' + cls + '" data-id="' + esc(j.id) + '">'
+      + '<div class="row1">'
+      + '<span class="badge ' + esc(j.status) + '">' + esc(j.status) + '</span>'
+      + '<span class="sum" title="' + esc(title) + '">' + esc(title) + '</span>'
+      + '</div>'
+      + '<div class="row2"><span class="rule">' + esc(j.rule_id || '-') + '</span>'
+      + '<span>' + esc(ev.source || '') + '/' + esc(ev.type || '') + '</span>'
+      + (j.duplicate_count ? '<span class="dup">+' + j.duplicate_count + '</span>' : '')
+      + '<span style="margin-left:auto">' + fmtTime(j.created_at) + '</span>'
+      + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+function renderStats() {
+  const s = STATE.stats || { total: 0, today: 0, needsAttention: 0, byStatus: {}, byRule: [] };
+  const st = s.byStatus || {};
+  const cells = [
+    { n: s.total, l: '总计' },
+    { n: s.today, l: '今天' },
+    { n: (st.running || 0), l: '运行中' },
+    { n: s.needsAttention, l: '待批', cls: 'att' },
+  ];
+  $('stats').innerHTML = cells.map((c) =>
+    '<div class="stat ' + (c.cls || '') + '"><div class="n">' + (c.n ?? 0) + '</div><div class="l">' + c.l + '</div></div>'
+  ).join('');
+
+  const rules = s.byRule || [];
+  $('ruleStats').innerHTML = rules.length
+    ? rules.map((r) =>
+        '<div class="r"><b>' + esc(r.rule_id) + '</b><span>' + r.total + ' 次 · ' + fmtDur(r.avgMs) + (r.failed ? ' · <span style="color:var(--danger)">' + r.failed + ' 失败</span>' : '') + '</span></div>'
+      ).join('')
+    : '<div class="r"><span>还没有数据</span></div>';
+}
+
+function renderFilters() {
+  const opts = [['', '全部'], ['awaiting_approval', '待批'], ['review', '待确认'], ['running', '运行中'], ['done', '完成'], ['failed', '失败']];
+  $('filters').innerHTML = opts.map(([v, l]) =>
+    '<button data-f="' + v + '" class="' + (STATE.filter === v ? 'on' : '') + '">' + l + '</button>'
+  ).join('');
+}
+
+function renderAllJobs() {
+  const rows = STATE.jobs.filter((j) => !STATE.filter || j.status === STATE.filter).slice(0, 200);
+  if (!rows.length) {
+    $('allJobs').innerHTML = '<tr><td colspan="4" style="color:var(--fg-faint);text-align:center;padding:16px">没有任务</td></tr>';
+    return;
+  }
+  $('allJobs').innerHTML = rows.map((j) => {
+    const idShort = j.id.replace(/^job_/, '');
+    return '<tr data-id="' + esc(j.id) + '" class="' + (STATE.selected === j.id ? 'sel' : '') + '">'
+      + '<td class="mono" title="' + esc(j.id) + '"><span class="id">' + esc(idShort) + '</span>' + (j.needs_attention ? ' <span style="color:var(--danger)">＊</span>' : '') + '</td>'
+      + '<td><span class="badge ' + esc(j.status) + '">' + esc(j.status) + '</span></td>'
+      + '<td class="mono" style="font-size:10.5px">' + esc(j.rule_id || '-') + '</td>'
+      + '<td class="mono" style="font-size:10.5px">' + fmtTime(j.created_at) + '</td>'
+      + '</tr>';
+  }).join('');
+}
+
+function renderDetail() {
+  const d = STATE.detail;
+  const el = $('detail');
+  if (!d) {
+    el.innerHTML = '<div class="empty">左边选一条</div>';
+    $('detailId').textContent = '';
+    return;
+  }
+  const j = d.job;
+  const ev = j.event || {};
+  $('detailId').textContent = j.id;
+
+  const canAct = ATTENTION.includes(j.status);
+  const approveLabel = j.status === 'review' ? '确认通过' : '批准执行';
+  const actions = canAct
+    ? '<div class="actions">'
+      + '<input id="noteInput" placeholder="备注（可选）">'
+      + '<button class="primary" id="btnApprove">' + approveLabel + '</button>'
+      + '<button class="danger" id="btnReject">拒绝</button>'
+      + '</div>'
+    : (j.decision
+      ? '<div class="actions" style="color:var(--fg-faint);font-size:12px">已' + (j.decision === 'approved' ? '批准' : '拒绝') + (j.decision_note ? '：' + esc(j.decision_note) : '') + '</div>'
+      : '');
+
+  const kv = [
+    ['状态', '<span class="badge ' + esc(j.status) + '">' + esc(j.status) + '</span>' + (j.needs_attention ? ' <span style="color:var(--danger);font-size:11px">需要你留意</span>' : '')],
+    ['规则', esc(j.rule_id || '-')],
+    ['agent', esc(j.agent || '-') + (j.model ? ' · ' + esc(j.model) : '') + (j.sandbox ? ' · ' + esc(j.sandbox) : '')],
+    ['cwd', esc(j.cwd || '-')],
+    ['事件', esc([ev.source, ev.type, ev.subject].filter(Boolean).join(' / ') || '-')],
+    ['耗时', fmtDur(j.duration_ms)],
+    ['创建', fmtTime(j.created_at)],
+    ['退出码', j.exit_code == null ? '-' : esc(j.exit_code)],
+  ];
+  if (j.duplicate_count) kv.push(['重复合并', esc(j.duplicate_count) + ' 次']);
+  if (ev.link) kv.push(['链接', '<a href="' + esc(ev.link) + '" target="_blank" rel="noreferrer" style="color:var(--accent)">' + esc(ev.link) + '</a>']);
+
+  const html = '<div class="detail">'
+    + '<h2>' + esc(j.summary || ev.subject || '(无摘要)') + '</h2>'
+    + '<dl class="kv">' + kv.map(([k, v]) => '<dt>' + k + '</dt><dd>' + v + '</dd>').join('') + '</dl>'
+    + actions
+    + (j.error ? '<div class="block"><div class="label">错误</div><pre class="err">' + esc(j.error) + '</pre></div>' : '')
+    + '<div class="block"><div class="label">结论' + (j.last_message ? '' : ' <span style="text-transform:none;letter-spacing:0;font-weight:400">（空）</span>') + '</div>'
+    + (j.last_message ? '<pre class="concl">' + esc(j.last_message) + '</pre>' : '<pre style="color:var(--fg-faint)">还没有结论</pre>')
+    + '</div>'
+    + '<div class="block"><div class="label">Prompt <button data-toggle="prompt">展开/收起</button></div>'
+    + '<pre class="collapsed" id="promptBox">' + esc(j.prompt || '-') + '</pre></div>'
+    + '<div class="block"><div class="label">Transcript 尾部 <button data-toggle="transcript">展开/收起</button></div>'
+    + '<pre class="collapsed" id="transcriptBox">' + esc(d.transcript_tail || '（无 JSONL 输出）') + '</pre></div>'
+    + '</div>';
+
+  el.innerHTML = html;
+
+  if (canAct) {
+    $('btnApprove').onclick = () => act(j.id, 'approve');
+    $('btnReject').onclick = () => act(j.id, 'reject');
+    const note = $('noteInput');
+    note.addEventListener('keydown', (e) => { if (e.key === 'Enter') act(j.id, 'approve'); });
+  }
+}
+
+// ---------- 交互 ----------
+async function act(id, verb) {
+  const noteEl = $('noteInput');
+  const note = noteEl ? noteEl.value : '';
+  const btn = $(verb === 'approve' ? 'btnApprove' : 'btnReject');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/jobs/' + encodeURIComponent(id) + '/' + verb, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ note: note || null }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    toast(verb === 'approve' ? '已放行：' + id : '已拒绝：' + id);
+    await poll();
+    if (STATE.selected === id) await loadDetail(id);
+  } catch (err) {
+    toast('操作失败：' + err.message, true);
+    if (btn) btn.disabled = false;
+  }
+}
+
+function select(id) {
+  STATE.selected = id;
+  renderQueue();
+  renderAllJobs();
+  loadDetail(id);
+}
+
+async function loadDetail(id) {
+  try {
+    const res = await fetch('/api/jobs/' + encodeURIComponent(id));
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    // 选中项可能在等待期间被换了
+    if (STATE.selected !== id) return;
+    STATE.detail = data;
+    renderDetail();
+  } catch (err) {
+    STATE.detail = null;
+    $('detail').innerHTML = '<div class="empty">加载失败：' + esc(err.message) + '</div>';
+  }
+}
+
+async function poll() {
+  try {
+    const res = await fetch('/api/state?limit=200');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    STATE.jobs = data.jobs || [];
+    STATE.stats = data.stats;
+    STATE.config = data.config;
+    STATE.rules = data.rules || [];
+    $('connDot').className = 'dot';
+    $('connText').textContent = '在线';
+    const c = STATE.config || {};
+    $('hubMeta').textContent = (c.host || '127.0.0.1') + ':' + (c.port || '') + ' · workers ' + (c.workers || '?')
+      + (data.rulesError ? ' · 规则告警' : '');
+    renderQueue();
+    renderStats();
+    renderAllJobs();
+    // 选中的 job 停在待批状态时，保持详情同步
+    if (STATE.selected) {
+      const j = STATE.jobs.find((x) => x.id === STATE.selected);
+      if (j && STATE.detail && STATE.detail.job && j.status !== STATE.detail.job.status) {
+        loadDetail(STATE.selected);
+      }
+    }
+  } catch (err) {
+    $('connDot').className = 'dot off';
+    $('connText').textContent = '断开';
+  }
+}
+
+// 事件委托
+$('queue').addEventListener('click', (e) => {
+  const card = e.target.closest('.card');
+  if (card) select(card.dataset.id);
+});
+$('allJobs').addEventListener('click', (e) => {
+  const tr = e.target.closest('tr');
+  if (tr && tr.dataset.id) select(tr.dataset.id);
+});
+$('filters').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  STATE.filter = b.dataset.f;
+  renderFilters();
+  renderAllJobs();
+});
+$('detail').addEventListener('click', (e) => {
+  const t = e.target.closest('[data-toggle]');
+  if (t) {
+    const box = $(t.dataset.toggle + 'Box');
+    if (box) box.classList.toggle('collapsed');
+    return;
+  }
+});
+
+$('emitForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const body = {
+    source: f.get('source') || 'cli',
+    type: f.get('type') || 'manual',
+    subject: f.get('subject') || null,
+    summary: f.get('summary') || null,
+  };
+  if (!body.summary) { toast('摘要别空着', true); return; }
+  const btn = e.target.querySelector('button[type=submit]');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/events', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    const msg = {
+      queued: '已入队：' + (data.jobId || ''),
+      awaiting_approval: '等你批：' + (data.jobId || ''),
+      duplicate: '已合并到 ' + (data.jobId || ''),
+      no_rule: '没有命中规则',
+    }[data.action] || data.action;
+    toast(msg, data.action === 'no_rule');
+    e.target.reset();
+    e.target.querySelector('[name=source]').value = 'cli';
+    e.target.querySelector('[name=type]').value = 'manual';
+    await poll();
+    if (data.jobId) select(data.jobId);
+  } catch (err) {
+    toast('触发失败：' + err.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// 键盘：j/k 上下选，a 批，r 驳
+document.addEventListener('keydown', (e) => {
+  if (/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+  const active = STATE.jobs
+    .filter((j) => ACTIVE.includes(j.status))
+    .sort((a, b) => rank(a) - rank(b) || String(b.created_at).localeCompare(String(a.created_at)));
+  if (!active.length) return;
+  const idx = active.findIndex((j) => j.id === STATE.selected);
+  if (e.key === 'j' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    select(active[Math.min(idx + 1, active.length - 1)].id);
+  } else if (e.key === 'k' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    select(active[Math.max(idx - 1, 0)].id);
+  } else if ((e.key === 'a' || e.key === 'r') && STATE.selected) {
+    const j = STATE.jobs.find((x) => x.id === STATE.selected);
+    if (j && ATTENTION.includes(j.status)) {
+      e.preventDefault();
+      act(j.id, e.key === 'a' ? 'approve' : 'reject');
+    }
+  }
+});
+
+// 启动
+renderFilters();
+poll();
+setInterval(poll, POLL_MS);
+// 详情跟队列同步刷新（比 poll 慢一档，避免刷太勤）
+setInterval(() => { if (STATE.selected) loadDetail(STATE.selected); }, 6000);
+</script>
+</body>
+</html>

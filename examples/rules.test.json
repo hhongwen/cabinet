@@ -1,0 +1,70 @@
+{
+  "$comment": "测试替身规则：不依赖 codex，用 examples/fake-agent.mjs 验证全链路（拼命令 / stdin / 日志 / 状态流转）。两个规则之间用 type 区分，互不干扰。",
+  "rules": [
+    {
+      "id": "fake-before",
+      "match": { "source": "test", "type": "before" },
+      "agent": "fake",
+      "sandbox": "read-only",
+      "approval": "before",
+      "prompt": "把事件处理一下。",
+      "notifyWhen": ["needs_decision", "failed"]
+    },
+    {
+      "id": "fake-never",
+      "match": { "source": "test", "type": "never" },
+      "agent": "fake",
+      "approval": "never",
+      "prompt": "直接干，不用问我。",
+      "notifyWhen": ["done", "failed"]
+    },
+    {
+      "id": "fake-review",
+      "match": { "source": "test", "type": "review" },
+      "agent": "fake",
+      "approval": "review",
+      "prompt": "给个结论。拿不准就明确写出来。",
+      "notifyWhen": ["needs_decision"]
+    },
+    {
+      "id": "fake-after",
+      "match": { "source": "test", "type": "after" },
+      "agent": "fake",
+      "approval": "after",
+      "prompt": "干完等我确认。",
+      "notifyWhen": ["needs_decision"]
+    },
+    {
+      "id": "fake-conc",
+      "match": { "source": "test", "type": "conc" },
+      "agent": "fake",
+      "approval": "never",
+      "prompt": "并发测试。",
+      "concurrency": { "key": "conc", "max": 1 }
+    },
+    {
+      "id": "fake-fail",
+      "match": { "source": "test", "type": "fail" },
+      "agent": "fake-fail",
+      "approval": "never",
+      "prompt": "故意失败。"
+    },
+    {
+      "id": "fake-slow",
+      "match": { "source": "test", "type": "slow" },
+      "agent": "fake-slow",
+      "approval": "never",
+      "prompt": "睡很久。",
+      "timeoutMs": 2000
+    },
+    {
+      "id": "fake-all",
+      "match": {},
+      "agent": "fake",
+      "sandbox": "read-only",
+      "approval": "before",
+      "prompt": "处理这个事件，给出结论。",
+      "notifyWhen": ["needs_decision", "failed"]
+    }
+  ]
+}

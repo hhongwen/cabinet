@@ -1,0 +1,32 @@
+{
+  "$comment": "测试用配置：把 agent 换成 examples/fake-agent.mjs，不需要网络/额度也能验证全链路。用法：node bin/cabinet.mjs doctor --config examples/cabinet.test.config.json",
+  "port": 8899,
+  "host": "127.0.0.1",
+  "dbPath": "~/.cabinet/test/cabinet.db",
+  "logsDir": "~/.cabinet/test/logs",
+  "rulesPath": "./rules.test.json",
+  "workers": 2,
+  "sources": {
+    "cron": [],
+    "watch": [],
+    "http": { "enabled": true }
+  },
+  "notify": { "panel": true, "webhook": { "url": null } },
+  "agents": {
+    "fake": {
+      "command": "node",
+      "args": ["fake-agent.mjs", "--json", "-C", "{cwd}", "-s", "{sandbox}", "-m", "{model}", "-o", "{lastMessageFile}"],
+      "promptViaStdin": true
+    },
+    "fake-fail": {
+      "command": "node",
+      "args": ["-e", "process.stderr.write('boom\\n'); process.exit(3)"],
+      "promptViaStdin": true
+    },
+    "fake-slow": {
+      "command": "node",
+      "args": ["-e", "setTimeout(()=>{}, 60000)"],
+      "promptViaStdin": true
+    }
+  }
+}
