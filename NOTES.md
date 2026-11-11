@@ -439,3 +439,55 @@ lark-cli auth login --profile cabinet --domain im,event
 所以点按钮根本没人听（日志里 `eventsSeen` 一直是 0）。
 
 现在 `bridge.start()` 会并行起两个，`stats` 里分开统计 `eventsSeen` 和 `cardEvents`。
+
+## 卡片「patch 报成功但没变」——真凶
+
+现象：改了 patchCard 之后，返回 `ok:true, exitCode:0`，
+但用户看到卡片还是原样，按钮还在，还能点。
+
+**根因**：`lark-cli` 的失败信息**打在 stderr，stdout 是空的**。
+我的 `run()` 只读 stdout，`tryJson('')` 返回 `null`，
+调用方拿到 null 就当没事发生了 —— **所有失败都被静默吞掉**。
+
+证据：用不存在的 message_id 调 patch：
+```
+exit code: 1
+STDOUT: ""
+STDERR: {"ok":false,"error":{"code":99992354,"message":"...not a valid {open_message_id}..."}}
+```
+
+**修法**：
+1. `run()` 返回 `{ out, err, code }`（之前丢了 exit code）
+2. 新增 `parseResult()`：
+   - JSON 先找 stdout，再找 stderr
+   - `ok === false` 或 `code !== 0` 一律算失败
+   - 完全没输出也算失败（不能静默）
+3. `tryJson()` 增强：能从混着日志的文本里挖出 `{...}` 那段
+
+**这个 bug 的影响面比卡片大得多**：发消息、发卡片、patch 全都受影响。
+在此之前，任何一次发失败都会被当成「没输出」，调用方察觉不到。
+
+新增 `examples/feishucli-unit.mjs`（12 项）专门覆盖这些失败路径。
+
+## 端到端最终验证（2026-11-11 22:07）
+
+```
+推卡片 → 用户点「通过」
+  → 卡片回调收到（task=task_mwc6yv2w78d11c msg=om_x100b607327...）
+  → 任务 review → done
+  → 卡片被 patch 成：
+      <card title="最终验证：点「通过」">
+      已通过：最终验证：点通过
+      📝 已处理，这条不用再点
+      </card>
+```
+
+按钮消失，重复点击不再可能。
+
+## 关于 card.action.trigger 订阅
+
+飞书开放平台 → 应用 → 事件与回调 → 事件配置 → 添加事件 →
+搜「卡片回传交互」/ `card.action.trigger`。
+
+和 `im.message.receive_v1` 是两条独立的订阅，必须分别加。
+用户已加。

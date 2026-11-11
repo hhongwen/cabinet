@@ -244,7 +244,7 @@ export function createFeishuCliSender(opts = {}) {
       child.stdout.on('data', (c) => (out += c));
       child.stderr.on('data', (c) => (err += c));
       child.on('error', reject);
-      child.on('close', () => resolve({ out, err }));
+      child.on('close', (code) => resolve({ out, err, code }));
       try {
         if (input != null) child.stdin.write(input);
         child.stdin.end();
@@ -269,9 +269,8 @@ export function createFeishuCliSender(opts = {}) {
         '--msg-type', 'text',
         '--content', JSON.stringify({ text: String(text ?? '') }),
       ];
-      const r = await run(args);
-      const parsed = tryJson(r.out);
-      if (parsed && parsed.ok === false) {
+      const parsed = parseResult(await run(args));
+      if (!parsed.ok) {
         log.warn(`发消息失败: ${JSON.stringify(parsed.error).slice(0, 200)}`);
       }
       return parsed;
@@ -289,8 +288,8 @@ export function createFeishuCliSender(opts = {}) {
         '--as', 'bot',
         '--data', '-',
       ], JSON.stringify({ content: JSON.stringify(card) }));
-      const parsed = tryJson(r.out);
-      if (parsed && parsed.ok === false) {
+      const parsed = parseResult(r);
+      if (!parsed.ok) {
         log.warn(`更新卡片失败: ${JSON.stringify(parsed.error).slice(0, 200)}`);
       }
       return parsed;
@@ -306,18 +305,61 @@ export function createFeishuCliSender(opts = {}) {
         '--msg-type', 'interactive',
         '--content', JSON.stringify(card),
       ];
-      const r = await run(args);
-      return tryJson(r.out);
+      const parsed = parseResult(await run(args));
+      if (!parsed.ok) {
+        log.warn(`发卡片失败: ${JSON.stringify(parsed.error).slice(0, 200)}`);
+      }
+      return parsed;
     },
 
     run,
   };
 }
 
-function tryJson(text) {
-  try {
-    return JSON.parse(String(text ?? '').trim());
-  } catch {
-    return null;
+/**
+ * 解析 lark-cli 的结果。
+ *
+ * 关键事实（踩过）：成功时 JSON 在 stdout；失败时 lark-cli 把 JSON 打到 stderr，
+ * stdout 是空的，退出码非零。之前只读 stdout，导致所有失败都被当成 null
+ * ——「patch 返回成功但卡片没变」就是这么来的。
+ */
+export function parseResult(result) {
+  const out = String(result?.out ?? '').trim();
+  const err = String(result?.err ?? '').trim();
+  const code = result?.code ?? 0;
+
+  // 优先 stdout，其次 stderr（失败信息在那里）
+  let parsed = tryJson(out) ?? tryJson(err);
+
+  if (parsed === null) {
+    return {
+      ok: false,
+      error: { type: 'parse', message: (err || out || '').slice(0, 300) || 'lark-cli 没有输出' },
+      exitCode: code,
+    };
   }
+  if (parsed.ok === false || code !== 0) {
+    return { ...parsed, ok: false, exitCode: code };
+  }
+  return { ...parsed, ok: true, exitCode: code };
+}
+
+function tryJson(text) {
+  const raw = String(text ?? '').trim();
+  if (!raw) return null;
+
+  // 先试整体
+  try {
+    return JSON.parse(raw);
+  } catch { /* 继续 */ }
+
+  // 再试「从第一个 { 到最后一个 }」，跳过混进来的日志行
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    try {
+      return JSON.parse(raw.slice(start, end + 1));
+    } catch { /* 放弃 */ }
+  }
+  return null;
 }
