@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>随手记</title>
+<style>
+  :root{
+    --bg:#0f1115; --card:#171a21; --line:#262b36; --text:#e6e8ee; --muted:#8b93a7;
+    --accent:#60a5fa; --ok:#4ade80; --err:#ef4444;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --text:#111827; --muted:#6b7280; }
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font:14px/1.55 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    display:flex; flex-direction:column;
+  }
+  .bar{
+    display:flex; align-items:center; gap:8px;
+    padding:10px 12px; border-bottom:1px solid var(--line); flex:0 0 auto;
+  }
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}
+  .bar b{font-size:13px; font-weight:600}
+  .bar .hint{font-size:11.5px; color:var(--muted); margin-left:auto}
+
+  .wrap{flex:1; display:flex; flex-direction:column; padding:12px; gap:10px; min-height:0}
+  textarea{
+    flex:1; width:100%; min-height:90px; resize:none;
+    font:inherit; font-size:14.5px; line-height:1.5; color:var(--text);
+    background:var(--card); border:1px solid var(--line); border-radius:10px;
+    padding:11px 12px; outline:none;
+  }
+  textarea:focus{border-color:var(--accent)}
+  textarea::placeholder{color:var(--muted); opacity:.75}
+
+  .thumbs{display:flex; gap:8px; flex-wrap:wrap}
+  .thumb{position:relative; width:56px; height:56px; border-radius:8px; overflow:hidden; border:1px solid var(--line)}
+  .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+  .thumb button{
+    position:absolute; top:2px; right:2px; width:16px; height:16px; border-radius:50%;
+    border:0; background:rgba(0,0,0,.65); color:#fff; font-size:11px; line-height:1;
+    cursor:pointer; padding:0; display:grid; place-items:center;
+  }
+
+  .row{display:flex; gap:8px; align-items:center; flex-wrap:wrap; flex:0 0 auto}
+  select,input[type=text]{
+    font:inherit; font-size:12.5px; color:var(--text); background:var(--card);
+    border:1px solid var(--line); border-radius:8px; padding:6px 8px; cursor:pointer;
+  }
+  input[type=text]{cursor:text; width:110px}
+  .grow{flex:1}
+  .go{
+    font:inherit; font-size:13px; font-weight:600; color:#0b1020; background:var(--accent);
+    border:0; border-radius:8px; padding:8px 16px; cursor:pointer;
+  }
+  .go:disabled{opacity:.45; cursor:default}
+  .msg{font-size:12px; min-height:16px; color:var(--muted)}
+  .msg.ok{color:var(--ok)}
+  .msg.err{color:var(--err)}
+
+  .drop{position:fixed; inset:0; background:rgba(96,165,250,.12); border:2px dashed var(--accent);
+        display:none; place-items:center; font-size:15px; color:var(--text); z-index:20}
+  .drop.on{display:grid}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <span class="dot"></span>
+  <b>随手记</b>
+  <span class="hint">Ctrl+V 贴图 · Enter 存下</span>
+</div>
+
+<div class="wrap">
+  <textarea id="text" placeholder="随手丢进来…" autofocus></textarea>
+  <div class="thumbs" id="thumbs"></div>
+  <div class="row">
+    <select id="project"></select>
+    <select id="priority">
+      <option value="p3">普通</option>
+      <option value="p0">紧急重要</option>
+      <option value="p1">重要</option>
+      <option value="p2">紧急</option>
+    </select>
+    <input type="text" id="category" placeholder="类别">
+    <span class="grow"></span>
+    <button class="go" id="go" disabled>存下</button>
+  </div>
+  <div class="msg" id="msg"></div>
+</div>
+
+<div class="drop" id="drop">松手就收进来</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let images = [];   // {path, url}
+let projects = ['默认'];
+
+function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function say(t, cls){ const el = $('#msg'); el.textContent = t; el.className = 'msg ' + (cls||''); }
+
+function refreshGo(){
+  $('#go').disabled = !$('#text').value.trim() && !images.length;
+}
+
+function renderThumbs(){
+  $('#thumbs').innerHTML = images.map((im, i) => `
+    <div class="thumb">
+      <img src="${esc(im.url)}" alt="">
+      <button data-i="${i}" title="移除">✕</button>
+    </div>`).join('');
+  $('#thumbs').querySelectorAll('button').forEach(b => {
+    b.addEventListener('click', () => { images.splice(+b.dataset.i, 1); renderThumbs(); refreshGo(); });
+  });
+  refreshGo();
+}
+
+async function upload(blob){
+  const dataUrl = await new Promise(res => {
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result);
+    fr.readAsDataURL(blob);
+  });
+  const r = await fetch('/api/upload', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ dataUrl })
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || '上传失败');
+  images.push({ path: d.path, url: d.url });
+  renderThumbs();
+  say('图片已收，' + images.length + ' 张', 'ok');
+}
+
+async function loadProjects(){
+  try {
+    const d = await (await fetch('/api/state')).json();
+    projects = d.projects || ['默认'];
+    $('#project').innerHTML = projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+  } catch { /* 服务没起也不阻塞输入 */ }
+}
+
+$('#text').addEventListener('input', refreshGo);
+
+$('#text').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
+});
+
+$('#text').addEventListener('paste', async e => {
+  const items = [...(e.clipboardData?.items || [])];
+  const files = items.filter(i => i.type.startsWith('image/')).map(i => i.getAsFile()).filter(Boolean);
+  if (!files.length) return;         // 文本粘贴走默认行为
+  e.preventDefault();
+  for (const f of files) {
+    try { await upload(f); } catch (err) { say(err.message, 'err'); }
+  }
+});
+
+// 拖图进来
+let dragDepth = 0;
+document.addEventListener('dragenter', e => { e.preventDefault(); dragDepth++; $('#drop').classList.add('on'); });
+document.addEventListener('dragleave', e => { e.preventDefault(); if (--dragDepth <= 0) { dragDepth = 0; $('#drop').classList.remove('on'); } });
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', async e => {
+  e.preventDefault(); dragDepth = 0; $('#drop').classList.remove('on');
+  const files = [...(e.dataTransfer?.files || [])].filter(f => f.type.startsWith('image/'));
+  for (const f of files) {
+    try { await upload(f); } catch (err) { say(err.message, 'err'); }
+  }
+});
+
+$('#go').addEventListener('click', submit);
+
+async function submit(){
+  const text = $('#text').value.trim();
+  if (!text && !images.length) return;
+
+  const kind = images.length && text ? 'image_text' : images.length ? 'image' : 'text';
+  const title = text || (images.length ? '截图：' + new Date().toLocaleString('zh-CN', { hour12: false }) : '');
+
+  const body = {
+    title: title.split('\n')[0].slice(0, 120),
+    kind,
+    text: text || null,
+    images: images.map(i => i.path),
+    project: $('#project').value || '默认',
+    priority: $('#priority').value,
+    category: $('#category').value.trim(),
+    source: 'quick'
+  };
+
+  $('#go').disabled = true;
+  try {
+    const r = await fetch('/api/tasks', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || '保存失败');
+
+    $('#text').value = '';
+    images = [];
+    renderThumbs();
+    $('#category').value = '';
+    refreshGo();
+    say('已收下：' + (body.title || '（图）'), 'ok');
+    $('#text').focus();
+  } catch (err) {
+    say(err.message, 'err');
+    refreshGo();
+  }
+}
+
+loadProjects();
+refreshGo();
+</script>
+</body>
+</html>

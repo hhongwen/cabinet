@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>任务看板</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --card:#1e222b; --card-hover:#242935;
+    --text:#e6e8ee; --muted:#8b93a7; --line:#262b36;
+    --p0:#ef4444; --p1:#f59e0b; --p2:#3b82f6; --p3:#64748b;
+    --todo:#60a5fa; --doing:#fbbf24; --done:#4ade80;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f6f7f9; --panel:#fff; --card:#fff; --card-hover:#f9fafb;
+           --text:#111827; --muted:#6b7280; --line:#e5e7eb; }
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font:14px/1.55 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+  }
+  header{
+    position:sticky; top:0; z-index:10; background:var(--bg);
+    border-bottom:1px solid var(--line); padding:14px 20px 10px;
+  }
+  .top{display:flex; align-items:center; gap:12px; flex-wrap:wrap}
+  h1{font-size:16px; margin:0; font-weight:600; letter-spacing:.2px}
+  .count{color:var(--muted); font-size:12px; margin-left:2px}
+  .spacer{flex:1}
+  .filters{display:flex; gap:8px; flex-wrap:wrap; margin-top:12px}
+  select,button{
+    font:inherit; font-size:13px; color:var(--text); background:var(--panel);
+    border:1px solid var(--line); border-radius:8px; padding:6px 10px; cursor:pointer;
+  }
+  select:hover,button:hover{background:var(--card-hover)}
+  button.primary{border-color:transparent; background:var(--todo); color:#0b1020; font-weight:600}
+
+  .board{display:grid; grid-template-columns:repeat(3,minmax(260px,1fr)); gap:16px; padding:16px 20px 40px; align-items:start}
+  @media (max-width:900px){ .board{grid-template-columns:1fr} }
+
+  .col{background:var(--panel); border:1px solid var(--line); border-radius:12px; display:flex; flex-direction:column; min-height:120px}
+  .col-head{display:flex; align-items:center; gap:8px; padding:11px 13px; border-bottom:1px solid var(--line)}
+  .dot{width:8px;height:8px;border-radius:50%}
+  .col-title{font-size:13px; font-weight:600}
+  .col-num{margin-left:auto; font-size:12px; color:var(--muted); background:var(--card); border-radius:999px; padding:1px 8px}
+  .col-body{padding:10px; display:flex; flex-direction:column; gap:8px; min-height:60px}
+  .col.drag-over .col-body{background:rgba(96,165,250,.07); border-radius:0 0 12px 12px}
+
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:10px;
+    padding:10px 11px 9px 14px; cursor:grab; position:relative; overflow:hidden;
+    transition:background .12s, transform .08s;
+  }
+  .card:hover{background:var(--card-hover)}
+  .card:active{cursor:grabbing; transform:scale(.995)}
+  .card::before{
+    content:''; position:absolute; left:0; top:0; bottom:0; width:3px;
+    background:var(--bar,var(--p3));
+  }
+  .card .t{font-size:13.5px; line-height:1.45; word-break:break-word}
+  .shots{display:flex; gap:5px; margin-top:8px; flex-wrap:wrap}
+  .shots img{
+    width:52px; height:52px; object-fit:cover; border-radius:6px;
+    border:1px solid var(--line); cursor:zoom-in; display:block;
+  }
+  .shots img:hover{outline:1px solid var(--accent)}
+  #lightbox{
+    position:fixed; inset:0; background:rgba(0,0,0,.82); display:none;
+    place-items:center; z-index:99; cursor:zoom-out;
+  }
+  #lightbox.on{display:grid}
+  #lightbox img{max-width:92vw; max-height:92vh; border-radius:8px}
+  .card.done .t{color:var(--muted); text-decoration:line-through; text-decoration-color:rgba(139,147,167,.5)}
+  .meta{display:flex; align-items:center; gap:6px; margin-top:7px; flex-wrap:wrap}
+  .tag{font-size:11px; padding:1px 7px; border-radius:999px; background:rgba(139,147,167,.14); color:var(--muted)}
+  .tag.cat{color:var(--text); background:rgba(96,165,250,.14)}
+  .kind{font-size:11px; color:var(--muted); opacity:.8}
+  .time{font-size:11px; color:var(--muted); opacity:0; transition:opacity .12s; margin-left:auto}
+  .card:hover .time{opacity:.75}
+  .empty{color:var(--muted); font-size:12.5px; text-align:center; padding:16px 0; opacity:.7}
+
+  dialog{
+    border:1px solid var(--line); background:var(--panel); color:var(--text);
+    border-radius:14px; padding:0; width:min(440px,92vw);
+  }
+  dialog::backdrop{background:rgba(0,0,0,.5)}
+  .dlg{padding:18px}
+  .dlg h2{margin:0 0 14px; font-size:15px; font-weight:600}
+  .field{margin-bottom:11px}
+  .field label{display:block; font-size:12px; color:var(--muted); margin-bottom:4px}
+  .field input,.field textarea,.field select{
+    width:100%; font:inherit; font-size:13.5px; color:var(--text); background:var(--bg);
+    border:1px solid var(--line); border-radius:8px; padding:8px 10px;
+  }
+  .field textarea{resize:vertical; min-height:64px}
+  .row2{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+  .dlg-foot{display:flex; gap:8px; justify-content:flex-end; margin-top:16px}
+  .toast{
+    position:fixed; left:50%; bottom:22px; transform:translateX(-50%) translateY(8px);
+    background:var(--card); border:1px solid var(--line); border-radius:10px;
+    padding:9px 16px; font-size:13px; opacity:0; pointer-events:none; transition:.18s; z-index:50;
+  }
+  .toast.on{opacity:1; transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="top">
+    <h1>全部任务</h1>
+    <span class="count" id="total"></span>
+    <span class="spacer"></span>
+    <button id="quickBtn">随手记</button>
+    <button class="primary" id="addBtn">+ 新任务</button>
+  </div>
+  <div class="filters">
+    <select id="project"><option value="">全部项目</option></select>
+    <select id="priority">
+      <option value="">全部优先级</option>
+      <option value="p0">紧急重要</option>
+      <option value="p1">重要</option>
+      <option value="p2">紧急</option>
+      <option value="p3">普通</option>
+    </select>
+    <select id="category"><option value="">全部类别</option></select>
+  </div>
+</header>
+
+<div class="board" id="board"></div>
+
+<dialog id="dlg">
+  <form class="dlg" id="form" method="dialog">
+    <h2>新任务</h2>
+    <div class="field">
+      <label>要做什么</label>
+      <input id="f-title" required placeholder="一句话说清" autocomplete="off">
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>项目</label>
+        <select id="f-project"></select>
+      </div>
+      <div class="field">
+        <label>优先级</label>
+        <select id="f-priority">
+          <option value="p3">普通</option>
+          <option value="p0">紧急重要</option>
+          <option value="p1">重要</option>
+          <option value="p2">紧急</option>
+        </select>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>类别</label>
+        <input id="f-category" placeholder="工作 / 学习" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>入口类型</label>
+        <select id="f-kind">
+          <option value="text">文字</option>
+          <option value="image">截图</option>
+          <option value="image_text">截图 + 文字</option>
+          <option value="link">链接</option>
+        </select>
+      </div>
+    </div>
+    <div class="field">
+      <label>补充说明</label>
+      <textarea id="f-text" placeholder="可选"></textarea>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" id="cancelBtn">取消</button>
+      <button type="submit" class="primary">收进收件箱</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="lightbox"><img alt=""></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const COLS = [
+  { key:'todo',  label:'未开始', color:'var(--todo)' },
+  { key:'doing', label:'进行中', color:'var(--doing)' },
+  { key:'done',  label:'已完成', color:'var(--done)' }
+];
+const PRI_LABEL = { p0:'紧急重要', p1:'重要', p2:'紧急', p3:'普通' };
+const PRI_COLOR = { p0:'var(--p0)', p1:'var(--p1)', p2:'var(--p2)', p3:'var(--p3)' };
+const KIND_LABEL = { text:'文字', image:'截图', image_text:'截图+文字', link:'链接' };
+
+let store = { projects:['默认'], tasks:[], counts:{}, total:0 };
+let filters = { project:'', priority:'', category:'' };
+
+const $ = (s) => document.querySelector(s);
+
+function esc(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+    { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]
+  ));
+}
+
+function toast(msg){
+  const el = $('#toast');
+  el.textContent = msg;
+  el.classList.add('on');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('on'), 1600);
+}
+
+function ago(iso){
+  if(!iso) return '';
+  const d = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (d < 60) return '刚刚';
+  if (d < 3600) return Math.floor(d/60) + ' 分钟前';
+  if (d < 86400) return Math.floor(d/3600) + ' 小时前';
+  if (d < 86400*30) return Math.floor(d/86400) + ' 天前';
+  return new Date(iso).toLocaleDateString();
+}
+
+function matches(t){
+  if (filters.project && t.project !== filters.project) return false;
+  if (filters.priority && t.priority !== filters.priority) return false;
+  if (filters.category && t.category !== filters.category) return false;
+  return true;
+}
+
+function imgUrl(p){
+  // 存的是绝对路径，映射到本服务的 /images/<name>
+  if (!p) return '';
+  if (/^https?:/i.test(p)) return p;
+  const name = String(p).split(/[\\/]/).pop();
+  return '/images/' + encodeURIComponent(name);
+}
+
+function cardHTML(t){
+  const meta = [];
+  meta.push(`<span class="tag" style="color:${PRI_COLOR[t.priority] || 'var(--muted)'};background:${(PRI_COLOR[t.priority]||'#666')}22">${PRI_LABEL[t.priority] || '普通'}</span>`);
+  if (t.category) meta.push(`<span class="tag cat">${esc(t.category)}</span>`);
+  if (t.project && t.project !== '默认') meta.push(`<span class="tag">${esc(t.project)}</span>`);
+  if (t.kind && t.kind !== 'text') meta.push(`<span class="kind">${KIND_LABEL[t.kind] || ''}</span>`);
+  return `
+    <div class="card ${t.status === 'done' ? 'done' : ''}" draggable="true" data-id="${t.id}"
+         style="--bar:${PRI_COLOR[t.priority] || 'var(--p3)'}">
+      <div class="t">${esc(t.title)}</div>
+      <div class="meta">${meta.join('')}<span class="time">${ago(t.created_at)}</span></div>
+      ${(t.payload && t.payload.images && t.payload.images.length)
+        ? '<div class="shots">' + t.payload.images.slice(0, 4).map(src => `<img src="${esc(imgUrl(src))}" alt="" loading="lazy">`).join('') + '</div>'
+        : ''}
+    </div>`;
+}
+
+function render(){
+  const board = $('#board');
+  board.innerHTML = COLS.map(col => {
+    const items = store.tasks.filter(t => t.status === col.key && matches(t));
+    return `
+      <section class="col" data-col="${col.key}">
+        <div class="col-head">
+          <span class="dot" style="background:${col.color}"></span>
+          <span class="col-title">${col.label}</span>
+          <span class="col-num">${items.length}</span>
+        </div>
+        <div class="col-body">
+          ${items.length ? items.map(cardHTML).join('') : '<div class="empty">空</div>'}
+        </div>
+      </section>`;
+  }).join('');
+
+  $('#total').textContent = store.total ? `${store.total} 条` : '';
+  bindDrag();
+}
+
+function bindDrag(){
+  document.querySelectorAll('.card').forEach(el => {
+    el.addEventListener('dragstart', e => {
+      e.dataTransfer.setData('text/plain', el.dataset.id);
+      e.dataTransfer.effectAllowed = 'move';
+      el.style.opacity = '.4';
+    });
+    el.addEventListener('dragend', () => { el.style.opacity = ''; });
+  });
+  document.querySelectorAll('.col').forEach(col => {
+    col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('drag-over'); });
+    col.addEventListener('dragleave', () => col.classList.remove('drag-over'));
+    col.addEventListener('drop', async e => {
+      e.preventDefault();
+      col.classList.remove('drag-over');
+      const id = e.dataTransfer.getData('text/plain');
+      const status = col.dataset.col;
+      if (!id) return;
+      try {
+        await api('POST', `/api/tasks/${encodeURIComponent(id)}/move`, { status });
+        await refresh();
+        toast(status === 'done' ? '完成' : status === 'doing' ? '进行中' : '已挪回未开始');
+      } catch (err) { toast('失败：' + err.message); }
+    });
+  });
+}
+
+async function api(method, url, body){
+  const res = await fetch(url, {
+    method,
+    headers: body ? { 'content-type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  return data;
+}
+
+async function refresh(){
+  store = await api('GET', '/api/state');
+  syncSelects();
+  render();
+}
+
+function syncSelects(){
+  const proj = $('#project');
+  const keep = proj.value;
+  proj.innerHTML = '<option value="">全部项目</option>' +
+    store.projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+  if (store.projects.includes(keep)) proj.value = keep;
+
+  const cats = [...new Set(store.tasks.map(t => t.category).filter(Boolean))].sort();
+  const cat = $('#category');
+  const keepCat = cat.value;
+  cat.innerHTML = '<option value="">全部类别</option>' +
+    cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  if (cats.includes(keepCat)) cat.value = keepCat;
+
+  const fp = $('#f-project');
+  fp.innerHTML = store.projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+}
+
+$('#project').addEventListener('change', e => { filters.project = e.target.value; render(); });
+$('#priority').addEventListener('change', e => { filters.priority = e.target.value; render(); });
+$('#category').addEventListener('change', e => { filters.category = e.target.value; render(); });
+
+document.addEventListener('click', e => {
+  const img = e.target.closest('.shots img');
+  if (img) {
+    const lb = $('#lightbox');
+    lb.querySelector('img').src = img.src;
+    lb.classList.add('on');
+  }
+});
+$('#lightbox').addEventListener('click', () => $('#lightbox').classList.remove('on'));
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') $('#lightbox').classList.remove('on');
+});
+
+$('#quickBtn').addEventListener('click', () => window.open('/quick', 'task-quick', 'width=420,height=320'));
+
+$('#addBtn').addEventListener('click', () => {
+  $('#form').reset();
+  $('#dlg').showModal();
+  setTimeout(() => $('#f-title').focus(), 30);
+});
+$('#cancelBtn').addEventListener('click', () => $('#dlg').close());
+
+$('#form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const payload = {
+    title: $('#f-title').value.trim(),
+    project: $('#f-project').value || '默认',
+    priority: $('#f-priority').value,
+    category: $('#f-category').value.trim(),
+    kind: $('#f-kind').value,
+    text: $('#f-text').value.trim() || null,
+    source: 'panel'
+  };
+  if (!payload.title) return;
+  try {
+    await api('POST', '/api/tasks', payload);
+    $('#dlg').close();
+    await refresh();
+    toast('已收进收件箱');
+  } catch (err) { toast('失败：' + err.message); }
+});
+
+// 键盘：n 新任务，esc 关弹窗
+document.addEventListener('keydown', e => {
+  if (e.key === 'n' && !e.metaKey && !e.ctrlKey && !/input|textarea|select/i.test(document.activeElement.tagName)) {
+    e.preventDefault(); $('#addBtn').click();
+  }
+});
+
+refresh().catch(err => {
+  document.body.insertAdjacentHTML('afterbegin',
+    `<div style="padding:20px;color:#ef4444">连不上任务服务：${esc(err.message)}</div>`);
+});
+setInterval(() => { refresh().catch(() => {}); }, 3000);
+</script>
+</body>
+</html>
