@@ -20,3 +20,8 @@ Thumbs.db
 .vscode/
 .idea/
 .alma-snapshots
+
+# 调界面时截的图，只在本机看，不进仓库
+.tmp-crop/
+.tmp-shot/
+.tmp-*/
