@@ -212,6 +212,60 @@
   .pick-item .tag2{margin-left:auto; font-size:10px; color:var(--muted);
     background:rgba(139,147,167,.14); border-radius:999px; padding:1px 6px}
   .pick-empty{padding:18px; text-align:center; color:var(--muted); font-size:12.5px}
+  /* ---------- 卡片抽屉 ---------- */
+  .drawer-mask{
+    position:fixed; inset:0; background:rgba(0,0,0,.28); opacity:0;
+    pointer-events:none; transition:opacity .18s; z-index:70;
+  }
+  .drawer-mask.on{opacity:1; pointer-events:auto}
+  .drawer{
+    position:fixed; top:0; right:0; bottom:0; width:min(460px,94vw);
+    background:var(--panel); border-left:1px solid var(--line);
+    transform:translateX(100%); transition:transform .22s cubic-bezier(.2,0,0,1);
+    z-index:71; display:flex; flex-direction:column; overflow:hidden;
+  }
+  .drawer.on{transform:none}
+  .dr-head{
+    flex:0 0 auto; padding:13px 15px 11px; border-bottom:1px solid var(--line);
+    display:flex; align-items:flex-start; gap:8px;
+  }
+  .dr-head .ttl{flex:1; min-width:0}
+  .dr-head .ttl b{font-size:14px; font-weight:600; display:block; line-height:1.4}
+  .dr-meta{display:flex; gap:5px; flex-wrap:wrap; margin-top:6px}
+  .dr-body{flex:1; overflow:auto; padding:12px 15px; display:flex; flex-direction:column; gap:10px}
+  .dr-empty{color:var(--muted); font-size:12.5px; text-align:center; padding:24px 8px; line-height:1.7}
+  .dm{display:flex; flex-direction:column; gap:4px; max-width:92%}
+  .dm.me{align-self:flex-end; align-items:flex-end}
+  .dm .bub{
+    font-size:13px; line-height:1.55; padding:8px 11px; border-radius:11px;
+    background:var(--card); border:1px solid var(--line); word-break:break-word; white-space:pre-wrap;
+  }
+  .dm.me .bub{background:color-mix(in srgb, var(--todo) 18%, transparent); border-color:transparent}
+  .dm .applied{
+    font-size:10.5px; color:var(--done); background:rgba(74,222,128,.12);
+    border-radius:999px; padding:1px 7px;
+  }
+  .dm .bad{color:var(--p0)}
+  .dr-foot{flex:0 0 auto; border-top:1px solid var(--line); padding:10px 15px 12px; display:flex; flex-direction:column; gap:7px}
+  .dr-foot textarea{
+    width:100%; min-height:38px; max-height:120px; resize:none; font:inherit;
+    font-size:13px; line-height:1.5; color:var(--text); background:var(--bg);
+    border:1px solid var(--line); border-radius:9px; padding:8px 10px; outline:none;
+  }
+  .dr-foot textarea:focus{border-color:var(--todo)}
+  .dr-row{display:flex; align-items:center; gap:7px}
+  .dr-row .hint{font-size:11px; color:var(--muted); flex:1}
+  .dr-row button{
+    font:inherit; font-size:12.5px; color:var(--text); background:var(--card);
+    border:1px solid var(--line); border-radius:8px; padding:7px 13px; cursor:pointer;
+  }
+  .dr-row button.primary{background:var(--todo); color:#0b1020; border-color:transparent; font-weight:600}
+  .dr-row button:disabled{opacity:.5; cursor:default}
+  .dr-fields{display:flex; gap:6px; flex-wrap:wrap; padding:0 15px 10px}
+  .dr-fields select,.dr-fields input{
+    font:inherit; font-size:12px; color:var(--text); background:var(--bg);
+    border:1px solid var(--line); border-radius:7px; padding:5px 8px;
+  }
   #lightbox{position:fixed; inset:0; background:rgba(0,0,0,.82); display:none; place-items:center; z-index:99; cursor:zoom-out}
   #lightbox.on{display:grid}
   #lightbox img{max-width:92vw; max-height:92vh; border-radius:8px}
@@ -372,6 +426,27 @@
   </div>
 </dialog>
 
+<div class="drawer-mask" id="drMask"></div>
+<aside class="drawer" id="drawer">
+  <div class="dr-head">
+    <div class="ttl">
+      <b id="drTitle"></b>
+      <div class="dr-meta" id="drMeta"></div>
+    </div>
+    <button class="icon-btn" id="drClose" title="关闭">✕</button>
+  </div>
+  <div class="dr-fields" id="drFields"></div>
+  <div class="dr-body" id="drBody"></div>
+  <div class="dr-foot">
+    <textarea id="drInput" rows="1" placeholder="说点什么：改优先级、换项目、讨论方案…"></textarea>
+    <div class="dr-row">
+      <span class="hint">Enter 发送 · Shift+Enter 换行</span>
+      <button id="drClear" title="清空对话">清空</button>
+      <button class="primary" id="drSend">发送</button>
+    </div>
+  </div>
+</aside>
+
 <div id="lightbox"><img alt=""></div>
 <div class="drop" id="drop">松手就收进来</div>
 <div class="toast" id="toast"></div>
@@ -521,6 +596,11 @@ function bindDrag(){
       el.style.opacity = '.4';
     });
     el.addEventListener('dragend', () => { el.style.opacity = ''; });
+    el.addEventListener('click', (e) => {
+      // 缩略图、徽章有自己的行为，别抢
+      if (e.target.closest('.shots img') || e.target.closest('[data-assign]')) return;
+      drOpen(el.dataset.id);
+    });
   });
   document.querySelectorAll('.col').forEach(col => {
     col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('drag-over'); });
@@ -762,6 +842,154 @@ async function openSettings(){
   renderProjList();
   $('#cfg').showModal();
 }
+
+/* ---------------- 卡片抽屉 ---------------- */
+
+let drTaskId = null;
+let drBusy = false;
+
+function drOpen(id){
+  drTaskId = id;
+  $('#drMask').classList.add('on');
+  $('#drawer').classList.add('on');
+  drLoad();
+}
+
+function drClose(){
+  drTaskId = null;
+  $('#drMask').classList.remove('on');
+  $('#drawer').classList.remove('on');
+}
+
+async function drLoad(){
+  if (!drTaskId) return;
+  const body = $('#drBody');
+  try {
+    const r = await api('GET', '/api/tasks/' + encodeURIComponent(drTaskId));
+    const t = r.task || r;
+    drRenderHead(t);
+    drRenderThread(r.messages || []);
+  } catch (e) {
+    body.innerHTML = '<div class="dr-empty">读不到任务：' + esc(e.message) + '</div>';
+  }
+}
+
+function drRenderHead(t){
+  $('#drTitle').textContent = t.title || '（无标题）';
+
+  const tags = [];
+  tags.push('<span class="tag" style="color:' + (PRI_COLOR[t.priority] || 'var(--muted)')
+    + ';background:' + ((PRI_COLOR[t.priority] || '#666') + '22') + '">'
+    + (PRI_LABEL[t.priority] || '普通') + '</span>');
+  if (t.project) tags.push('<span class="tag">' + esc(t.project) + '</span>');
+  if (t.category) tags.push('<span class="tag cat">' + esc(t.category) + '</span>');
+  tags.push('<span class="tag">' + esc(t.status) + '</span>');
+  $('#drMeta').innerHTML = tags.join('');
+
+  // 快速改字段
+  const opts = (store.projects || []).map(p =>
+    '<option value="' + esc(p.name) + '"' + (p.name === t.project ? ' selected' : '') + '>'
+    + esc(p.name) + '</option>').join('');
+  $('#drFields').innerHTML =
+    '<select id="drPri">'
+      + ['p0','p1','p2','p3','p4'].map(k =>
+          '<option value="' + k + '"' + (k === t.priority ? ' selected' : '') + '>'
+          + PRI_LABEL[k] + '</option>').join('')
+    + '</select>'
+    + '<select id="drProj">' + opts + '</select>'
+    + '<select id="drStatus">'
+      + [['todo','未开始'],['doing','进行中'],['done','已完成']].map(([k,l]) =>
+          '<option value="' + k + '"' + (k === t.status ? ' selected' : '') + '>' + l + '</option>').join('')
+    + '</select>';
+
+  $('#drPri').onchange = () => drQuick({ priority: $('#drPri').value });
+  $('#drProj').onchange = () => drQuick({ project: $('#drProj').value });
+  $('#drStatus').onchange = () => drQuick({ status: $('#drStatus').value });
+}
+
+async function drQuick(patch){
+  if (!drTaskId) return;
+  try {
+    const t = await api('PATCH', '/api/tasks/' + encodeURIComponent(drTaskId), patch);
+    drRenderHead(t);
+    await refresh();
+  } catch (e) { toast('改不了：' + e.message); }
+}
+
+function drRenderThread(list){
+  const body = $('#drBody');
+  if (!list.length) {
+    body.innerHTML = '<div class="dr-empty">这里可以补充信息、纠正判断、讨论方案。<br>'
+      + '说的每句话都会直接改动这条任务。</div>';
+    return;
+  }
+  body.innerHTML = list.map(m => {
+    const applied = m.patch && Object.keys(m.patch).length
+      ? '<span class="applied">已改 ' + Object.keys(m.patch)
+          .map(k => ({title:'标题',priority:'优先级',category:'类别',project:'项目',status:'状态',note:'备注'}[k] || k))
+          .join(' · ') + '</span>' : '';
+    return '<div class="dm ' + (m.role === 'user' ? 'me' : '') + '">'
+      + '<div class="bub">' + esc(m.text) + '</div>' + applied + '</div>';
+  }).join('');
+  body.scrollTop = body.scrollHeight;
+}
+
+async function drSend(){
+  const input = $('#drInput');
+  const text = input.value.trim();
+  if (!text || drBusy || !drTaskId) return;
+
+  drBusy = true;
+  $('#drSend').disabled = true;
+  input.value = '';
+  input.style.height = 'auto';
+
+  // 先乐观渲染用户这句
+  const body = $('#drBody');
+  if (body.querySelector('.dr-empty')) body.innerHTML = '';
+  body.insertAdjacentHTML('beforeend',
+    '<div class="dm me"><div class="bub">' + esc(text) + '</div></div>');
+  body.scrollTop = body.scrollHeight;
+
+  const thinking = document.createElement('div');
+  thinking.className = 'dm';
+  thinking.innerHTML = '<div class="bub" style="color:var(--muted)">…</div>';
+  body.appendChild(thinking);
+  body.scrollTop = body.scrollHeight;
+
+  try {
+    const r = await api('POST', '/api/chat', { taskId: drTaskId, text });
+    thinking.remove();
+    drRenderThread((await api('GET', '/api/tasks/' + encodeURIComponent(drTaskId))).messages || []);
+    if (r.task) drRenderHead(r.task);
+    await refresh();
+  } catch (e) {
+    thinking.innerHTML = '<div class="bub bad">失败：' + esc(e.message) + '</div>';
+  } finally {
+    drBusy = false;
+    $('#drSend').disabled = false;
+    input.focus();
+  }
+}
+
+$('#drClose')?.addEventListener('click', drClose);
+$('#drMask')?.addEventListener('click', drClose);
+$('#drSend')?.addEventListener('click', drSend);
+$('#drClear')?.addEventListener('click', async () => {
+  if (!drTaskId) return;
+  if (!confirm('清空这条任务的对话？')) return;
+  await api('POST', '/api/chat/clear', { taskId: drTaskId });
+  drLoad();
+});
+
+$('#drInput')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); drSend(); }
+});
+$('#drInput')?.addEventListener('input', e => {
+  const ta = e.target;
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+});
 
 /* ---------------- 目录浏览 ---------------- */
 
@@ -1052,7 +1280,11 @@ document.addEventListener('drop', async e => {
 document.addEventListener('keydown', e => {
   const typing = /input|textarea|select/i.test(document.activeElement.tagName);
 
-  if (e.key === 'Escape') { $('#lightbox').classList.remove('on'); return; }
+  if (e.key === 'Escape') {
+    $('#lightbox').classList.remove('on');
+    if ($('#drawer')?.classList.contains('on')) drClose();
+    return;
+  }
 
   if (e.key === '[' && !typing && !e.metaKey && !e.ctrlKey) {
     e.preventDefault(); setCollapsed(!collapsed); return;

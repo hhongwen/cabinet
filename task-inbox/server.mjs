@@ -21,6 +21,7 @@ const loadLocal = (rel) => import(pathToFileURL(path.join(path.dirname(fileURLTo
 const { createCore } = await loadLocal('core.mjs');
 const { createClassifier } = await loadLocal('classify.mjs');
 const { listRoots, listDir } = await loadLocal('browse.mjs');
+const { createChat } = await loadLocal('chat.mjs');
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -364,6 +365,85 @@ export function createHandler(core, opts = {}) {
         }
       }
 
+
+      // 单条任务 + 它的对话
+      {
+        const dm = p.match(/^\/api\/tasks\/([^/]+)$/);
+        if (dm && req.method === 'GET') {
+          const id = decodeURIComponent(dm[1]);
+          const t = core.load().tasks.find((x) => x.id === id);
+          if (!t) return json(res, 404, { error: '任务不存在' });
+          return json(res, 200, { task: t, messages: t.messages || [] });
+        }
+      }
+
+      if (p === '/api/chat' && req.method === 'POST') {
+        if (!queue) return json(res, 400, { error: '模型未启用' });
+        const b = await readBody(req);
+        const t = core.load().tasks.find((x) => x.id === b.taskId);
+        if (!t) return json(res, 404, { error: '任务不存在' });
+
+        const userText = String(b.text || '').trim();
+        if (!userText) return json(res, 400, { error: '说点什么' });
+
+        // 先把用户这句存进去，再调模型
+        core.pushMessage(t.id, { role: 'user', text: userText });
+
+        const chat = createChat({
+          ...opts,
+          imagesDir: core.imagesDir,
+          filesDir: core.filesDir,
+          mode: core.loadSettings().backend,
+          model: core.loadSettings().model
+        });
+
+        let result;
+        try {
+          result = await chat.reply({
+            task: t,
+            thread: t.messages || [],
+            userText,
+            projects: core.listProjects()
+          });
+        } catch (e) {
+          const msg = core.pushMessage(t.id, {
+            role: 'assistant',
+            text: '模型调用失败：' + String(e.message || e).slice(0, 200)
+          });
+          return json(res, 200, { reply: msg.text, patch: {}, failed: true });
+        }
+
+        // 应用补丁（模型说要改的字段）
+        let updated = t;
+        if (result.patch && Object.keys(result.patch).length) {
+          const patch = { ...result.patch };
+          // 项目名要对回 id
+          if (patch.project) {
+            const hit = core.findProject(patch.project);
+            if (hit) { patch.project_id = hit.id; patch.project = hit.name; }
+          }
+          patch.needs_project = false;
+          try { updated = core.patch(t.id, patch); } catch { /* 字段非法就跳过 */ }
+        }
+
+        const msg = core.pushMessage(t.id, {
+          role: 'assistant',
+          text: result.reply,
+          patch: result.patch
+        });
+
+        return json(res, 200, {
+          reply: result.reply,
+          patch: result.patch,
+          message: msg,
+          task: core.load().tasks.find((x) => x.id === t.id)
+        });
+      }
+
+      if (p === '/api/chat/clear' && req.method === 'POST') {
+        const b = await readBody(req);
+        return json(res, 200, { task: core.clearMessages(b.taskId) });
+      }
 
       const m = p.match(/^\/api\/tasks\/([^/]+)(\/move)?$/);
       if (m) {

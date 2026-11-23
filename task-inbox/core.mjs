@@ -111,6 +111,7 @@ export function createCore(dataDir) {
     }
 
     for (const t of d.tasks) {
+      if (!Array.isArray(t.messages)) t.messages = [];
       if (!t.project_id || !objects.some((x) => x.id === t.project_id)) {
         const name = String(t.project || '默认');
         const proj = byName.get(name) || objects[0];
@@ -213,6 +214,8 @@ export function createCore(dataDir) {
       priority: PRIORITIES.includes(input.priority) ? input.priority : 'p3',
       note: input.note ?? '',
       source: String(input.source || 'chat'),
+      // 卡片抽屉里的对话，元素 { id, role, text, at, patch }
+      messages: [],
       // 自动分类的状态：pending 排队中 / done 已完成 / failed 失败 / off 不需要
       classify_state: input.classify_state || 'off',
       classify_reason: '',
@@ -265,6 +268,36 @@ export function createCore(dataDir) {
   }
 
   function move(id, status) { return patch(id, { status }); }
+
+  // 往任务里追加一条对话消息
+  function pushMessage(id, msg) {
+    const d = load();
+    const t = d.tasks.find((x) => x.id === id);
+    if (!t) throw new Error('任务不存在: ' + id);
+    if (!Array.isArray(t.messages)) t.messages = [];
+    const m = {
+      id: 'm_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+      role: msg.role === 'assistant' ? 'assistant' : 'user',
+      text: String(msg.text || '').slice(0, 4000),
+      patch: msg.patch && typeof msg.patch === 'object' ? msg.patch : null,
+      at: nowIso()
+    };
+    t.messages.push(m);
+    // 只留最近 200 条，防止文件无限膨胀
+    if (t.messages.length > 200) t.messages = t.messages.slice(-200);
+    t.updated_at = nowIso();
+    save(d);
+    return m;
+  }
+
+  function clearMessages(id) {
+    const d = load();
+    const t = d.tasks.find((x) => x.id === id);
+    if (!t) throw new Error('任务不存在: ' + id);
+    t.messages = [];
+    save(d);
+    return t;
+  }
 
   function remove(id) {
     const d = load();
@@ -408,6 +441,7 @@ export function createCore(dataDir) {
   return {
     dataDir, dataFile, imagesDir, filesDir, settingsFile,
     load, save, add, patch, move, remove, list, state,
+    pushMessage, clearMessages,
     listProjects, addProject, updateProject, deleteProject, findProject,
     loadSettings, saveSettings,
     saveImage, imagePath, saveFile, filePath

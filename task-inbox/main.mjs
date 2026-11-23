@@ -149,7 +149,16 @@ export async function activate(ctx) {
   TOOL_DEFS(ctx);
 
   // 起服务。如果端口已占（比如 CLI 已经跑着），就复用，不重复起。
-  // 先探一下端口。已经有人在那儿跑就别抢，直接复用。
+  // 插件重载时，旧的服务实例还占着端口，而且它是旧代码。
+  // 模块重载在同一个 Node 进程里，所以用 globalThis 记住它，先关掉再起新的。
+  // （踩过：改了 server.mjs 之后怎么都不生效，因为一直在复用旧进程）
+  const prev = globalThis.__taskInboxServer;
+  if (prev) {
+    try { prev.close(); logger.info('[task-inbox] 关掉上一个实例'); } catch { /* 忽略 */ }
+    globalThis.__taskInboxServer = null;
+  }
+
+  // 再探一次端口：自己刚关的应该已经空了；如果是别的进程占着，就复用。
   let occupied = false;
   try {
     const r = await fetch('http://127.0.0.1:' + DEFAULT_PORT + '/api/ping', { signal: AbortSignal.timeout(1200) });
@@ -157,6 +166,7 @@ export async function activate(ctx) {
   } catch { occupied = false; }
 
   const started = occupied ? null : await start(core, { port: DEFAULT_PORT, webDir: extensionPath || undefined });
+  if (started) globalThis.__taskInboxServer = started.server;
   if (started) {
     server = started.server;
     port = started.port;
@@ -182,6 +192,7 @@ export async function activate(ctx) {
   return {
     dispose() {
       try { if (server) server.close(); } catch {}
+      if (globalThis.__taskInboxServer === server) globalThis.__taskInboxServer = null;
       try { statusItem?.dispose?.(); } catch {}
       // 清掉模块缓存标记，下次激活会重新探测
       server = null;
