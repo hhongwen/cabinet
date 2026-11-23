@@ -212,6 +212,57 @@ TASK_INBOX_MODEL=auto/deepseek-v4.1-flash   // 默认这个，看图也够用
 
 ---
 
+## 模型接入：三条通道自动降级
+
+不绑定任何一家。启动时按顺序探测，第一个能用的就走：
+
+| 顺序 | 通道 | 地址 | 图片 | 特点 |
+|---|---|---|---|---|
+| 1 | **magpie** | `127.0.0.1:3425/v1` | base64 直接给 | 最快，不要 key，OpenAI 兼容 |
+| 2 | **alma** | `localhost:23001` | 先传 gallery 换 url | 要 Alma 在跑 |
+| 3 | **opencode** | CLI | ✗ | 进程启动慢，纯兜底 |
+| 4 | **codex** | CLI | ✗ | 同上 |
+
+`GET /api/backend` 能看到当前哪几条通。
+
+### 为什么优先 magpie
+
+它本身就是 OpenAI 兼容网关，走它比走 Alma 少一跳，而且**图片可以直接给 base64**：
+
+```json
+{ "type": "image_url", "image_url": { "url": "data:image/png;base64,..." } }
+```
+
+走 Alma 就没这么舒服 —— 必须先 POST `/api/attachments/image` 换成
+`http://localhost:23001/api/gallery/cache/xxx.png` 才能用，否则模型会说"没看到图片"。
+（本地路径、dataUrl、自建服务 url 我都试过，全失败。）
+
+### 配置
+
+```bash
+TASK_INBOX_BACKEND=auto        # auto | magpie | alma | opencode | codex
+TASK_INBOX_MODEL=auto/deepseek-v4.1-flash
+MAGPIE_URL=http://127.0.0.1:3425/v1
+ALMA_API_URL=http://localhost:23001
+```
+
+想固定用某一条就写死，不用它自己探。
+
+### 关于 magpie 的 agents
+
+**不需要把 Cabinet 接进 magpie 的 agent 列表。**
+
+magpie 里的 Codex / OpenCode / Claude Code 是「agent 配置」——它管的是
+那些 CLI 用哪个模型、什么推理强度、配置文件写在哪。
+
+Task Inbox 要的只是「问一句话拿个 JSON」，属于**调模型**，不是**派 agent**。
+走 `/v1/chat/completions` 就够了，不会出现在 `magpie ls` 的输出里，也不需要。
+
+真正需要接 agent 的时候是下一步：让 agent 自己领任务去干活。那时候才需要
+`magpie ls` 看有哪些 agent，再用 `opencode run` 之类把它们叫起来。
+
+---
+
 ## 已知的 Alma 限制
 
 这四条不是本项目的 bug，是 Alma 插件系统当前的状态：

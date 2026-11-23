@@ -1,15 +1,18 @@
-// classify.mjs —— 调 Alma 的模型，自动判断一条记录的类型和优先级
+// classify.mjs —— 判断一条记录的类型和优先级
 //
-// 输入是「用户原样丢进来的东西」：文字、图片、附件、链接。
-// 输出是结构化的 { kind, priority, title, category }。
+// 模型怎么接是 backend.mjs 的事，这里只管：
+//   1. 把任务整理成一段话（+ 图片路径）
+//   2. 拼 prompt
+//   3. 解析模型返回的 JSON
 //
-// 走 Alma 本机的 OpenAI 兼容接口，不需要额外配 key。
+// 三条通道（magpie / alma / cli）自动探测，这里不用关心。
 
 import fs from 'node:fs';
-import * as _fs from 'node:fs';
 import path from 'node:path';
+import { createBackend } from './backend.mjs';
 
 const PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4'];
+const KINDS = ['text', 'image', 'image_text', 'link', 'file', 'mixed'];
 
 const PRIORITY_RUBRIC = `P0 灾难级/阻塞级：核心业务中断、线上重大故障、严重安全漏洞、大面积用户受影响。必须立刻停下其他事处理。
 P1 高（紧急且重要）：核心功能受限但有替代、即将到期的关键需求、高层重点关注的紧急项目。当天或 24 小时内解决。
@@ -51,13 +54,12 @@ ${PRIORITY_RUBRIC}
 function jsonBlock(text) {
   if (!text) return null;
   const s = String(text).trim();
-  // 容忍模型包了代码块
   const m = s.match(/\{[\s\S]*\}/);
   if (!m) return null;
   try { return JSON.parse(m[0]); } catch { return null; }
 }
 
-// 把附件转成模型能读的片段
+// 附件里的文本类内容，给模型当上下文
 function readTextPreview(filePath, maxChars = 1500) {
   try {
     const st = fs.statSync(filePath);
@@ -66,9 +68,14 @@ function readTextPreview(filePath, maxChars = 1500) {
     const textual = ['.txt', '.md', '.json', '.csv', '.log', '.yml', '.yaml',
       '.js', '.mjs', '.ts', '.py', '.java', '.sql', '.html', '.css', '.xml'];
     if (!textual.includes(ext)) return null;
-    const s = fs.readFileSync(filePath, 'utf8');
-    return s.slice(0, maxChars);
+    return fs.readFileSync(filePath, 'utf8').slice(0, maxChars);
   } catch { return null; }
+}
+
+function humanSize(n) {
+  if (n < 1024) return n + 'B';
+  if (n < 1024 * 1024) return Math.round(n / 1024) + 'KB';
+  return (n / 1024 / 1024).toFixed(1) + 'MB';
 }
 
 function describeFiles(files = [], resolve) {
@@ -79,13 +86,15 @@ function describeFiles(files = [], resolve) {
     const ext = path.extname(name).toLowerCase();
     let size = 0;
     try { size = fs.statSync(p).size; } catch { /* 忽略 */ }
+    const line = `- ${name}（${ext || '无扩展名'}，${humanSize(size)}）`;
     const preview = readTextPreview(p);
-    const line = `- ${name}（${ext || '无扩展名'}，${Math.round(size / 1024)}KB）`;
-    return preview ? `${line}\n  内容片段：${preview.replace(/\s+/g, ' ').slice(0, 800)}` : line;
+    return preview
+      ? `${line}\n  内容片段：${preview.replace(/\s+/g, ' ').slice(0, 800)}`
+      : line;
   }).join('\n');
 }
 
-// 模型没给出有效标题时，从原文或 reason 里拼一个能看的
+// 模型没给有效标题时的兜底
 function buildFallbackTitle(task, parsed) {
   const raw = String(task.title || '').trim();
   const allNames = [...(task.images || []), ...(task.files || [])].map((x) => path.basename(String(x)));
@@ -96,7 +105,6 @@ function buildFallbackTitle(task, parsed) {
   const text = String(task.text || '').trim();
   if (text) return text.split(/\n/)[0].slice(0, 120);
 
-  // 用 reason 的第一句，去掉"仅是/只是"这类开头
   const r = String(parsed.reason || '').replace(/^(仅是|只是|这是|这只是|以上是)/, '').trim();
   if (r) return r.split(/[，。,.]/)[0].slice(0, 120);
 
@@ -105,72 +113,24 @@ function buildFallbackTitle(task, parsed) {
   return '待整理';
 }
 
-function guessImageType(p) {
-  const e = path.extname(p).toLowerCase();
-  if (e === '.jpg' || e === '.jpeg') return 'image/jpeg';
-  if (e === '.webp') return 'image/webp';
-  if (e === '.gif') return 'image/gif';
-  return 'image/png';
-}
-
 export function createClassifier(opts = {}) {
-  const apiUrl = process.env.ALMA_API_URL || 'http://localhost:23001';
-  const model = opts.model || process.env.TASK_INBOX_MODEL || 'auto/deepseek-v4.1-flash';
-  const timeoutMs = opts.timeoutMs || 45000;
-  const imageBase = opts.imageBase || 'http://127.0.0.1:46001';
+  const backend = opts.backend || createBackend(opts);
   const imagesDir = opts.imagesDir || '';
   const filesDir = opts.filesDir || '';
 
-  // 任务里存的可能只是文件名，也可能是绝对路径，统一解析成真实文件
   function resolveLocal(nameOrPath, dir) {
     const s = String(nameOrPath || '');
     if (!s) return null;
-    // 绝对路径直接用
     if (s.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(s)) return s;
     // 先查目标目录 —— 不能先试相对路径，否则会被 cwd 里的同名文件截胡
-    // （踩过：'notes.md' 命中了项目根的 NOTES.md，读到了完全无关的内容）
     if (dir) {
       const guess = path.join(dir, path.basename(s));
-      if (_fs.existsSync(guess)) return guess;
+      if (fs.existsSync(guess)) return guess;
     }
-    return _fs.existsSync(s) ? path.resolve(s) : null;
-  }
-
-  // 本地图片 -> Alma gallery url。模型只能读 Alma 自己托管的 url。
-  async function uploadToAlma(filePath) {
-    const buf = await fs.promises.readFile(filePath);
-    const res = await fetch(apiUrl + '/api/attachments/image', {
-      method: 'POST',
-      headers: { 'content-type': guessImageType(filePath) },
-      body: buf,
-      signal: AbortSignal.timeout(20000)
-    });
-    if (!res.ok) throw new Error('附件上传 ' + res.status);
-    const d = await res.json();
-    return d.url || null;
-  }
-
-  // 找 providerId（Alma 要求 providerId:modelId）
-  let cachedFullModel = null;
-  async function resolveModel() {
-    if (cachedFullModel) return cachedFullModel;
-    if (model.includes(':')) { cachedFullModel = model; return cachedFullModel; }
-    try {
-      const r = await fetch(apiUrl + '/api/models', { signal: AbortSignal.timeout(8000) });
-      const d = await r.json();
-      const list = d.data || d.models || [];
-      const hit = list.find((m) => m.id === model) || list.find((m) => m.capabilities?.vision);
-      if (hit) {
-        cachedFullModel = hit.providerId + ':' + hit.id;
-        return cachedFullModel;
-      }
-    } catch { /* 忽略，退回裸 model 名 */ }
-    cachedFullModel = model;
-    return cachedFullModel;
+    return fs.existsSync(s) ? path.resolve(s) : null;
   }
 
   async function classify(task) {
-    const parts = [];
     const lines = [];
 
     if (task.text) lines.push('用户写的原文：\n' + String(task.text).slice(0, 4000));
@@ -180,60 +140,26 @@ export function createClassifier(opts = {}) {
       lines.push('附件：\n' + describeFiles(task.files, (n) => resolveLocal(n, filesDir)));
     }
 
-    const imgs = (task.images || []).filter(Boolean);
-    if (imgs.length) lines.push('附带了 ' + imgs.length + ' 张图片。');
-
-    parts.push({ type: 'text', text: lines.join('\n\n') || '（没有文字内容）' });
-
-    // 图片要先进 Alma 的 gallery cache 才能被模型读到。
-    // 直接用本地路径或自建服务的 url 都会失败（模型那边拉不到）。
-    for (const img of imgs.slice(0, 3)) {
-      try {
-        const local = resolveLocal(img, imagesDir);
-        if (!local) { lines.push('（一张图找不到：' + path.basename(String(img)) + '）'); continue; }
-        const url = await uploadToAlma(local);
-        if (!url) continue;
-        parts.push({
-          type: 'file',
-          filename: path.basename(String(img)),
-          mediaType: guessImageType(String(img)),
-          url
-        });
-      } catch (e) {
-        lines.push('（一张图上传失败：' + (e.message || e).slice(0, 80) + '）');
-      }
+    const imgPaths = [];
+    for (const img of (task.images || []).filter(Boolean).slice(0, 3)) {
+      const local = resolveLocal(img, imagesDir);
+      if (local) imgPaths.push(local);
+      else lines.push('（一张图找不到：' + path.basename(String(img)) + '）');
     }
+    if (imgPaths.length) lines.push('附带了 ' + imgPaths.length + ' 张图片，直接看图判断内容。');
 
-    const body = {
-      model: await resolveModel(),
-      stream: false,
-      temperature: 0.2,
-      messages: [
-        { role: 'system', parts: [{ type: 'text', text: SYSTEM }] },
-        { role: 'user', parts }
-      ]
-    };
-
-    const res = await fetch(apiUrl + '/api/chat/completions', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs)
+    const r = await backend.chat({
+      system: SYSTEM,
+      text: lines.join('\n\n') || '（没有文字内容）',
+      images: imgPaths
     });
 
-    const raw = await res.text();
-    if (!res.ok) throw new Error('模型调用失败 ' + res.status + ': ' + raw.slice(0, 200));
-
-    let data;
-    try { data = JSON.parse(raw); } catch { throw new Error('返回不是 JSON'); }
-    const content = data?.choices?.[0]?.message?.content;
-    const parsed = jsonBlock(content);
-    if (!parsed) throw new Error('模型没返回可解析的 JSON: ' + String(content).slice(0, 160));
+    const parsed = jsonBlock(r.text);
+    if (!parsed) throw new Error('模型没返回可解析的 JSON: ' + String(r.text).slice(0, 160));
 
     const priority = PRIORITIES.includes(parsed.priority) ? parsed.priority : 'p3';
+    const kind = KINDS.includes(parsed.kind) ? parsed.kind : (task.kind || 'text');
     const guessedTitle = /^(截图|图片|附件|image|screenshot)$/i.test(String(parsed.title || '').trim());
-    const kind = ['text', 'image', 'image_text', 'link', 'file', 'mixed'].includes(parsed.kind)
-      ? parsed.kind : task.kind || 'text';
 
     return {
       priority,
@@ -243,9 +169,10 @@ export function createClassifier(opts = {}) {
         : buildFallbackTitle(task, parsed),
       category: typeof parsed.category === 'string' ? parsed.category.trim().slice(0, 20) : '',
       reason: typeof parsed.reason === 'string' ? parsed.reason.trim().slice(0, 200) : '',
-      model: data?.model || model
+      model: r.model || '',
+      backend: backend.name
     };
   }
 
-  return { classify, resolveModel };
+  return { classify, backend };
 }

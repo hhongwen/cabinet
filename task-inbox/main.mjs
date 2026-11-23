@@ -10,8 +10,19 @@
 
 import os from 'node:os';
 import path from 'node:path';
-import { createCore, STATUSES, PRIORITIES, KINDS } from './core.mjs';
-import { start, DEFAULT_DATA_DIR, DEFAULT_PORT } from './server.mjs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+// 关键：Alma 重载插件时只给入口文件加 ?t=，它 import 的子模块会被 ESM 缓存住。
+// 所以子模块必须用带时间戳的动态 import —— 否则改了 core/server 根本不生效。
+// （踩过：改了 classify.mjs 半天不生效，以为是模型问题）
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const reloadTag = '?t=' + Date.now();
+
+const coreMod = await import(pathToFileURL(path.join(HERE, 'core.mjs')).href + reloadTag);
+const serverMod = await import(pathToFileURL(path.join(HERE, 'server.mjs')).href + reloadTag);
+
+const { createCore, STATUSES, PRIORITIES, KINDS } = coreMod;
+const { start, DEFAULT_DATA_DIR, DEFAULT_PORT } = serverMod;
 
 let server = null;
 let port = 0;
@@ -138,7 +149,14 @@ export async function activate(ctx) {
   TOOL_DEFS(ctx);
 
   // 起服务。如果端口已占（比如 CLI 已经跑着），就复用，不重复起。
-  const started = await start(core, { port: DEFAULT_PORT, webDir: extensionPath || undefined });
+  // 先探一下端口。已经有人在那儿跑就别抢，直接复用。
+  let occupied = false;
+  try {
+    const r = await fetch('http://127.0.0.1:' + DEFAULT_PORT + '/api/ping', { signal: AbortSignal.timeout(1200) });
+    occupied = r.ok;
+  } catch { occupied = false; }
+
+  const started = occupied ? null : await start(core, { port: DEFAULT_PORT, webDir: extensionPath || undefined });
   if (started) {
     server = started.server;
     port = started.port;
@@ -163,9 +181,11 @@ export async function activate(ctx) {
 
   return {
     dispose() {
-      // 自己起的服务才关；复用的不关。
       try { if (server) server.close(); } catch {}
       try { statusItem?.dispose?.(); } catch {}
+      // 清掉模块缓存标记，下次激活会重新探测
+      server = null;
+      statusItem = null;
     }
   };
 }

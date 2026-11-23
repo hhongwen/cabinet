@@ -10,9 +10,15 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { fileURLToPath } from 'node:url';
-import { createCore } from './core.mjs';
-import { createClassifier } from './classify.mjs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+// 把入口带上的 ?t= 继续往下传给子模块，否则 static import 会被 ESM 缓存住，
+// 改了 core/classify 也不生效（踩过的坑）。
+const RELOAD_TAG = new URL(import.meta.url).search || '';
+const loadLocal = (rel) => import(pathToFileURL(path.join(path.dirname(fileURLToPath(import.meta.url)), rel)).href + RELOAD_TAG);
+
+const { createCore } = await loadLocal('core.mjs');
+const { createClassifier } = await loadLocal('classify.mjs');
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -91,7 +97,7 @@ export function createClassifyQueue(core, opts = {}) {
         category: t.category || r.category,
         classify_state: 'done',
         classify_reason: r.reason || '',
-        classify_model: r.model || ''
+        classify_model: (r.backend ? r.backend + ':' : '') + (r.model || '')
       });
       onDone(updated);
       return updated;
@@ -151,7 +157,17 @@ export function createHandler(core, opts = {}) {
         try { n = core.load().tasks.length; } catch { /* 忽略 */ }
         return json(res, 200, { ok: true, tasks: n });
       }
-      if (p === '/api/state' && req.method === 'GET') return json(res, 200, core.state());
+      if (p === '/api/state' && req.method === 'GET') {
+        const st = core.state();
+        if (queue && queue.classifier?.backend) st.backend = { name: queue.classifier.backend.name };
+        return json(res, 200, st);
+      }
+      if (p === '/api/backend' && req.method === 'GET') {
+        if (!queue) return json(res, 200, { error: '分类未启用' });
+        const b = queue.classifier && queue.classifier.backend;
+        if (!b) return json(res, 200, { error: '后端未初始化' });
+        return json(res, 200, await b.status());
+      }
 
       if (p === '/api/tasks' && req.method === 'POST') {
         const b = await readBody(req);
