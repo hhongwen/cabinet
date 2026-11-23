@@ -38,9 +38,8 @@ input,select,textarea{font:inherit}
   height:100vh; overflow:hidden;
   transition:grid-template-columns .22s cubic-bezier(.2,0,0,1);
 }
-.app.side-collapsed{grid-template-columns:0 minmax(0,1fr)}
+.app.side-collapsed{grid-template-columns:68px minmax(0,1fr)}
 .app.side-collapsed .main{grid-column:2}
-.app.side-collapsed .sidebar{display:none}
 .app.resizing{transition:none}
 .app.collapsed .dock{display:none}
 
@@ -127,16 +126,6 @@ input,select,textarea{font:inherit}
 }
 .side-toggle svg{width:13px;height:13px;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .side-toggle:hover{background:#fff;border-color:#8c9da2;color:var(--ink)}
-.side-open{
-  position:fixed;left:12px;top:14px;z-index:60;display:none;
-  width:30px;height:30px;padding:0;place-items:center;
-  border:1px solid #b0bcc0;background:rgba(255,255,255,.8);color:#394549;
-  border-radius:9px;transition:.16s cubic-bezier(.2,0,0,1);
-  backdrop-filter:blur(8px);box-shadow:0 2px 8px #36495010;
-}
-.side-open svg{stroke-linecap:round}
-.side-open:hover{background:#fff;border-color:#8c9da2}
-.app.side-collapsed ~ .side-open{display:grid}
 
 /* 系统块里的设置按钮 */
 .sys-btn{
@@ -149,6 +138,40 @@ input,select,textarea{font:inherit}
 .sys-btn:hover{background:#fff;border-color:#8fa0a5;color:var(--ink)}
 
 /* ---------- 主区 ---------- */
+/* ---------- 窄轨：只留图标，仍可点击 ---------- */
+.app.side-collapsed .sidebar{padding:16px 8px 14px;align-items:center}
+.app.side-collapsed .brand{justify-content:center;padding:2px 0 18px;gap:0}
+.app.side-collapsed .brand > div:nth-child(2){display:none}
+.app.side-collapsed .brand-mark{width:32px;height:32px}
+.app.side-collapsed .side-toggle{
+  position:absolute;right:-11px;top:20px;z-index:5;
+  width:22px;height:22px;border-radius:50%;background:#eef1f1;
+}
+.app.side-collapsed .side-toggle svg{transform:rotate(180deg)}
+.app.side-collapsed .section-title{
+  font-size:0;padding:0;width:100%;height:1px;background:#b9c3c6;
+  margin:10px 0 12px;opacity:.6;
+}
+.app.side-collapsed .menu{gap:6px;width:100%;align-items:center}
+.app.side-collapsed .nav-link{
+  width:42px;height:40px;padding:0;justify-content:center;border-radius:11px;
+}
+.app.side-collapsed .nav-link .name{gap:0;justify-content:center}
+.app.side-collapsed .nav-link .name > span{display:none}
+.app.side-collapsed .nav-link .cnt{display:none}
+.app.side-collapsed .nav-link svg{width:17px;height:17px}
+.app.side-collapsed .nav-link::before{left:-6px}
+.app.side-collapsed .nav-link.active::before{height:20px}
+.app.side-collapsed .sidebar-bottom{width:100%;padding:10px 0 0}
+.app.side-collapsed .systembox{padding:8px 6px;text-align:center;background:transparent;border:none}
+.app.side-collapsed .sys-top,
+.app.side-collapsed .sys-head,
+.app.side-collapsed .sys-info,
+.app.side-collapsed .sys-bar{display:none}
+.app.side-collapsed .sys-btn{margin-top:0;width:40px;height:38px;padding:0}
+.app.side-collapsed .sys-btn span{display:none}
+.app.side-collapsed .sidebar-foot{display:none}
+
 .main{
   min-width:0; min-height:0; width:100%;
   display:flex; flex-direction:column; overflow:hidden;
@@ -162,7 +185,6 @@ input,select,textarea{font:inherit}
   mask-image:linear-gradient(to bottom,#000,transparent 55%);
 }
 
-.app.side-collapsed .topbar{padding-left:56px}
 .topbar{
   height:56px; flex:0 0 auto; display:flex; align-items:center; justify-content:space-between;
   padding:0 24px; border-bottom:1px solid #cbd2d5; position:relative; z-index:2;
@@ -549,18 +571,32 @@ body.solo .board-area{display:none}
 body.solo .dock{border-top:none;justify-content:center}
 body.solo .dock .grow{max-width:720px}
 body.solo #collapseBtn{display:none}
-@media (max-width:1100px){
-  .app{grid-template-columns:72px minmax(0,1fr)}
-  .sidebar{padding:18px 9px}
-  .brand{justify-content:center;padding:4px 0 16px}
-  .brand-name,.brand-sub,.section-title,.nav-link .name span:not(.ico),.sidebar-foot{display:none}
-  .sidebar-bottom{padding:10px 0 0}
-  .systembox{padding:7px;text-align:center}
-  .sys-top,.sys-head,.sys-info,.sys-bar,.side-toggle{display:none}
-  .sys-btn{margin-top:0;padding:7px 0}
-  .sys-btn span{display:none}
-  .nav-link{justify-content:center;padding:10px 4px}
+/* 屏幕真的窄的时候自动进窄轨，和手动收起长得一样 */
+@media (max-width:900px){
+  .app{grid-template-columns:68px minmax(0,1fr)}
+  .sidebar{padding:16px 8px 14px;align-items:center}
+  .brand{justify-content:center;padding:2px 0 18px;gap:0}
+  .brand > div:nth-child(2){display:none}
+  .brand-mark{width:32px;height:32px}
+  .side-toggle{position:absolute;right:-11px;top:20px;z-index:5;
+    width:22px;height:22px;border-radius:50%;background:#eef1f1}
+  .side-toggle svg{transform:rotate(180deg)}
+  .section-title{font-size:0;padding:0;width:100%;height:1px;
+    background:#b9c3c6;margin:10px 0 12px;opacity:.6}
+  .menu{gap:6px;width:100%;align-items:center}
+  .nav-link{width:42px;height:40px;padding:0;justify-content:center;border-radius:11px}
+  .nav-link .name{gap:0;justify-content:center}
+  .nav-link .name > span{display:none}
   .nav-link .cnt{display:none}
+  .nav-link svg{width:17px;height:17px}
+  .nav-link::before{left:-6px}
+  .nav-link.active::before{height:20px}
+  .sidebar-bottom{width:100%;padding:10px 0 0}
+  .systembox{padding:8px 6px;text-align:center;background:transparent;border:none}
+  .sys-top,.sys-head,.sys-info,.sys-bar{display:none}
+  .sys-btn{margin-top:0;width:40px;height:38px;padding:0}
+  .sys-btn span{display:none}
+  .sidebar-foot{display:none}
 }
 </style>
 </head>
@@ -718,10 +754,6 @@ body.solo #collapseBtn{display:none}
     </footer>
   </main>
 </div>
-
-<button class="side-open" id="sideOpen" title="展开侧栏">
-  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="15" height="15"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
-</button>
 
 <dialog id="cfg">
   <form class="dlg" id="cfgForm" method="dialog">
@@ -936,14 +968,17 @@ async function refreshSystemBox(){
 /* ---------------- 侧栏收起 ---------------- */
 
 const LS_SIDE = 'ti.sideCollapsed';
+let collapsedSide = false;
 
 function setSidebar(collapsed){
-  $('#app').classList.toggle('side-collapsed', collapsed);
-  localStorage.setItem(LS_SIDE, collapsed ? '1' : '0');
+  collapsedSide = !!collapsed;
+  $('#app').classList.toggle('side-collapsed', collapsedSide);
+  localStorage.setItem(LS_SIDE, collapsedSide ? '1' : '0');
+  const btn = $('#sideToggle');
+  if (btn) btn.title = collapsedSide ? '展开侧栏' : '收起侧栏';
 }
 
-$('#sideToggle')?.addEventListener('click', () => setSidebar(true));
-$('#sideOpen')?.addEventListener('click', () => setSidebar(false));
+$('#sideToggle')?.addEventListener('click', () => setSidebar(!collapsedSide));
 
 /* ---------------- 侧栏：状态导航 / 项目导航 ---------------- */
 
