@@ -162,6 +162,8 @@ input,select,textarea{font:inherit}
 }
 .app.side-collapsed .nav-link .name{gap:0;justify-content:center}
 .app.side-collapsed .nav-link .ico-text{display:none}
+.app.side-collapsed .nav-link .name > span:not(.ico-initial){display:none}
+.app.side-collapsed .nav-link{white-space:nowrap; overflow:hidden}
 .app.side-collapsed .nav-link .ico-folder{display:none}
 .app.side-collapsed .nav-link .ico-initial{display:block}
 .app.side-collapsed .nav-link .cnt{display:none}
@@ -643,28 +645,28 @@ body.solo #collapseBtn{display:none}
       <div class="nav-link active" data-filter="all">
         <span class="name">
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-          <span>全部任务</span>
+          <span class="ico-text">全部任务</span>
         </span>
         <span class="cnt" id="cntAll">0</span>
       </div>
       <div class="nav-link" data-filter="todo">
         <span class="name">
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-          <span>未开始</span>
+          <span class="ico-text">未开始</span>
         </span>
         <span class="cnt" id="cntTodo">0</span>
       </div>
       <div class="nav-link" data-filter="doing">
         <span class="name">
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M2 12h4l3-7 5 14 3-7h5"/></svg>
-          <span>进行中</span>
+          <span class="ico-text">进行中</span>
         </span>
         <span class="cnt" id="cntDoing">0</span>
       </div>
       <div class="nav-link" data-filter="done">
         <span class="name">
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
-          <span>已完成</span>
+          <span class="ico-text">已完成</span>
         </span>
         <span class="cnt" id="cntDone">0</span>
       </div>
