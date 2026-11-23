@@ -932,10 +932,27 @@ function dirRow(d = {}){
     <button type="button" class="rm" title="移除">✕</button>
   `;
   wrap.querySelector('.rm').addEventListener('click', () => wrap.remove());
-  wrap.querySelector('.pick').addEventListener('click', () => {
-    openPicker(wrap.querySelector('.dp').value.trim(), (chosen) => {
-      wrap.querySelector('.dp').value = chosen;
-    });
+  wrap.querySelector('.pick').addEventListener('click', async () => {
+    const input = wrap.querySelector('.dp');
+    const current = input.value.trim();
+
+    // 先试系统原生对话框 —— 一次点完，不用逐层走
+    const btn = wrap.querySelector('.pick');
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+      const r = await api('POST', '/api/pickdir', { initial: current });
+      if (r.path) { input.value = r.path; return; }
+      return;                       // 用户取消了，什么都不做
+    } catch (e) {
+      // 系统对话框不可用（非 Windows / 缺脚本），退到页面浏览
+      console.warn('原生对话框不可用，改用页面浏览：', e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '📁';
+    }
+
+    openPicker(current, (chosen) => { input.value = chosen; });
   });
   return wrap;
 }

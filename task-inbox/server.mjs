@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
 
 // 把入口带上的 ?t= 继续往下传给子模块，否则 static import 会被 ESM 缓存住，
 // 改了 core/classify 也不生效（踩过的坑）。
@@ -166,6 +167,39 @@ export function createClassifyQueue(core, opts = {}) {
   };
 }
 
+// 弹系统原生的选择文件夹对话框。
+// 浏览器做不到这件事，只有进程能调 —— 我们用 PowerShell 的
+// FolderBrowserDialog（Windows 自带，不用装任何东西）。
+function pickDir(initial) {
+  return new Promise((resolve, reject) => {
+    if (process.platform !== 'win32') {
+      return reject(new Error('这个系统没有原生目录对话框，用 /api/browse 逐层选'));
+    }
+    const script = path.join(HERE, 'pickdir.ps1');
+    if (!fs.existsSync(script)) return reject(new Error('缺 pickdir.ps1'));
+
+    const args = ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', script];
+    if (initial) args.push('-Initial', initial);
+
+    const child = spawn('powershell.exe', args, { windowsHide: false, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '', err = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { err += d; });
+
+    // 用户可能开着对话框很久，给 5 分钟
+    const timer = setTimeout(() => { try { child.kill(); } catch {} reject(new Error('对话框超时')); }, 5 * 60 * 1000);
+
+    child.on('error', (e) => { clearTimeout(timer); reject(e); });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code !== 0) return reject(new Error(err.trim() || ('退出码 ' + code)));
+      resolve(out.trim());
+    });
+  });
+}
+
 // ---------- 模型清单 ----------
 
 let modelCache = { at: 0, data: null, from: '' };
@@ -292,6 +326,15 @@ export function createHandler(core, opts = {}) {
       if (p === '/api/classify' && req.method === 'POST') {
         const b = await readBody(req);
         return json(res, 200, await runClassify(b.id));
+      }
+      if (p === '/api/pickdir' && req.method === 'POST') {
+        const b = await readBody(req);
+        try {
+          const picked = await pickDir(b.initial || '');
+          return json(res, 200, { path: picked || null });
+        } catch (e) {
+          return json(res, 400, { error: e.message });
+        }
       }
       if (p === '/api/browse' && req.method === 'GET') {
         const target = url.searchParams.get('path');

@@ -375,3 +375,22 @@ Task Inbox 要的只是「问一句话拿个 JSON」，属于**调模型**，不
 GET /api/browse               → 盘符 + 用户目录
 GET /api/browse?path=D:\xxx   → 该目录的子目录、父目录、是否 git 仓库
 ```
+
+---
+
+## 选目录：先弹系统对话框
+
+点目录行的 📁，**直接弹 Windows 原生的「选择文件夹」**，一次点完。
+
+浏览器自己做不到这件事（`<input webkitdirectory>` 拿不到盘符，
+`showDirectoryPicker` 也只给沙箱路径）。所以走服务端：
+`server.mjs` spawn 一个 PowerShell，用 `FolderBrowserDialog` 弹窗，
+把选中的路径回传给页面。
+
+- `pickdir.ps1`：WinForms 对话框，带一个透明置顶窗体当 owner
+  （不然 Alma 在后台时对话框会弹到后面，看着像没反应）
+- `POST /api/pickdir { initial }`：起进程、等结果、回路径
+- 取消返回 `path: null`，前端什么都不做
+- 系统调用失败时自动退回页面里的逐层浏览（`browse.mjs`）
+
+Linux/macOS 上没有这条路径，会直接走页面浏览。
