@@ -343,7 +343,7 @@ const INPUT_POOL = ['.dock textarea', '.dr-foot textarea', '.dr-fields select', 
 // ---------- 检查 5d：z-index 只能用表里的值（STYLE.md 第五节） ----------
 
 {
-  const ALLOWED = new Set([1, 2, 3, 5, 60, 70, 71, 80, 90, 99]);
+  const ALLOWED = new Set([1, 2, 3, 5, 60, 70, 71, 80, 90, 95, 99]);
   for (const r of rules) {
     const m = r.body.match(/(?:^|[;\s])z-index\s*:\s*(-?\d+)/i);
     if (!m) continue;

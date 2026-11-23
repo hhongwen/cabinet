@@ -44,6 +44,9 @@
   --danger-text:#a32d2d;    /* 报错文字 */
   --danger-edge:#e0b6aa;    /* 危险按钮描边 */
   --danger-edge-hi:#d99e8b;
+  /* 顶部横幅（连不上服务 / 后端是旧版本）—— 只在这一处用，但别写死在规则里 */
+  --banner-bad-bg:#fff1ee; --banner-bad-ink:#8a2c14; --banner-bad-edge:#e8c2b8;
+  --banner-warn-bg:#fff8e6; --banner-warn-ink:#7a5810; --banner-warn-edge:#e8d9a8;
   /* 深色面（抽屉里"我说的"气泡、toast）上的文字 */
   --on-dark:#eef3f4;
 
@@ -886,6 +889,9 @@ dialog::backdrop{background:rgba(30,40,45,.34); backdrop-filter:blur(3px)}
 }
 .dr-head .ttl{flex:1;min-width:0}
 .dr-head .ttl b{font-size:13.5px;font-weight:750;display:block;line-height:1.45;letter-spacing:-.2px}
+/* 删除是不可逆操作，默认低调，悬停才变红 —— 别让人误点 */
+#drDelete{color:var(--text-4);font-size:11px;padding:3px 8px}
+#drDelete:hover{color:var(--p0);border-color:var(--danger-edge);background:var(--banner-bad-bg)}
 .dr-meta{display:flex;gap:4px;flex-wrap:wrap;margin-top:7px}
 .dr-fields{
   display:flex;gap:6px;flex-wrap:wrap;padding:10px 16px;
@@ -994,6 +1000,23 @@ dialog::backdrop{background:rgba(30,40,45,.34); backdrop-filter:blur(3px)}
   transition:.22s;z-index:80;
 }
 .toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+/* 顶部横幅：首屏连不上 / 后端是旧版本。
+   fixed 是因为 .app 是整屏 grid，往流里插一个元素会把布局挤坏；
+   出现时给 body 加 .boot-open，把 app 往下让 34px。 */
+.boot-bar{
+  position:fixed;top:0;left:0;right:0;z-index:95;
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  min-height:34px;padding:6px 16px;font:11.5px var(--font-ui);
+}
+.boot-bar.bad{background:var(--banner-bad-bg);color:var(--banner-bad-ink);border-bottom:1px solid var(--banner-bad-edge)}
+.boot-bar.warn{background:var(--banner-warn-bg);color:var(--banner-warn-ink);border-bottom:1px solid var(--banner-warn-edge)}
+.boot-bar button{
+  margin-left:auto;font:11.5px var(--font-ui);padding:4px 12px;
+  border:1px solid currentColor;border-radius:7px;background:transparent;
+  color:inherit;cursor:pointer;opacity:.8;
+}
+.boot-bar button:hover{opacity:1;background:rgba(255,255,255,.5)}
+body.boot-open .app{margin-top:34px;height:calc(100vh - 34px)}
 .drop{
   position:fixed;inset:0;background:rgba(250,70,22,.10);border:2px dashed var(--orange);
   display:none;place-items:center;font:13px var(--font-mono);color:var(--ink);z-index:90;
@@ -1327,6 +1350,7 @@ body.solo #collapseBtn{display:none}
       <b id="drTitle"></b>
       <div class="dr-meta" id="drMeta"></div>
     </div>
+    <button class="icon-btn" id="drDelete" title="删除这条任务">删</button>
     <button class="icon-btn" id="drClose" title="关闭">✕</button>
   </div>
   <div class="dr-fields" id="drFields"></div>
@@ -2414,6 +2438,19 @@ async function drSend(){
 
 $('#drClose')?.addEventListener('click', drClose);
 $('#drMask')?.addEventListener('click', drClose);
+$('#drDelete')?.addEventListener('click', async () => {
+  if (!drTaskId) return;
+  const t = (store.tasks || []).find(x => x.id === drTaskId);
+  const label = t ? '「' + t.title + '」' : '这条任务';
+  if (!confirm('删除' + label + '？\n\n对话和附件会一起删掉，不能撤销。')) return;
+  try {
+    const r = await api('DELETE', '/api/tasks/' + encodeURIComponent(drTaskId));
+    const n = (r.attachments_removed || 0);
+    drClose();
+    await refresh();
+    toast(n ? '已删除，同时清掉 ' + n + ' 个附件' : '已删除');
+  } catch (e) { toast('删不掉：' + e.message); }
+});
 $('#drSend')?.addEventListener('click', drSend);
 $('#drClear')?.addEventListener('click', async () => {
   if (!drTaskId) return;
@@ -2758,11 +2795,75 @@ document.addEventListener('keydown', e => {
   }
 });
 
-refresh().catch(err => {
-  document.body.insertAdjacentHTML('afterbegin',
-    `<div style="padding:18px;color:#ef4444">连不上任务服务：${esc(err.message)}</div>`);
+/* ---------------- 首屏加载 + 轮询 ---------------- */
+
+// 首屏失败不能只插一行红字：用户除了刷新没别的办法，而且不知道能不能恢复。
+// 给个「重试」，点一下重新拉。
+function ensureBootBar(){
+  let bar = document.getElementById('bootBar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'bootBar';
+    document.body.insertBefore(bar, document.body.firstChild);
+  }
+  document.body.classList.add('boot-open');
+  return bar;
+}
+
+function clearBootBar(){
+  document.getElementById('bootBar')?.remove();
+  document.body.classList.remove('boot-open');
+}
+
+function showBootError(err){
+  const bar = ensureBootBar();
+  bar.className = 'boot-bar bad';
+  bar.innerHTML = '连不上任务服务：' + esc(err.message)
+    + ' <button type="button" id="bootRetry">重试</button>';
+  document.getElementById('bootRetry').onclick = () => boot();
+}
+
+function showStaleBar(info){
+  const bar = ensureBootBar();
+  bar.className = 'boot-bar warn';
+  bar.innerHTML = '后端还是旧版本（v' + esc(info.version || '?') + '），'
+    + '改过的代码没有生效。<b>重启服务</b>后这里会自己消失。';
+}
+
+async function boot(){
+  clearBootBar();
+  try {
+    await refresh();
+  } catch (e) {
+    showBootError(e);
+    return;
+  }
+  if (store.build?.stale) showStaleBar(store.build);
+}
+
+// 页面在后台时不轮询：看板全量拉一次不便宜（2000 条任务约 0.93MB），
+// 而隐藏的标签页没人看。切回来立刻补一次，不会出现数据是旧的。
+const POLL_MS = 3000;
+let pollTimer = null;
+
+function startPolling(){
+  if (pollTimer) return;
+  pollTimer = setInterval(() => {
+    if (document.hidden) return;
+    refresh().then(() => {
+      if (store.build?.stale) showStaleBar(store.build);
+    }).catch(() => {});
+  }, POLL_MS);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  refresh().then(() => {
+    if (store.build?.stale) showStaleBar(store.build);
+  }).catch(() => {});
 });
-setInterval(() => { refresh().catch(() => {}); }, 3000);
+
+boot().finally(startPolling);
 </script>
 </body>
 </html>

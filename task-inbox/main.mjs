@@ -150,6 +150,9 @@ export async function activate(ctx) {
     } else if (mg?.reason && !/没有 tasks\.json/.test(mg.reason)) {
       logger.info('[task-inbox] 迁移跳过：' + mg.reason);
     }
+    if (r.revived) {
+      logger.info('[task-inbox] ' + r.revived + ' 条任务的判断被上次退出打断，已标成失败，可以重新判断');
+    }
   } catch (e) {
     logger.warn('[task-inbox] 初始化数据库: ' + e.message);
   }

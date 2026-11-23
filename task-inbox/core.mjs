@@ -139,6 +139,7 @@ export function createCore(dataDir) {
       classify_reason: r.classify_reason,
       classify_model: r.classify_model,
       claimed_by: r.claimed_by,
+      needs_project: Number(r.needs_project || 0) === 1,
       created_at: r.created_at,
       updated_at: r.updated_at,
       doing_at: r.doing_at,
@@ -180,7 +181,31 @@ export function createCore(dataDir) {
     }
 
     ensureDefaultProject();
-    return { dbFile, migration };
+    const revived = reviveStuckPending();
+    return { dbFile, migration, revived };
+  }
+
+  // 分类进行到一半进程被杀（重启/崩溃/断电），任务会永远停在「判断中…」，
+  // 而前端只在 failed 时显示「未判断」，pending 就一直转圈，没有任何入口能重试。
+  // 启动时把超过 5 分钟还挂着的 pending 收成 failed，让失败态暴露出来。
+  const STUCK_PENDING_MS = 5 * 60 * 1000;
+  function reviveStuckPending() {
+    const d = conn();
+    const cutoff = new Date(Date.now() - STUCK_PENDING_MS).toISOString();
+    const rows = d.all(
+      "SELECT id FROM tasks WHERE classify_state = 'pending' AND updated_at < ?",
+      [cutoff]
+    );
+    if (!rows.length) return 0;
+    d.tx(() => {
+      for (const r of rows) {
+        d.run(
+          "UPDATE tasks SET classify_state = 'failed', classify_reason = ? WHERE id = ? AND classify_state = 'pending'",
+          ['上次判断被中断（进程退出），可以重新判断', r.id]
+        );
+      }
+    });
+    return rows.length;
   }
 
   // ---------- 项目 ----------
@@ -349,6 +374,8 @@ export function createCore(dataDir) {
       classify_reason: '',
       classify_model: '',
       claimed_by: null,
+      // 1 = 模型判不出项目、也没手选过，界面靠它显示「选项目」徽章
+      needs_project: !!input.needs_project,
       created_at: now,
       updated_at: now,
       doing_at: null,
@@ -366,14 +393,15 @@ export function createCore(dataDir) {
     d.run(
       `INSERT INTO tasks
          (id, title, kind, payload, project, project_id, category, status, priority, note, source,
-          brief, brief_at, classify_state, classify_reason, classify_model, claimed_by,
+          brief, brief_at, classify_state, classify_reason, classify_model, claimed_by, needs_project,
           created_at, updated_at, doing_at, done_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         t.id, t.title, t.kind, JSON.stringify(t.payload), t.project, t.project_id,
         t.category, t.status, t.priority, t.note, t.source,
         t.brief, t.brief_at,
         t.classify_state, t.classify_reason, t.classify_model, t.claimed_by,
+        t.needs_project ? 1 : 0,
         t.created_at, t.updated_at, t.doing_at, t.done_at
       ]
     );
@@ -427,6 +455,12 @@ export function createCore(dataDir) {
       if (k === 'project_id') nextProjectId = fields[k];
     }
 
+    // 布尔列单独处理：库里存 0/1，外面看到的是 true/false
+    if (fields.needs_project !== undefined) {
+      sets.push('needs_project = ?');
+      args.push(fields.needs_project ? 1 : 0);
+    }
+
     if (fields.payload && typeof fields.payload === 'object') {
       const merged = { ...t.payload, ...fields.payload };
       sets.push('payload = ?');
@@ -464,12 +498,46 @@ export function createCore(dataDir) {
 
   function move(id, status) { return patch(id, { status }); }
 
+  // 从 payload 里那堆「可能是字符串、可能是对象」的条目里取出文件名
+  function attachmentNames(list, dir) {
+    const out = [];
+    for (const item of Array.isArray(list) ? list : []) {
+      const raw = typeof item === 'string' ? item : (item?.path || item?.url || item?.name || '');
+      if (!raw) continue;
+      const base = path.basename(String(raw));
+      // 只认这个目录里的文件，防止 payload 里塞了别的路径把人文件删了
+      if (!base || base === '.' || base === '..') continue;
+      if (fs.existsSync(path.join(dir, base))) out.push(base);
+    }
+    return out;
+  }
+
   function remove(id) {
     const d = conn();
     const t = requireTask(id);
+
+    // 先把要清的文件列出来，删库之后 payload 就没了
+    const imgs = attachmentNames(t.payload?.images, imagesDir);
+    const fls = attachmentNames(t.payload?.files, filesDir);
+
     // messages 靠 ON DELETE CASCADE 一并清掉
     d.run('DELETE FROM tasks WHERE id = ?', [id]);
-    return t;
+
+    // 库删成功才动文件。反过来的话，删文件成功、删库失败，就留下一条指向空文件的任务。
+    // 文件删失败只记日志：库里已经没有引用了，留着孤儿文件比回滚更安全。
+    const removed = [];
+    for (const [dir, names] of [[imagesDir, imgs], [filesDir, fls]]) {
+      for (const n of names) {
+        try {
+          fs.unlinkSync(path.join(dir, n));
+          removed.push(n);
+        } catch (e) {
+          console.warn('[task-inbox] 附件没删掉 ' + n + '：' + e.message);
+        }
+      }
+    }
+
+    return { ...t, removedFiles: removed };
   }
 
   // ---------- 聊天消息 ----------
@@ -665,7 +733,12 @@ export function createCore(dataDir) {
   }
 
   function close() {
-    if (db) { try { db.close(); } catch { /* 已关闭 */ } db = null; }
+    if (!db) return;
+    // 正常关停时把 WAL 收回去：不然目录里会留一个几 MB 的 -wal，
+    // 跟几十 KB 的主库放在一起看着不成比例（虽然不影响正确性）。
+    try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch { /* 只读库等情况，忽略 */ }
+    try { db.close(); } catch { /* 已关闭 */ }
+    db = null;
   }
 
   return {

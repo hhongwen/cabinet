@@ -30,6 +30,56 @@ export const DEFAULT_DATA_DIR = path.join(os.homedir(), '.config', 'alma', 'task
 export const DEFAULT_PORT = 46001;
 export const FALLBACK_PORTS = [46002, 46003, 46004, 46005];
 
+// ---------- 运行时身份 ----------
+//
+// 为什么要这个：改完代码忘了重启，是最容易踩的坑。表现是「代码明明改了却没生效」，
+// 而且没有任何提示 —— 排查方向会被带到完全错的地方（实测踩过一次：
+// 中文分片修复写好了，线上跑的还是旧进程，是测数据损坏才发现的）。
+//
+// 做法：进程启动时记一份「磁盘上这几个文件长什么样」，请求时再算一遍。
+// 两份不一样 = 磁盘代码比正在跑的进程新 = 需要重启。
+// 只 stat 不读内容，4 个文件的成本可以忽略。
+
+const WATCH_FILES = ['core.mjs', 'storage.mjs', 'server.mjs', 'board.html', 'classify.mjs', 'chat.mjs', 'brief.mjs', 'backend.mjs'];
+
+function codeFingerprint() {
+  const parts = [];
+  for (const rel of WATCH_FILES) {
+    try {
+      const st = fs.statSync(path.join(HERE, rel));
+      // 只要 100ms 精度就够：同一秒内改两次本来就分不出来，而这里只需要判断「变没变」
+      parts.push(rel + ':' + st.size + ':' + Math.floor(st.mtimeMs / 100));
+    } catch {
+      parts.push(rel + ':-');
+    }
+  }
+  return parts.join('|');
+}
+
+function readVersion() {
+  try {
+    const m = JSON.parse(fs.readFileSync(path.join(HERE, 'manifest.json'), 'utf8'));
+    return String(m.version || '0');
+  } catch { return '0'; }
+}
+
+const BOOTED_AT = new Date().toISOString();
+const BOOT_FINGERPRINT = codeFingerprint();
+const VERSION = readVersion();
+
+/** /api/ping 和 /api/state 都会带上它，前端据此提示「需要重启」 */
+export function buildInfo() {
+  const now = codeFingerprint();
+  return {
+    version: VERSION,
+    pid: process.pid,
+    started_at: BOOTED_AT,
+    // true = 磁盘上的代码比这个进程新，得重启才生效
+    stale: now !== BOOT_FINGERPRINT,
+    node: process.version
+  };
+}
+
 function json(res, code, obj) {
   res.writeHead(code, {
     'content-type': 'application/json; charset=utf-8',
@@ -38,22 +88,67 @@ function json(res, code, obj) {
   res.end(JSON.stringify(obj));
 }
 
+// 请求体上限。要跟 core.mjs 里 saveFile 的 25MB 对得上：
+// 附件是 base64 传的，膨胀 4/3，25MB 二进制 = 33.3MB 文本，再留点 JSON 包装的余量 → 40MB。
+const MAX_BODY_BYTES = 40 * 1024 * 1024;
+
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
+    const tooLarge = () => new HttpError(413,
+      '内容太大：请求体超过 ' + (MAX_BODY_BYTES / 1024 / 1024) + 'MB。'
+      + '考虑到 base64 会膨胀约 1/3，单个附件上限约 25MB、图片约 12MB。');
+
+    // 有 content-length 就先看，超了立刻拒 —— 不用白读几十 MB
+    const declared = Number(req.headers['content-length'] || 0);
+    if (declared > MAX_BODY_BYTES) {
+      req.resume();               // 把 body 读完丢掉，让响应能干净地送出去
+      return reject(tooLarge());
+    }
+
     // 必须先把 Buffer 收齐再解码：直接 `str += chunk` 会对每个分片单独调
     // toString()，一个中文字符被切在两个 TCP 分片之间就会变成 U+FFFD，
     // 实测能造出「Ĭ��」这种烂项目名，还写进了库。
     const chunks = [];
     let size = 0;
+    let overflow = false;
+
     req.on('data', (c) => {
-      chunks.push(c);
       size += c.length;
-      if (size > 16 * 1024 * 1024) { reject(new Error('body too large')); req.destroy(); }
+
+      if (overflow) return;       // 已超限：剩下的继续读、直接丢，见下
+
+      if (size > MAX_BODY_BYTES) {
+        // 三件事都不能做错，否则 413 送不到前端手上（实测踩过两次）：
+        //   destroy() → 连接被掐，前端只看到「fetch failed」，以为是网络问题
+        //   pause()   → body 卡在 TCP 缓冲里，响应发完 Node 会 RST，客户端 ECONNRESET
+        //   立刻 reject → 响应在 body 还没读完时就写，同样被 RST
+        // 正确做法是继续把剩余数据读完丢弃，等 'end' 之后再 reject。
+        overflow = true;
+        chunks.length = 0;
+        // 极端情况（比如有人传 1GB）不能一直读：超过两倍上限就直接掐，
+        // 这时候保护进程比给一句好错误重要。
+        if (size > MAX_BODY_BYTES * 2) {
+          req.destroy();
+          reject(tooLarge());
+        }
+        return;
+      }
+
+      chunks.push(c);
     });
+
     req.on('end', () => {
+      if (overflow) return reject(tooLarge());
       if (!chunks.length) return resolve({});
       const raw = Buffer.concat(chunks).toString('utf8');
-      try { resolve(JSON.parse(raw)); } catch { reject(new Error('invalid JSON')); }
+      try { resolve(JSON.parse(raw)); } catch { reject(new HttpError(400, 'invalid JSON')); }
     });
     req.on('error', reject);
   });
@@ -341,13 +436,14 @@ export function createHandler(core, opts = {}) {
       if (p === '/api/ping') {
         let n = 0;
         try { n = core.count(); } catch { /* 忽略 */ }
-        return json(res, 200, { ok: true, tasks: n });
+        return json(res, 200, { ok: true, tasks: n, ...buildInfo() });
       }
       if (p === '/api/state' && req.method === 'GET') {
         const st = core.state();
         const cfg = core.loadSettings();
         st.settings = { backend: cfg.backend, model: cfg.model, classify: cfg.classify };
         if (queue && queue.classifier?.backend) st.backend = { name: queue.classifier.backend.name };
+        st.build = buildInfo();   // 前端靠这个判断「跑的是不是最新代码」
         return json(res, 200, st);
       }
       if (p === '/api/backend' && req.method === 'GET') {
@@ -568,13 +664,19 @@ export function createHandler(core, opts = {}) {
           const b = await readBody(req);
           return json(res, 200, core.patch(id, b));
         }
-        if (req.method === 'DELETE') return json(res, 200, core.remove(id));
+        if (req.method === 'DELETE') {
+          const t = core.remove(id);
+          // 顺手清掉的附件个数返回给前端，好显示「已删除，同时清掉 2 个附件」
+          return json(res, 200, { ...t, attachments_removed: (t.removedFiles || []).length });
+        }
       }
 
       res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
       res.end('not found');
     } catch (e) {
-      json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+      // 自己抛的 HttpError 带状态码（413/400），其余当 400 处理
+      const status = e instanceof HttpError ? e.status : 400;
+      json(res, status, { error: e instanceof Error ? e.message : String(e) });
     }
   };
 }
@@ -624,6 +726,9 @@ if (isMain) {
   } else if (initResult.migration?.reason && !/没有 tasks\.json/.test(initResult.migration.reason)) {
     console.log('[task-inbox] 迁移跳过：' + initResult.migration.reason);
   }
+  if (initResult.revived) {
+    console.log('[task-inbox] ' + initResult.revived + ' 条任务的判断被上次退出打断，已标成失败，可以重新判断');
+  }
 
   const started = await start(core, { port: argPort });
   if (!started) {
@@ -632,12 +737,17 @@ if (isMain) {
   }
 
   const base = 'http://127.0.0.1:' + started.port;
-  console.log('[task-inbox] 已启动');
+  console.log('[task-inbox] 已启动  v' + VERSION + '  pid ' + process.pid);
   console.log('  看板：' + base + '/');
   console.log('  随手记：' + base + '/quick');
   console.log('  数据：' + core.dbFile);
 
-  const stop = () => { try { started.server.close(); } catch {} process.exit(0); };
+  const stop = () => {
+    try { started.server.close(); } catch {}
+    // 关库时把 WAL 收回去，不留一个几 MB 的 -wal 文件在目录里
+    try { core.close(); } catch {}
+    process.exit(0);
+  };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
 }

@@ -153,8 +153,8 @@ export function openSqlite(file) {
 
 // ---------- schema ----------
 
-// 版本号存在 meta 里，将来加字段时按版本走迁移
-export const SCHEMA_VERSION = 1;
+// 版本号存在 meta 里。加字段时：把 SCHEMA_VERSION +1，在 MIGRATIONS 里补一条。
+export const SCHEMA_VERSION = 2;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -189,6 +189,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   classify_reason TEXT NOT NULL DEFAULT '',
   classify_model  TEXT NOT NULL DEFAULT '',
   claimed_by      TEXT,
+  needs_project   INTEGER NOT NULL DEFAULT 0,   -- 1 = 判不出项目，界面上提示手选
   created_at      TEXT NOT NULL,
   updated_at      TEXT NOT NULL,
   doing_at        TEXT,
@@ -216,17 +217,47 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 `;
 
+// 老库升级：key 是「从这个版本升到下一个」要做的事。
+// 只在 tasks 表已经存在（也就是老库）的时候才需要跑，新库由 SCHEMA 一次建全。
+const MIGRATIONS = {
+  // v1 → v2：needs_project 从「前端读但库里没有」变成真的有这一列
+  1: (db) => {
+    const cols = db.all('PRAGMA table_info(tasks)').map((c) => c.name);
+    if (!cols.includes('needs_project')) {
+      db.exec('ALTER TABLE tasks ADD COLUMN needs_project INTEGER NOT NULL DEFAULT 0');
+    }
+  }
+};
+
 export function applySchema(db) {
   db.exec('PRAGMA journal_mode = WAL');       // 多进程读写不打架
   db.exec('PRAGMA busy_timeout = 10000');     // 撞锁等 10 秒而不是立刻报错
   db.exec('PRAGMA synchronous = NORMAL');     // WAL 下够安全，快很多
   db.exec('PRAGMA foreign_keys = ON');        // 删任务级联删消息
-  db.exec(SCHEMA);
 
-  const cur = db.get('SELECT value FROM meta WHERE key = ?', ['schema_version']);
-  if (!cur) {
-    db.run('INSERT INTO meta(key, value) VALUES(?, ?)', ['schema_version', String(SCHEMA_VERSION)]);
+  // 先看这是不是老库：meta 有版本号、tasks 表也已经有数据
+  const metaExists = db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='meta'");
+  const recorded = metaExists ? db.get('SELECT value FROM meta WHERE key = ?', ['schema_version']) : null;
+  const fromVersion = recorded ? Number(recorded.value) : null;
+
+  db.exec(SCHEMA);   // 全部 CREATE TABLE IF NOT EXISTS，对老库是空操作
+
+  if (fromVersion === null) {
+    // 新库：SCHEMA 已经建全，直接记版本号
+    db.run('INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)', ['schema_version', String(SCHEMA_VERSION)]);
+    return db;
   }
+
+  if (fromVersion < SCHEMA_VERSION) {
+    db.tx(() => {
+      for (let v = fromVersion; v < SCHEMA_VERSION; v++) {
+        const step = MIGRATIONS[v];
+        if (step) step(db);
+      }
+      db.run('INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)', ['schema_version', String(SCHEMA_VERSION)]);
+    });
+  }
+
   return db;
 }
 

@@ -205,7 +205,55 @@ try {
 } catch (e) { collide = true; console.log('  批量写入异常: ' + e.message); }
 ok('500 任务 + 500 消息 id 全唯一', !collide && ids.size === 1000);
 
-console.log('\n=== 10. 重开后数据还在 ===');
+console.log('\n=== 10. needs_project 往返（P0-2） ===');
+const np = core.add({ title: '判不出项目', project: '默认' });
+eq('新建默认 false', core.getTask(np.id).needs_project, false);
+eq('patch 成 true', core.patch(np.id, { needs_project: true }).needs_project, true);
+eq('重新读仍是 true', core.getTask(np.id).needs_project, true);
+eq('state 里带这个字段', core.state().tasks.find((x) => x.id === np.id).needs_project, true);
+eq('patch 回 false', core.patch(np.id, { needs_project: false }).needs_project, false);
+
+console.log('\n=== 11. 删任务清附件（P0-3） ===');
+const img = core.saveImage('data:image/png;base64,' + Buffer.from('png-bytes').toString('base64'));
+const fil = core.saveFile('data:application/pdf;base64,' + Buffer.from('pdf-bytes').toString('base64'), 'a.pdf');
+const withFiles = core.add({ title: '带附件', images: [img.path], files: [fil.path] });
+ok('附件已落盘', fs.existsSync(img.path) && fs.existsSync(fil.path));
+const removedTask = core.remove(withFiles.id);
+eq('清掉 2 个附件', removedTask.removedFiles.length, 2);
+ok('附件真的没了', !fs.existsSync(img.path) && !fs.existsSync(fil.path));
+eq('任务确实删了', core.getTask(withFiles.id), null);
+
+// 安全性：payload 里塞了目录外的路径，不能跟着删
+const outside = path.join(tmp, 'outside.txt');
+fs.writeFileSync(outside, 'x');
+const dangerous = core.add({ title: '危险路径', files: ['../../../../etc/passwd', outside] });
+eq('目录外的文件不被删', core.remove(dangerous.id).removedFiles.length, 0);
+ok('外部文件还在', fs.existsSync(outside));
+
+console.log('\n=== 12. 卡死的 pending 会被收成 failed（P1-2） ===');
+const stuck = core.add({ title: '卡住的', classify_state: 'pending' });
+core.conn().run('UPDATE tasks SET updated_at = ? WHERE id = ?', ['2020-01-01T00:00:00.000Z', stuck.id]);
+const fresh = core.add({ title: '刚提交', classify_state: 'pending' });
+const init2 = core.init();
+eq('只收了超时那条', init2.revived, 1);
+eq('老任务变 failed', core.getTask(stuck.id).classify_state, 'failed');
+eq('新任务还是 pending', core.getTask(fresh.id).classify_state, 'pending');
+ok('reason 写清了原因', /中断/.test(core.getTask(stuck.id).classify_reason));
+
+console.log('\n=== 13. v1 → v2 schema 迁移（P1-5） ===');
+// 把刚才的库降级成「没有 needs_project 列的 v1」，再让新代码接管
+core.conn().exec('ALTER TABLE tasks DROP COLUMN needs_project');
+core.conn().run("UPDATE meta SET value='1' WHERE key='schema_version'");
+ok('降级成功（列已删）', !core.conn().all('PRAGMA table_info(tasks)').map((c) => c.name).includes('needs_project'));
+const v2core = createCore(tmp);
+v2core.init();
+ok('迁移后补回了列', v2core.conn().all('PRAGMA table_info(tasks)').map((c) => c.name).includes('needs_project'));
+eq('版本升到 2', v2core.conn().get("SELECT value FROM meta WHERE key='schema_version'").value, '2');
+ok('老数据没丢', v2core.count() > 0);
+ok('老任务 needs_project 默认 false', v2core.state().tasks.every((t) => t.needs_project === false));
+v2core.close();
+
+console.log('\n=== 14. 重开后数据还在 ===');
 const totalBefore = core.count();
 core.close();
 const core2 = createCore(tmp);

@@ -29,7 +29,7 @@ if !NODEMAJOR! EQU 22 (
 )
 
 if not exist "%DST%" mkdir "%DST%"
-for %%f in (manifest.json main.mjs core.mjs storage.mjs server.mjs classify.mjs backend.mjs chat.mjs brief.mjs browse.mjs cli.mjs pickdir.ps1 board.html) do (
+for %%f in (manifest.json main.mjs core.mjs storage.mjs server.mjs classify.mjs backend.mjs chat.mjs brief.mjs browse.mjs cli.mjs pickdir.ps1 stop-service.ps1 board.html) do (
   if exist "%%f" (
     copy /Y "%%f" "%DST%" >nul
     echo [OK] %%f
@@ -37,6 +37,13 @@ for %%f in (manifest.json main.mjs core.mjs storage.mjs server.mjs classify.mjs 
     echo [!] missing %%f
   )
 )
+
+rem --- 先把还在跑的旧服务停掉 ---
+rem 不这么做的话，改了代码但 46001 上还是旧进程，会以为改动没生效。
+rem 只动「命令行里带 task-inbox」的 node，不碰别的 node 进程。
+echo.
+echo Stopping any running task-inbox service...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0stop-service.ps1"
 
 echo.
 echo Notifying Alma to reload plugins...
