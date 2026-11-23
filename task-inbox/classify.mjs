@@ -52,8 +52,22 @@ ${PRIORITY_RUBRIC}
 - 提到目录名、文件路径、接口名、客户名 → 找对应项目
 - 完全判断不出来 → 项目填 null，不要瞎猜
 
+「够不够直接开工」的判断（dev_ready）：
+你要额外回答一个问题 —— 这条记录现在能不能直接拿去做开发？
+判断依据是：有没有说清要做哪个模块/页面、做到什么程度、怎么算做完。
+
+- 只有一句抱怨、一个模糊方向、缺具体对象（"那个页面有点慢"、"优化一下那个功能"）
+  → dev_ready 填 false，并在 dev_gaps 里逐条列出还缺什么。每条一句话，最多 3 条。
+- 说清了对象和预期结果（"把快速筛选挪到标题行右侧，宽度不变"）
+  → dev_ready 填 true，dev_gaps 填 []。
+
+**宁可判 false**：误判成 false 只是让用户多点一次确认，
+误判成 true 会让一条含糊的需求直接进开发，代价大得多。
+注意 dev_ready 判的是「信息够不够」，不是「优先级高不高」——
+一条 P3 的小改动只要说清楚了，也是 true。
+
 输出 JSON，字段：
-{"kind":"...","priority":"p0-p4","title":"...","category":"...","project":"项目名或null","reason":"一句话说明为什么是这个优先级"}
+{"kind":"...","priority":"p0-p4","title":"...","category":"...","project":"项目名或null","reason":"一句话说明为什么是这个优先级","dev_ready":true,"dev_gaps":["还缺什么"]}
 
 不要输出任何解释、不要说"好的"、不要 markdown 代码块。`;
 
@@ -63,6 +77,17 @@ function jsonBlock(text) {
   const m = s.match(/\{[\s\S]*\}/);
   if (!m) return null;
   try { return JSON.parse(m[0]); } catch { return null; }
+}
+
+// 「还缺什么」：数组、非空串、最多 3 条。模型偶尔会返回一个字符串或嵌套对象，
+// 与其把它塞进界面，不如整条丢掉 —— 待澄清页签里显示一串 [object Object] 更糟。
+function parseGaps(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((g) => typeof g === 'string')
+    .map((g) => g.trim())
+    .filter(Boolean)
+    .slice(0, 3);
 }
 
 // 附件里的文本类内容，给模型当上下文
@@ -194,6 +219,10 @@ export function createClassifier(opts = {}) {
       category: typeof parsed.category === 'string' ? parsed.category.trim().slice(0, 20) : '',
       project: typeof parsed.project === 'string' ? parsed.project.trim() : null,
       reason: typeof parsed.reason === 'string' ? parsed.reason.trim().slice(0, 200) : '',
+      // 只接受真正的布尔。模型爱写 "true" / 1 / "是"，这些一律当「没给」——
+      // 上层拿到 undefined 就不覆盖库里的值，也就不会把已经在看板上的任务误踢进待澄清。
+      dev_ready: typeof parsed.dev_ready === 'boolean' ? parsed.dev_ready : undefined,
+      dev_gaps: parseGaps(parsed.dev_gaps),
       model: r.model || '',
       backend: backend.name
     };

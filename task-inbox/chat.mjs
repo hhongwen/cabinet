@@ -7,6 +7,9 @@
 //   reply  给用户看的话
 //   patch  要改的字段（可为空）
 
+import fs from 'node:fs';
+import path from 'node:path';
+
 import { createBackend } from './backend.mjs';
 
 const SYSTEM = `你在帮用户维护一条任务。用户会在下面这条任务的对话里说话，
@@ -46,6 +49,40 @@ function jsonBlock(text) {
   try { return JSON.parse(m[0]); } catch { return null; }
 }
 
+// 文件能不能给模型看，取决于通道：图片走 images，其余只能转成文字描述。
+// 这段跟 classify.mjs 里的 describeFiles 是同一套思路（那里要判类型和优先级，
+// 这里要判任务字段），但两边都不该出现第二份「文本预览」的实现。
+const TEXTUAL_EXT = ['.txt', '.md', '.json', '.csv', '.log', '.yml', '.yaml',
+  '.js', '.mjs', '.ts', '.py', '.java', '.sql', '.html', '.css', '.xml'];
+
+function humanSize(n) {
+  if (n < 1024) return n + 'B';
+  if (n < 1024 * 1024) return Math.round(n / 1024) + 'KB';
+  return (n / 1024 / 1024).toFixed(1) + 'MB';
+}
+
+function readTextPreview(file, maxChars = 1200) {
+  try {
+    const ext = path.extname(file).toLowerCase();
+    if (!TEXTUAL_EXT.includes(ext)) return null;
+    if (fs.statSync(file).size > 2 * 1024 * 1024) return null;
+    return fs.readFileSync(file, 'utf8').slice(0, maxChars);
+  } catch { return null; }
+}
+
+function describeFiles(files = [], resolve) {
+  return files.map((f) => {
+    const raw = f?.path || f;
+    const local = resolve ? (resolve(raw) || raw) : raw;
+    const name = path.basename(String(raw));
+    let size = 0;
+    try { size = fs.statSync(local).size; } catch { /* 文件不在了，只留名字 */ }
+    const line = '- ' + name + '（' + (path.extname(name).toLowerCase() || '无扩展名') + '，' + humanSize(size) + '）';
+    const preview = readTextPreview(local);
+    return preview ? line + '\n  内容片段：' + preview.replace(/\s+/g, ' ').slice(0, 800) : line;
+  }).join('\n');
+}
+
 const FIELD_LABEL = {
   title: '标题', priority: '优先级', category: '类别',
   project: '项目', status: '状态', note: '备注'
@@ -53,8 +90,22 @@ const FIELD_LABEL = {
 
 export function createChat(opts = {}) {
   const backend = opts.backend || createBackend(opts);
+  const imagesDir = opts.imagesDir || '';
+  const filesDir = opts.filesDir || '';
 
-  async function reply({ task, thread, userText, projects }) {
+  // 附件里存的是「cwd 无关」的相对名字或绝对路径，两种都要能落到真实文件
+  function resolveLocal(nameOrPath, dir) {
+    const s = String(nameOrPath || '');
+    if (!s) return null;
+    if (s.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(s)) return s;
+    if (dir) {
+      const guess = path.join(dir, path.basename(s));
+      if (fs.existsSync(guess)) return guess;
+    }
+    return fs.existsSync(s) ? path.resolve(s) : null;
+  }
+
+  async function reply({ task, thread, userText, projects, images = [], files = [] }) {
     const lines = [];
 
     // 任务现状
@@ -84,9 +135,23 @@ export function createChat(opts = {}) {
       }).join('\n'));
     }
 
-    lines.push('用户刚说：' + userText);
+    // 纯文件/纯图片也要有「用户刚说」这一段，否则 prompt 结构会缺一条
+    lines.push('用户刚说：' + (userText || '（没有文字，只有附件）'));
 
-    const r = await backend.chat({ system: SYSTEM, text: lines.join('\n\n') });
+    if (files.length) {
+      lines.push('用户这次附带的文件：\n' + describeFiles(files, (n) => resolveLocal(n, filesDir)));
+    }
+
+    const imgPaths = [];
+    for (const img of images.filter(Boolean).slice(0, 3)) {
+      const local = resolveLocal(img, imagesDir);
+      if (local) imgPaths.push(local);
+      else lines.push('（一张图找不到：' + path.basename(String(img)) + '）');
+    }
+
+    // 图片直接交给 backend：magpie / alma 都能看，CLI 通道会自己抛错。
+    // 这里不 try —— 吞掉那条「通道不支持图片」的话术，用户就不知道该换通道了。
+    const r = await backend.chat({ system: SYSTEM, text: lines.join('\n\n'), images: imgPaths });
     const parsed = jsonBlock(r.text);
 
     if (!parsed) {

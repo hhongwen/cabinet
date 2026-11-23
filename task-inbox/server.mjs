@@ -232,6 +232,17 @@ export function createClassifyQueue(core, opts = {}) {
         classify_reason: r.reason || '',
         classify_model: (r.backend ? r.backend + ':' : '') + (r.model || '')
       };
+
+      // 初判只负责「先把它挡在待澄清里」：模型明确说不够开发就落 0。
+      // undefined（模型没给这个字段）时不要覆盖 —— 老任务默认是 1，
+      // 覆盖成 0 会让一条已经在看板上的任务凭空消失。
+      //
+      // dev_gaps 必须和 dev_ready 一起落：只落 0 不落原因，待澄清页签里
+      // 就只能显示「缺东西」而说不出缺什么，用户还得自己再问一遍模型。
+      if (r.dev_ready !== undefined) {
+        patch.dev_ready = r.dev_ready ? 1 : 0;
+        patch.dev_gaps = r.dev_ready ? [] : (r.dev_gaps || []);
+      }
       if (projectId && projectId !== t.project_id) {
         patch.project_id = projectId;
         patch.project = projectName;
@@ -306,7 +317,9 @@ function pickDirWindows(initial) {
     const args = ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', script];
     if (initial) args.push('-Initial', initial);
 
-    const child = spawn('powershell.exe', args, { windowsHide: false, stdio: ['ignore', 'pipe', 'pipe'] });
+    // windowsHide: false 会先弹一个控制台窗口再弹对话框，用户看到的是黑框闪一下。
+    // pickdir.ps1 自己负责显示文件对话框，不需要宿主窗口。
+    const child = spawn('powershell.exe', args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '', err = '';
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
@@ -429,6 +442,20 @@ export function createHandler(core, opts = {}) {
   const webDir = opts.webDir || HERE;
   const queue = opts.queue || null;
 
+  // 归档的两个触发点：进程启动 + 每次收下一条新记录。
+  // 刻意不起定时器 —— 单机自用，多一个看不见的循环就多一条故障线。
+  // 阈值来自 settings，懒得读库就退回默认 30 天。
+  const runArchive = () => {
+    try {
+      return core.archiveStale(core.loadSettings().archive_after_days);
+    } catch (e) {
+      // 归档失败不该让「收一条记录」这件事失败
+      console.warn('[task-inbox] 归档扫描失败：' + e.message);
+      return 0;
+    }
+  };
+  runArchive();
+
   const runClassify = async (id) => {
     if (!queue) throw new Error('分类器未启用');
     return await queue.runOne(id);
@@ -457,7 +484,11 @@ export function createHandler(core, opts = {}) {
         return json(res, 200, { ok: true, tasks: n, ...buildInfo() });
       }
       if (p === '/api/state' && req.method === 'GET') {
-        const rev = core.revision();
+        // 视图参数先归一成两个值，revision 和 core.state 用的是同一份 ——
+        // 否则「指纹按一种理解算、数据按另一种理解查」，短路会命中错的缓存。
+        const incArch = url.searchParams.get('include_archived');
+        const devReady = url.searchParams.get('dev_ready');
+        const rev = core.revision((incArch || '0') + '|' + (devReady || '-'));
         const since = url.searchParams.get('since');
         const build = buildInfo();
 
@@ -469,7 +500,12 @@ export function createHandler(core, opts = {}) {
           return json(res, 200, { unchanged: true, revision: rev, build });
         }
 
-        const st = core.state();
+        // include_archived / dev_ready 是视图参数，原样透传给 core 的过滤层：
+        // 「待澄清」页签查 dev_ready=0，归档视图查 include_archived=1
+        const st = core.state({
+          include_archived: incArch ?? undefined,
+          dev_ready: devReady ?? undefined
+        });
         const cfg = core.loadSettings();
         st.settings = { backend: cfg.backend, model: cfg.model, classify: cfg.classify };
         if (queue && queue.classifier?.backend) st.backend = { name: queue.classifier.backend.name };
@@ -506,9 +542,11 @@ export function createHandler(core, opts = {}) {
         const auto = b.classify !== false;
         const t = core.add({ ...b, classify_state: auto ? 'pending' : 'off' });
         if (auto && queue) queue.enqueue(t.id);   // 后台跑，不等
+        runArchive();
         return json(res, 200, t);
       }
       if (p === '/api/tasks' && req.method === 'GET') {
+        // 查询参数原样透传，include_archived / dev_ready 由 core.buildWhere 解释
         return json(res, 200, core.list(Object.fromEntries(url.searchParams)));
       }
       if (p === '/api/upload' && req.method === 'POST') {
@@ -553,6 +591,13 @@ export function createHandler(core, opts = {}) {
       if (p === '/api/projects' && req.method === 'POST') {
         const b = await readBody(req);
         return json(res, 200, core.addProject(b.name, { aliases: b.aliases, dirs: b.dirs }));
+      }
+      // 拖拽排序：整串一次性提交。逐条 PATCH 会让 6 个项目跳 6 次 revision，
+      // 前端会跟着重绘 6 遍。
+      if (p === '/api/projects/reorder' && req.method === 'POST') {
+        const b = await readBody(req);
+        core.reorderProjects(b.ids);
+        return json(res, 200, { projects: core.listProjects() });
       }
       {
         const pm = p.match(/^\/api\/projects\/([^/]+)$/);
@@ -628,13 +673,23 @@ export function createHandler(core, opts = {}) {
         if (!t) return json(res, 404, { error: '任务不存在' });
 
         const userText = String(b.text || '').trim();
-        if (!userText) return json(res, 400, { error: '说点什么' });
+        // 附件形状跟 /api/tasks 一致（上传完的 {path,url,name} / {path,name,original,size}）
+        const images = Array.isArray(b.images) ? b.images.filter(Boolean) : [];
+        const files = Array.isArray(b.files) ? b.files.filter(Boolean) : [];
+        // 纯文件、纯图片没有文字也要能发。三者全空才算「什么都没说」。
+        if (!userText && !images.length && !files.length) {
+          return json(res, 400, { error: '说点什么，或者贴张图/加个文件' });
+        }
 
         // 先取旧对话当上下文（不含这条新消息，和改造前一致），再写库
         const thread = core.listMessages(t.id);
 
         // 先把用户这句存进去，再调模型
-        core.pushMessage(t.id, { role: 'user', text: userText });
+        core.pushMessage(t.id, {
+          role: 'user',
+          text: userText,
+          attachments: { images, files }
+        });
 
         const chat = createChat({
           ...opts,
@@ -650,9 +705,13 @@ export function createHandler(core, opts = {}) {
             task: t,
             thread,
             userText,
+            images,
+            files,
             projects: core.listProjects()
           });
         } catch (e) {
+          // CLI 通道不支持图片时 backend 直接抛错 —— 原样显示给用户，
+          // 不要在这里吞掉改写成「调用失败」，否则用户不知道该换通道。
           const msg = core.pushMessage(t.id, {
             role: 'assistant',
             text: '模型调用失败：' + String(e.message || e).slice(0, 200)
@@ -791,6 +850,12 @@ if (isMain) {
   }
   if (initResult.revived) {
     console.log('[task-inbox] ' + initResult.revived + ' 条任务的判断被上次退出打断，已标成失败，可以重新判断');
+  }
+  try {
+    const archived = core.archiveStale(core.loadSettings().archive_after_days);
+    if (archived) console.log('[task-inbox] 已归档 ' + archived + ' 条超期的已完成任务');
+  } catch (e) {
+    console.log('[task-inbox] 归档扫描失败：' + e.message);
   }
 
   const started = await start(core, { port: argPort });

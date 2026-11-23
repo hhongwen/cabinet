@@ -31,8 +31,14 @@ export const KIND_LABEL = {
 export const DEFAULT_SETTINGS = {
   backend: 'auto',                      // auto | magpie | alma | opencode | codex
   model: 'auto/deepseek-v4.1-flash',
-  classify: true                        // 关掉就只收不判
+  classify: true,                       // 关掉就只收不判
+  // done 超过这么多天就自动归档。一年调一次的参数，所以只放库里，不做输入框。
+  archive_after_days: 30
 };
+
+// 「默认」不是普通项目，是模型判不出项目时的收件筐。
+// 认名字不认 id：老库里它的 id 可能是 p_default，也可能是迁移时现生成的。
+export const DEFAULT_PROJECT_NAME = '默认';
 
 // 单张卡片的聊天上限。旧版是 200（当时是为了别让 JSON 无限膨胀），
 // 现在存库没有这个压力，放宽到 2000 仍然保留一个兜底删除。
@@ -107,6 +113,23 @@ export function createCore(dataDir) {
     try { return JSON.parse(text); } catch { return fallback; }
   }
 
+  // 「还缺什么」归一化：只留非空字符串，最多 3 条。
+  // 存进来的时候已经过 classify.parseGaps 收过一次，这里再收一遍是因为
+  // 库是唯一真相 —— 手改过、老版本写过的脏值不能直接喂给前端渲染。
+  function normalizeGaps(g) {
+    if (!Array.isArray(g)) return [];
+    return g.filter((x) => typeof x === 'string').map((x) => x.trim()).filter(Boolean).slice(0, 3);
+  }
+
+  // 对话附件归一化：形状跟 tasks.payload 的 images/files 一致，
+  // 前端两处能用同一套渲染。两个数组都空就返回 null —— 空对象没必要占一列。
+  function normalizeAttachments(a) {
+    if (!a || typeof a !== 'object') return null;
+    const images = Array.isArray(a.images) ? a.images.filter(Boolean) : [];
+    const files = Array.isArray(a.files) ? a.files.filter(Boolean) : [];
+    return (images.length || files.length) ? { images, files } : null;
+  }
+
   function rowToProject(r) {
     if (!r) return null;
     return {
@@ -114,6 +137,9 @@ export function createCore(dataDir) {
       name: r.name,
       aliases: parseJson(r.aliases, []),
       dirs: parseJson(r.dirs, []),
+      sort_order: Number(r.sort_order || 0),
+      // 前端不该把「默认」这个字符串写死两遍，语义从接口里给
+      isDefault: r.name === DEFAULT_PROJECT_NAME,
       created_at: r.created_at,
       updated_at: r.updated_at
     };
@@ -140,6 +166,11 @@ export function createCore(dataDir) {
       classify_model: r.classify_model,
       claimed_by: r.claimed_by,
       needs_project: Number(r.needs_project || 0) === 1,
+      // 0 = 待澄清。库里是 0/1，外面一律给布尔，跟 needs_project 一致
+      dev_ready: Number(r.dev_ready ?? 1) !== 0,
+      // 初判说「还缺这些」。存 JSON 数组，读出来就是数组，前端直接渲染成列表
+      dev_gaps: normalizeGaps(parseJson(r.dev_gaps, [])),
+      archived_at: r.archived_at ?? null,
       created_at: r.created_at,
       updated_at: r.updated_at,
       doing_at: r.doing_at,
@@ -156,6 +187,8 @@ export function createCore(dataDir) {
       role: r.role,
       text: r.text,
       patch: parseJson(r.patch, null),
+      // 形状跟 tasks.payload 的 images/files 一致，前端两处能用同一套渲染
+      attachments: parseJson(r.attachments, null),
       at: r.at
     };
   }
@@ -212,10 +245,11 @@ export function createCore(dataDir) {
 
   function listProjects() {
     const d = conn();
+    // 顺序 = 用户拖出来的 sort_order；同值（老库刚升上来）时退回创建时间，保证稳定
     const rows = d.all(
       `SELECT p.*, (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id) AS taskCount
          FROM projects p
-        ORDER BY p.created_at`
+        ORDER BY p.sort_order, p.created_at`
     );
     return rows.map((r) => ({ ...rowToProject(r), taskCount: Number(r.taskCount || 0) }));
   }
@@ -237,15 +271,24 @@ export function createCore(dataDir) {
       name: n,
       aliases: Array.isArray(opts.aliases) ? opts.aliases.map(String).filter(Boolean) : [],
       dirs: Array.isArray(opts.dirs) ? opts.dirs.map(normalizeDir).filter((x) => x.path) : [],
+      // 新项目排到最后，不能插到「默认」前面 —— 那个位置是收件筐的
+      sort_order: nextSortOrder(),
       created_at: nowIso(),
       updated_at: nowIso()
     };
     d.run(
-      `INSERT INTO projects (id, name, aliases, dirs, created_at, updated_at)
-       VALUES (?,?,?,?,?,?)`,
-      [proj.id, proj.name, JSON.stringify(proj.aliases), JSON.stringify(proj.dirs), proj.created_at, proj.updated_at]
+      `INSERT INTO projects (id, name, aliases, dirs, sort_order, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?)`,
+      [proj.id, proj.name, JSON.stringify(proj.aliases), JSON.stringify(proj.dirs),
+        proj.sort_order, proj.created_at, proj.updated_at]
     );
     return proj;
+  }
+
+  // 排在所有项目之后（「默认」是 0，所以 max+1 至少是 1）
+  function nextSortOrder() {
+    const r = conn().get('SELECT MAX(sort_order) AS m FROM projects');
+    return Number(r?.m || 0) + 1;
   }
 
   function updateProject(id, fields = {}) {
@@ -289,10 +332,18 @@ export function createCore(dataDir) {
     const cur = getProject(id);
     if (!cur) throw new Error('项目不存在: ' + id);
 
+    // 「默认」是流水线的最后一道落点（未分配收件筐），删了它整条链路就断了：
+    // 判不出项目的任务会当场重建一个同名新项目，id 换掉，历史引用全断。
+    if (cur.name === DEFAULT_PROJECT_NAME) {
+      throw new Error('「默认」是未分配收件筐，不能删除');
+    }
+
     const total = Number(d.get('SELECT COUNT(*) AS c FROM projects')?.c || 0);
     if (total <= 1) throw new Error('至少要保留一个项目');
 
-    const fallback = d.get('SELECT * FROM projects WHERE id <> ? ORDER BY created_at LIMIT 1', [id]);
+    // 删项目时它的任务回到收件筐，而不是塞进某个真实项目 —— 那些任务本来就还没分配
+    const fallback = d.get("SELECT * FROM projects WHERE name = ? AND id <> ?", [DEFAULT_PROJECT_NAME, id])
+      || d.get('SELECT * FROM projects WHERE id <> ? ORDER BY sort_order, created_at LIMIT 1', [id]);
     if (!fallback) throw new Error('至少要保留一个项目');
 
     d.tx(() => {
@@ -301,6 +352,42 @@ export function createCore(dataDir) {
     });
 
     return { removed: cur, movedTo: fallback.name };
+  }
+
+  /**
+   * 一次性提交整串项目顺序（拖拽完一次性写，不做逐条 PATCH）。
+   * - ids 里混进「默认」：静默忽略，它永远在 0 位，不报错（前端拖拽逻辑不用特判）
+   * - 出现库里没有的 id：抛错，免得把顺序写成半截
+   * - ids 没覆盖全部项目：没提到的排到末尾，按原顺序 —— 否则它们会和传进来的
+   *   抢同一个数字，sort_order 出现重复，下次 ORDER BY 就变成随机顺序
+   */
+  function reorderProjects(ids) {
+    const d = conn();
+    const list = Array.isArray(ids) ? ids.map(String).filter(Boolean) : [];
+    const known = new Map(d.all('SELECT id, name FROM projects').map((r) => [r.id, r.name]));
+
+    const ordered = [];
+    for (const id of list) {
+      const name = known.get(id);
+      if (name === undefined) throw new Error('项目不存在: ' + id);
+      if (name === DEFAULT_PROJECT_NAME) continue;   // 固定第一位，跳过而不是报错
+      if (ordered.includes(id)) continue;
+      ordered.push(id);
+    }
+
+    const rest = d.all('SELECT id, name FROM projects ORDER BY sort_order, created_at')
+      .filter((r) => r.name !== DEFAULT_PROJECT_NAME && !ordered.includes(r.id))
+      .map((r) => r.id);
+
+    d.tx(() => {
+      const now = nowIso();
+      d.run('UPDATE projects SET sort_order = 0 WHERE name = ?', [DEFAULT_PROJECT_NAME]);
+      [...ordered, ...rest].forEach((id, i) => {
+        d.run('UPDATE projects SET sort_order = ?, updated_at = ? WHERE id = ?', [i + 1, now, id]);
+      });
+    });
+
+    return listProjects();
   }
 
   // 按 id 或名字（含别名）找项目
@@ -318,13 +405,15 @@ export function createCore(dataDir) {
   }
 
   // 项目不存在就按名字补一个 —— 收任务时最常见的情况
+  // 这里是内部兜底，不受 deleteProject 那条「「默认」不能删」的保护影响：
+  // 收件筐被误删过之后，下一条没项目的任务还得能落回来。
   function ensureProject(name, projectId) {
     const d = conn();
     if (projectId) {
       const hit = d.get('SELECT * FROM projects WHERE id = ?', [projectId]);
       if (hit) return rowToProject(hit);
     }
-    const n = String(name || '默认').trim() || '默认';
+    const n = String(name || DEFAULT_PROJECT_NAME).trim() || DEFAULT_PROJECT_NAME;
     const byName = d.get('SELECT * FROM projects WHERE name = ?', [n]);
     if (byName) return rowToProject(byName);
 
@@ -333,13 +422,14 @@ export function createCore(dataDir) {
       name: n,
       aliases: [],
       dirs: [],
+      sort_order: n === DEFAULT_PROJECT_NAME ? 0 : nextSortOrder(),
       created_at: nowIso(),
       updated_at: nowIso()
     };
     d.run(
-      `INSERT INTO projects (id, name, aliases, dirs, created_at, updated_at)
-       VALUES (?,?,?,?,?,?)`,
-      [proj.id, proj.name, '[]', '[]', proj.created_at, proj.updated_at]
+      `INSERT INTO projects (id, name, aliases, dirs, sort_order, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?)`,
+      [proj.id, proj.name, '[]', '[]', proj.sort_order, proj.created_at, proj.updated_at]
     );
     return proj;
   }
@@ -361,7 +451,7 @@ export function createCore(dataDir) {
         urls: Array.isArray(input.urls) ? input.urls : [],
         path: input.path ?? null
       },
-      project: String(input.project || '默认'),
+      project: String(input.project || DEFAULT_PROJECT_NAME),
       project_id: input.project_id || null,
       category: String(input.category || ''),
       status: STATUSES.includes(input.status) ? input.status : 'todo',
@@ -376,6 +466,11 @@ export function createCore(dataDir) {
       claimed_by: null,
       // 1 = 模型判不出项目、也没手选过，界面靠它显示「选项目」徽章
       needs_project: !!input.needs_project,
+      // 默认 1：老任务早就在看板上了，本来就该算「已确认可以开工」。
+      // 只有分类初判明确说不够开发时，入口才会传 false。
+      dev_ready: input.dev_ready === undefined ? true : !!input.dev_ready,
+      dev_gaps: normalizeGaps(input.dev_gaps),
+      archived_at: null,
       created_at: now,
       updated_at: now,
       doing_at: null,
@@ -394,14 +489,15 @@ export function createCore(dataDir) {
       `INSERT INTO tasks
          (id, title, kind, payload, project, project_id, category, status, priority, note, source,
           brief, brief_at, classify_state, classify_reason, classify_model, claimed_by, needs_project,
-          created_at, updated_at, doing_at, done_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          dev_ready, dev_gaps, archived_at, created_at, updated_at, doing_at, done_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         t.id, t.title, t.kind, JSON.stringify(t.payload), t.project, t.project_id,
         t.category, t.status, t.priority, t.note, t.source,
         t.brief, t.brief_at,
         t.classify_state, t.classify_reason, t.classify_model, t.claimed_by,
         t.needs_project ? 1 : 0,
+        t.dev_ready ? 1 : 0, JSON.stringify(t.dev_gaps || []), t.archived_at,
         t.created_at, t.updated_at, t.doing_at, t.done_at
       ]
     );
@@ -460,6 +556,27 @@ export function createCore(dataDir) {
       sets.push('needs_project = ?');
       args.push(fields.needs_project ? 1 : 0);
     }
+    // dev_ready 0/1 同理。归档走 archived_at 时间戳，不设单独的布尔列。
+    if (fields.dev_ready !== undefined) {
+      sets.push('dev_ready = ?');
+      args.push(fields.dev_ready ? 1 : 0);
+    }
+    // dev_gaps 跟着 dev_ready 走：说「不够开发」就得同时说清楚缺什么。
+    // 反过来单独改 gaps 也允许 —— 用户手写「还缺这些」是有意义的。
+    if (fields.dev_gaps !== undefined) {
+      sets.push('dev_gaps = ?');
+      args.push(JSON.stringify(normalizeGaps(fields.dev_gaps)));
+    }
+    // 确认可以开工之后，那次初判留下的「缺什么」就过期了 —— 留着会让
+    // 表面上已经能做的任务还挂着一串疑问。只在调用方没显式给 gaps 时清。
+    if (fields.dev_ready && fields.dev_gaps === undefined) {
+      sets.push('dev_gaps = ?');
+      args.push('[]');
+    }
+    if (fields.archived_at !== undefined) {
+      sets.push('archived_at = ?');
+      args.push(fields.archived_at === null ? null : String(fields.archived_at));
+    }
 
     if (fields.payload && typeof fields.payload === 'object') {
       const merged = { ...t.payload, ...fields.payload };
@@ -516,9 +633,17 @@ export function createCore(dataDir) {
     const d = conn();
     const t = requireTask(id);
 
-    // 先把要清的文件列出来，删库之后 payload 就没了
-    const imgs = attachmentNames(t.payload?.images, imagesDir);
-    const fls = attachmentNames(t.payload?.files, filesDir);
+    // 先把要清的文件列出来，删库之后 payload 和 messages 就都没了。
+    // 对话里的附件也算：只清 tasks.payload 的话，删任务会在 images/ 里留一堆垃圾
+    // （就是 P0-3 那个坑，只是换了个入口）。
+    const imgSet = new Set(attachmentNames(t.payload?.images, imagesDir));
+    const fileSet = new Set(attachmentNames(t.payload?.files, filesDir));
+    for (const m of listMessages(id)) {
+      for (const n of attachmentNames(m.attachments?.images, imagesDir)) imgSet.add(n);
+      for (const n of attachmentNames(m.attachments?.files, filesDir)) fileSet.add(n);
+    }
+    const imgs = [...imgSet];
+    const fls = [...fileSet];
 
     // messages 靠 ON DELETE CASCADE 一并清掉
     d.run('DELETE FROM tasks WHERE id = ?', [id]);
@@ -571,13 +696,15 @@ export function createCore(dataDir) {
       role: msg.role === 'assistant' ? 'assistant' : 'user',
       text: String(msg.text || '').slice(0, 4000),
       patch: msg.patch && typeof msg.patch === 'object' && Object.keys(msg.patch).length ? msg.patch : null,
+      attachments: normalizeAttachments(msg.attachments),
       at: nowIso()
     };
 
     d.tx(() => {
       d.run(
-        'INSERT INTO messages (id, task_id, role, text, patch, at) VALUES (?,?,?,?,?,?)',
-        [m.id, id, m.role, m.text, m.patch ? JSON.stringify(m.patch) : null, m.at]
+        'INSERT INTO messages (id, task_id, role, text, patch, attachments, at) VALUES (?,?,?,?,?,?,?)',
+        [m.id, id, m.role, m.text, m.patch ? JSON.stringify(m.patch) : null,
+          m.attachments ? JSON.stringify(m.attachments) : null, m.at]
       );
       // 超出上限就丢掉最旧的几条，保持单卡片体积可控
       const count = Number(d.get('SELECT COUNT(*) AS c FROM messages WHERE task_id = ?', [id])?.c || 0);
@@ -619,15 +746,37 @@ export function createCore(dataDir) {
 
   // ---------- 列表 / 看板 ----------
 
+  // 查询参数是从 URL 上原样透传下来的，全是字符串：
+  // "0" / "false" 是真值，不能直接 if()。这里统一按语义判断一次。
+  function truthy(v) {
+    if (v === true || v === 1) return true;
+    if (typeof v === 'number') return v !== 0;
+    const s = String(v ?? '').trim().toLowerCase();
+    return s === '1' || s === 'true' || s === 'yes' || s === 'on';
+  }
+
+  // dev_ready 只认 0 / 1 / true / false，其它（空串、undefined、"abc"）当没传
+  function devReadyFilter(v) {
+    if (v === undefined || v === null || v === '') return null;
+    if (v === true || v === 'true') return 1;
+    if (v === false || v === 'false') return 0;
+    const n = Number(v);
+    return (n === 0 || n === 1) ? n : null;
+  }
+
   function buildWhere(opts = {}) {
     const where = [];
     const args = [];
+    // 归档是「done 之后」的阶段，默认不进任何视图；要看得显式要
+    if (!truthy(opts.include_archived)) where.push('t.archived_at IS NULL');
     if (opts.project) {
       where.push('(t.project = ? OR t.project_id = ?)');
       args.push(opts.project, opts.project);
     }
     if (opts.status) { where.push('t.status = ?'); args.push(opts.status); }
     if (opts.category) { where.push('t.category = ?'); args.push(opts.category); }
+    const dr = devReadyFilter(opts.dev_ready);
+    if (dr !== null) { where.push('t.dev_ready = ?'); args.push(dr); }
     return { sql: where.length ? ' WHERE ' + where.join(' AND ') : '', args };
   }
 
@@ -639,20 +788,60 @@ export function createCore(dataDir) {
     if (opts.limit) { sql += ' LIMIT ?'; args.push(Number(opts.limit)); }
 
     const tasks = d.all(sql, args).map(rowToTask);
-    const total = Number(d.get('SELECT COUNT(*) AS c FROM tasks')?.c || 0);
+    // total 是「这个视图里有多少条」，跟 tasks 受同一个归档过滤，
+    // 但不吃 project/status/category —— 前端拿它当分母画比例。
+    const total = opts.include_archived
+      ? Number(d.get('SELECT COUNT(*) AS c FROM tasks')?.c || 0)
+      : Number(d.get('SELECT COUNT(*) AS c FROM tasks WHERE archived_at IS NULL')?.c || 0);
     return { projects: listProjects(), tasks, total };
   }
 
-  function state() {
+  function state(opts = {}) {
     const d = conn();
-    const tasks = d.all(TASK_SELECT + ` ORDER BY ${PRIORITY_ORDER_SQL}, t.created_at DESC`).map(rowToTask);
+    const w = buildWhere(opts);
+    const tasks = d.all(TASK_SELECT + w.sql + ` ORDER BY ${PRIORITY_ORDER_SQL}, t.created_at DESC`).map(rowToTask);
+
+    // 计数单独查一遍，只看未归档 —— 已归档的「已完成」不该还挂在侧栏上。
+    // 键固定 todo/doing/done 三个，不加 draft/archived：那是视图，不是列。
     const counts = { todo: 0, doing: 0, done: 0 };
-    for (const t of tasks) counts[t.status] = (counts[t.status] || 0) + 1;
+    for (const r of d.all('SELECT status, COUNT(*) AS c FROM tasks WHERE archived_at IS NULL GROUP BY status')) {
+      if (counts[r.status] !== undefined) counts[r.status] = Number(r.c || 0);
+    }
     return { projects: listProjects(), tasks, counts, total: tasks.length };
   }
 
   function count() {
     return Number(conn().get('SELECT COUNT(*) AS c FROM tasks')?.c || 0);
+  }
+
+  // ---------- 归档 ----------
+
+  /**
+   * 把「做完很久了」的任务移出看板。不删任何东西 —— 附件、对话、brief 全留着。
+   *
+   * 只在启动时和每次 add() 之后各扫一次，不起定时器：这是单机自用，
+   * 多一个定时器就多一条平时看不见、出事又难查的故障线。
+   *
+   * @returns {number} 这次归档了几条
+   */
+  function archiveStale(days) {
+    const d = conn();
+    const n = days === undefined || days === null ? loadSettings().archive_after_days : days;
+    const num = Number(n);
+    const useDays = Number.isFinite(num) && num > 0 ? num : DEFAULT_SETTINGS.archive_after_days;
+    const cutoff = new Date(Date.now() - useDays * 24 * 60 * 60 * 1000).toISOString();
+
+    // 只认 done_at：done_at 为空的行是脏数据（正常路径改状态一定会写它），
+    // 拿 updated_at 兜底会把「刚点完又被别处改过」的新任务一起扫进去。
+    const r = d.run(
+      `UPDATE tasks SET archived_at = ?
+        WHERE status = 'done'
+          AND archived_at IS NULL
+          AND done_at IS NOT NULL
+          AND done_at < ?`,
+      [nowIso(), cutoff]
+    );
+    return Number(r.changes || 0);
   }
 
   // ---------- 变更指纹 ----------
@@ -670,11 +859,17 @@ export function createCore(dataDir) {
   //
   // 代价是值本身不可读（不是「8 条任务」而是个哈希），但它只用来比是否相等，
   // 不需要看懂。重启后 total_changes 归零 → 值变了 → 前端拉一次全量，正确。
-  function revision() {
+  //
+  // scope 是「这个 revision 属于哪个视图」。不带它的话，带
+  // ?dev_ready=0 和 ?include_archived=1 的两个请求会拿同一个指纹，
+  // 前端做完 since 短路就会把 A 视图的缓存当成 B 视图的数据用 —— 数据没坏，
+  // 但显示的是另一套过滤结果，比没缓存更糟。现在指纹里带上视图参数，
+  // 换视图必然 fingerprint 不同，短路不会误命中。
+  function revision(scope) {
     const d = conn();
     const chg = Number(d.get('SELECT total_changes() AS v')?.v || 0);
     const dv = Number(d.get('PRAGMA data_version')?.data_version || 0);
-    const s = chg + ':' + dv;
+    const s = chg + ':' + dv + (scope ? ':' + String(scope) : '');
     // FNV-1a：短、稳定、不依赖 crypto
     let h = 0x811c9dc5;
     for (let i = 0; i < s.length; i++) {
@@ -710,9 +905,15 @@ export function createCore(dataDir) {
       next.model = m;
     }
     if (patch.classify !== undefined) next.classify = !!patch.classify;
+    // 归档阈值不做 UI，但要让脚本/CLI 能改；非法值直接拒，别留下一个「永不归档」的 0
+    if (patch.archive_after_days !== undefined) {
+      const n = Number(patch.archive_after_days);
+      if (!Number.isFinite(n) || n <= 0) throw new Error('archive_after_days 必须是正整数');
+      next.archive_after_days = Math.round(n);
+    }
 
     d.tx(() => {
-      for (const k of ['backend', 'model', 'classify']) {
+      for (const k of ['backend', 'model', 'classify', 'archive_after_days']) {
         d.run(
           'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
           [k, JSON.stringify(next[k])]
@@ -731,7 +932,8 @@ export function createCore(dataDir) {
    */
   function exportAll() {
     const d = conn();
-    const projects = d.all('SELECT * FROM projects ORDER BY created_at').map(rowToProject);
+    // 备份语义是全都要：归档的任务照样导出来，否则「备份」就不是备份了
+    const projects = d.all('SELECT * FROM projects ORDER BY sort_order, created_at').map(rowToProject);
     const tasks = d.all(TASK_SELECT + ' ORDER BY t.created_at').map((r) => {
       const t = rowToTask(r);
       // 老格式里没有 message_count 这个派生字段，messages 是实数组 —— 去干净点，
@@ -741,7 +943,9 @@ export function createCore(dataDir) {
       return t;
     });
     return {
-      version: 2,
+      // 3 起导出里多了 dev_gaps（归档/待澄清的状态在 v2 就已经带了）。
+      // 版本号只增不改语义：老导出文件仍然能被 migrateFromJson 读进来。
+      version: 3,
       exported_at: nowIso(),
       schema_version: Number(d.get("SELECT value FROM meta WHERE key = 'schema_version'")?.value || 0),
       projects,
@@ -818,9 +1022,10 @@ export function createCore(dataDir) {
     dataFile: dbFile,   // 兼容旧调用方的命名，指向的已经是 .db
     imagesDir, filesDir, settingsFile,
     conn, init, close,
-    add, getTask, patch, move, remove, list, state, count, revision,
+    add, getTask, patch, move, remove, list, state, count, revision, archiveStale,
     pushMessage, listMessages, recentMessages, clearMessages, setBrief,
     listProjects, getProject, addProject, updateProject, deleteProject, findProject, ensureProject,
+    reorderProjects,
     loadSettings, saveSettings,
     exportAll, backupTo,
     saveImage, imagePath, saveFile, filePath

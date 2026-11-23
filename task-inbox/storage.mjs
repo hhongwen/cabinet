@@ -154,7 +154,7 @@ export function openSqlite(file) {
 // ---------- schema ----------
 
 // 版本号存在 meta 里。加字段时：把 SCHEMA_VERSION +1，在 MIGRATIONS 里补一条。
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 4;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -168,7 +168,8 @@ CREATE TABLE IF NOT EXISTS projects (
   aliases    TEXT NOT NULL DEFAULT '[]',   -- JSON array
   dirs       TEXT NOT NULL DEFAULT '[]',   -- JSON array of {path,note,primary}
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0    -- 侧栏拖拽顺序，「默认」永远是 0
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -190,6 +191,9 @@ CREATE TABLE IF NOT EXISTS tasks (
   classify_model  TEXT NOT NULL DEFAULT '',
   claimed_by      TEXT,
   needs_project   INTEGER NOT NULL DEFAULT 0,   -- 1 = 判不出项目，界面上提示手选
+  dev_ready       INTEGER NOT NULL DEFAULT 1,   -- 0 = 需求待澄清，不进看板
+  dev_gaps        TEXT NOT NULL DEFAULT '[]',   -- JSON array：初判说「还缺这些」
+  archived_at     TEXT,                          -- NULL = 未归档
   created_at      TEXT NOT NULL,
   updated_at      TEXT NOT NULL,
   doing_at        TEXT,
@@ -201,12 +205,13 @@ CREATE INDEX IF NOT EXISTS idx_tasks_status  ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
 
 CREATE TABLE IF NOT EXISTS messages (
-  id      TEXT PRIMARY KEY,
-  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-  role    TEXT NOT NULL,
-  text    TEXT NOT NULL DEFAULT '',
-  patch   TEXT,                                 -- JSON 或 NULL
-  at      TEXT NOT NULL
+  id          TEXT PRIMARY KEY,
+  task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  role        TEXT NOT NULL,
+  text        TEXT NOT NULL DEFAULT '',
+  patch       TEXT,                             -- JSON 或 NULL
+  attachments TEXT,                             -- JSON {images:[],files:[]} 或 NULL
+  at          TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_task ON messages(task_id, at);
@@ -225,6 +230,44 @@ const MIGRATIONS = {
     const cols = db.all('PRAGMA table_info(tasks)').map((c) => c.name);
     if (!cols.includes('needs_project')) {
       db.exec('ALTER TABLE tasks ADD COLUMN needs_project INTEGER NOT NULL DEFAULT 0');
+    }
+  },
+
+  // v2 → v3：待澄清（dev_ready）、归档（archived_at）、对话附件、项目排序
+  //
+  // 四个字段一次加完。分开升级的话，后一个落地时会把先落的那个跳过去 ——
+  // 老库的版本号已经写进 meta，再 `fromVersion < SCHEMA_VERSION` 就不成立了。
+  // 所以这一批只占一个版本号。
+  2: (db) => {
+    const addColumn = (table, column, ddl) => {
+      const cols = db.all('PRAGMA table_info(' + table + ')').map((c) => c.name);
+      if (!cols.includes(column)) db.exec('ALTER TABLE ' + table + ' ADD COLUMN ' + ddl);
+    };
+
+    addColumn('tasks', 'dev_ready', 'dev_ready INTEGER NOT NULL DEFAULT 1');
+    addColumn('tasks', 'archived_at', 'archived_at TEXT');
+    addColumn('messages', 'attachments', 'attachments TEXT');
+    addColumn('projects', 'sort_order', 'sort_order INTEGER NOT NULL DEFAULT 0');
+
+    // 回填顺序：老库没有顺序概念，按 rowid（≈插入顺序）拿一个稳定值，
+    // 再用 created_at 排序就不需要排序遗产了。
+    db.exec('UPDATE projects SET sort_order = rowid');
+
+    // 「默认」是未分配收件筐，不是普通项目 —— 它永远钉在第一行。
+    // 用名字判断，因为老库里它的 id 可能是 p_default，也可能是迁移时现生成的。
+    db.exec("UPDATE projects SET sort_order = 0 WHERE name = '默认'");
+  },
+
+  // v3 → v4：dev_gaps
+  //
+  // 上一版把 dev_ready 落了库，但把「还缺什么」丢掉了 —— 模型判出 false 之后
+  // 界面上只能显示「待澄清」，说不了缺在哪儿，用户还得自己再问一遍模型。
+  // 单开一个版本号，因为 v3 那批已经落过地了（真库现在就是 3），
+  // 再往 2 里加字段会被 `fromVersion < SCHEMA_VERSION` 跳过。
+  3: (db) => {
+    const cols = db.all('PRAGMA table_info(tasks)').map((c) => c.name);
+    if (!cols.includes('dev_gaps')) {
+      db.exec("ALTER TABLE tasks ADD COLUMN dev_gaps TEXT NOT NULL DEFAULT '[]'");
     }
   }
 };
@@ -306,11 +349,15 @@ export function migrateFromJson(db, dataDir, opts = {}) {
   const stats = db.tx(() => {
     const projByName = new Map();
     const projIds = new Set();
+    let projSeq = 0;
     for (const p of projects) {
+      // 导入时给一个新顺序：JSON 里没有这个概念，按数组位置排，「默认」还是 0
+      const sortOrder = p.name === '默认' ? 0 : ++projSeq;
       db.run(
-        `INSERT OR IGNORE INTO projects (id, name, aliases, dirs, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [p.id, p.name, JSON.stringify(p.aliases || []), JSON.stringify(p.dirs || []), p.created_at, p.updated_at]
+        `INSERT OR IGNORE INTO projects (id, name, aliases, dirs, sort_order, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [p.id, p.name, JSON.stringify(p.aliases || []), JSON.stringify(p.dirs || []),
+          sortOrder, p.created_at, p.updated_at]
       );
       projByName.set(p.name, p);
       projIds.add(p.id);
@@ -327,26 +374,36 @@ export function migrateFromJson(db, dataDir, opts = {}) {
         `INSERT OR REPLACE INTO tasks
            (id, title, kind, payload, project, project_id, category, status, priority, note, source,
             brief, brief_at, classify_state, classify_reason, classify_model, claimed_by,
-            created_at, updated_at, doing_at, done_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+            dev_ready, dev_gaps, archived_at, created_at, updated_at, doing_at, done_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [
           t.id, t.title, t.kind, JSON.stringify(t.payload || {}), t.project, pid,
           t.category || '', t.status || 'todo', t.priority || 'p3', t.note || '', t.source || 'chat',
           t.brief || '', t.brief_at || null,
           t.classify_state || 'off', t.classify_reason || '', t.classify_model || '', t.claimed_by || null,
+          // 老 tasks.json 里没有这几个字段，缺了就是「已确认可开工、未归档、没记缺什么」。
+          // 但 exportAll 会带上它们，所以原样导回去时这些状态不会丢。
+          t.dev_ready === 0 || t.dev_ready === false ? 0 : 1,
+          JSON.stringify(Array.isArray(t.dev_gaps) ? t.dev_gaps : []),
+          t.archived_at || null,
           t.created_at, t.updated_at, t.doing_at || null, t.done_at || null
         ]
       );
       const msgs = Array.isArray(t.messages) ? t.messages : [];
       for (const m of msgs) {
+        const att = m.attachments && typeof m.attachments === 'object'
+          && ((m.attachments.images || []).length || (m.attachments.files || []).length)
+          ? JSON.stringify({ images: m.attachments.images || [], files: m.attachments.files || [] })
+          : null;
         db.run(
-          'INSERT OR REPLACE INTO messages (id, task_id, role, text, patch, at) VALUES (?,?,?,?,?,?)',
+          'INSERT OR REPLACE INTO messages (id, task_id, role, text, patch, attachments, at) VALUES (?,?,?,?,?,?,?)',
           [
             m.id || ('m_' + Math.random().toString(36).slice(2, 10)),
             t.id,
             m.role === 'assistant' ? 'assistant' : 'user',
             String(m.text || '').slice(0, 4000),
             m.patch && typeof m.patch === 'object' ? JSON.stringify(m.patch) : null,
+            att,
             m.at || t.updated_at || t.created_at
           ]
         );

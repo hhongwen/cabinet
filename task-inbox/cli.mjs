@@ -5,8 +5,11 @@
 //   node cli.mjs add "买咖啡豆"      加一条
 //   node cli.mjs add "写周报" -p 工作 --p0 -c 工作
 //   node cli.mjs ls --todo          只看未开始
+//   node cli.mjs ls --archived      只看已归档
 //   node cli.mjs move <id> doing    换列
 //   node cli.mjs done <id>          标完成
+//   node cli.mjs archive            手动跑一次自动归档
+//   node cli.mjs unarchive <id>     从归档里取回
 //   node cli.mjs ls --json          给程序看的输出
 
 import fs from 'node:fs';
@@ -68,6 +71,9 @@ try {
     const title = parts.join(' ').trim();
     if (!title) { console.error('用法: node cli.mjs add "要做什么" [-p 项目] [--p0] [-c 类别]'); process.exit(1); }
     const priority = Object.keys(PRI).find((k) => flag(k))?.slice(2) || opt('--priority') || 'p3';
+    // 不传 dev_ready —— core 会落默认值 1（已确认可开工）。
+    // CLI 本来就不跑分类；settings.classify 关掉时更是没人判「够不够开发」，
+    // 这种情况下把任务塞进待澄清是凭空造出来的门。
     const t = core.add({
       title,
       project: opt('--project', '-p') || '默认',
@@ -81,12 +87,17 @@ try {
 
   if (cmd === 'ls' || cmd === 'list') {
     const status = flag('--todo') ? 'todo' : flag('--doing') ? 'doing' : flag('--done') ? 'done' : undefined;
+    // 默认不含归档。--archived 是「只看归档」，不是「连归档一起看」——
+    // 混在一起时已经做完归档的那些会挤掉真正要看的。
+    const archivedOnly = flag('--archived');
     const r = core.list({
       status,
       project: opt('--project', '-p'),
       category: opt('--category', '-c'),
-      limit: opt('--limit', '-n')
+      limit: opt('--limit', '-n'),
+      include_archived: archivedOnly ? true : undefined
     });
+    if (archivedOnly) r.tasks = r.tasks.filter((t) => t.archived_at);
 
     if (flag('--json')) { console.log(JSON.stringify(r, null, 2)); process.exit(0); }
 
@@ -95,6 +106,7 @@ try {
     else console.log(r.tasks.map(fmt).join('\n'));
     console.log('');
     console.log(`共 ${check.todo} 待办 / ${check.doing} 进行中 / ${check.done} 已完成`);
+    if (archivedOnly) console.log('（以上是已归档任务，不计入上面的计数）');
     process.exit(0);
   }
 
@@ -119,6 +131,24 @@ try {
     if (!id) { console.error('用法: node cli.mjs rm <id>'); process.exit(1); }
     const t = core.remove(id);
     console.log('已删除: ' + t.title);
+    process.exit(0);
+  }
+
+  if (cmd === 'archive') {
+    // 手动跑一次自动归档。服务自己会在启动和收任务时各扫一遍，这里只是
+    // 「现在就想看一下会归档几条」的入口，不改任何阈值。
+    const days = core.loadSettings().archive_after_days;
+    const n = core.archiveStale(days);
+    console.log('已归档 ' + n + ' 条（阈值 ' + days + ' 天）');
+    process.exit(0);
+  }
+
+  if (cmd === 'unarchive') {
+    const [id] = args();
+    if (!id) { console.error('用法: node cli.mjs unarchive <id>'); process.exit(1); }
+    // 取回 = 把时间戳清掉。任务回到它原来的列（归档不改 status）。
+    const t = core.patch(id, { archived_at: null });
+    console.log('已取回: ' + t.title + '（' + t.status + '）');
     process.exit(0);
   }
 
@@ -167,10 +197,12 @@ try {
   console.log(`task-inbox
 
   add <标题> [-p 项目] [--p0..--p3] [-c 类别]   收一条
-  ls [--todo|--doing|--done] [--json]            看列表
+  ls [--todo|--doing|--done] [--archived] [--json]  看列表（默认不含归档）
   move <id> todo|doing|done                      换列
   done <id>                                      标完成
   rm <id>                                        删除
+  archive                                        手动跑一次自动归档
+  unarchive <id>                                 从归档里取回
   init                                           初始化数据目录
   export [文件]                                  导成 tasks.json（给迁移/审阅用）
   backup [文件]                                  热备份成 .db（服务在跑也能备）

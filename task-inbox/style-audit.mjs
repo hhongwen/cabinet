@@ -345,7 +345,9 @@ const INPUT_POOL = ['.dock textarea', '.dr-foot textarea', '.dr-fields select', 
 // ---------- 检查 5d：z-index 只能用表里的值（STYLE.md 第五节） ----------
 
 {
-  const ALLOWED = new Set([1, 2, 3, 5, 60, 70, 71, 80, 90, 95, 99]);
+  // 72 是项目选择浮层：它要盖过抽屉（71），从抽屉里点徽章也得看得见。
+  // 改这里必须同时改 STYLE.md 第五节的表，两边是同一份约定的两处抄写。
+  const ALLOWED = new Set([1, 2, 3, 5, 60, 70, 71, 72, 80, 90, 95, 99]);
   for (const r of rules) {
     const m = r.body.match(/(?:^|[;\s])z-index\s*:\s*(-?\d+)/i);
     if (!m) continue;

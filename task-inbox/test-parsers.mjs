@@ -115,6 +115,60 @@ console.log('\n=== 2. classify：模型不规矩的输出 ===');
   eq('project null 保留', r.project, null);
 }
 
+console.log('\n=== 2b. classify：dev_ready / dev_gaps ===');
+
+{
+  const be = fakeBackend('{"priority":"p2","title":"优化那个页面","dev_ready":false,"dev_gaps":["慢在哪一步","目标响应时间","谁来验收"]}');
+  const c = createClassifier({ backend: be });
+  const r = await c.classify({ title: '那个页面有点慢', text: '那个页面有点慢' });
+  eq('dev_ready 是布尔 false', r.dev_ready, false);
+  eq('dev_gaps 逐条带出', r.dev_gaps, ['慢在哪一步', '目标响应时间', '谁来验收']);
+  ok('system prompt 里写了 dev_ready', be.calls[0].system.includes('dev_ready'));
+  ok('system prompt 里写了「宁可判 false」', be.calls[0].system.includes('宁可判 false'));
+}
+
+{
+  const be = fakeBackend('{"priority":"p2","title":"挪筛选条","dev_ready":true,"dev_gaps":[]}');
+  const c = createClassifier({ backend: be });
+  const r = await c.classify({ title: '把筛选条挪到标题行右侧', text: '把筛选条挪到标题行右侧' });
+  eq('dev_ready 是布尔 true', r.dev_ready, true);
+  eq('信息足够时 gaps 为空', r.dev_gaps, []);
+}
+
+{
+  // 模型爱写的几种「差不多是 true」都要当成没给 —— 上层靠 undefined 决定不覆盖库里的值
+  for (const raw of ['"true"', '1', '"是"', 'null']) {
+    const be = fakeBackend('{"priority":"p2","title":"t","dev_ready":' + raw + '}');
+    const c = createClassifier({ backend: be });
+    const r = await c.classify({ title: 'x', text: 'y' });
+    eq('dev_ready=' + raw + ' → undefined', r.dev_ready, undefined);
+  }
+}
+
+{
+  // gaps 是字符串 / 带空串 / 超过 3 条，都要收干净
+  const be = fakeBackend('{"priority":"p2","title":"t","dev_ready":false,"dev_gaps":["  a  ","","b","c","d"]}');
+  const c = createClassifier({ backend: be });
+  const r = await c.classify({ title: 'x', text: 'y' });
+  eq('空格被裁掉、空串被滤、最多 3 条', r.dev_gaps, ['a', 'b', 'c']);
+}
+
+{
+  const be = fakeBackend('{"priority":"p2","title":"t","dev_ready":false,"dev_gaps":"缺对象"}');
+  const c = createClassifier({ backend: be });
+  const r = await c.classify({ title: 'x', text: 'y' });
+  eq('gaps 不是数组时给空数组', r.dev_gaps, []);
+}
+
+{
+  // 模型完全没提这两个字段 —— 不能变成 false
+  const be = fakeBackend('{"priority":"p2","title":"t"}');
+  const c = createClassifier({ backend: be });
+  const r = await c.classify({ title: 'x', text: 'y' });
+  eq('没给 dev_ready 时是 undefined', r.dev_ready, undefined);
+  eq('没给 dev_gaps 时是空数组', r.dev_gaps, []);
+}
+
 console.log('\n=== 3. classify：prompt 拼装 ===');
 
 {
@@ -275,6 +329,52 @@ console.log('\n=== 6. chat：prompt 拼装 ===');
   const sent = be.calls[0].text;
   ok('最早的对话被截掉', !sent.includes('第0句') && !sent.includes('第1句'));
   ok('最近的对话还在', sent.includes('第29句'));
+}
+
+console.log('\n=== 6b. chat：图片和文件（UI-3） ===');
+
+{
+  const imgFile = path.join(tmp, 'shot.png');
+  fs.writeFileSync(imgFile, Buffer.from('png'));
+
+  const be = fakeBackend('{"reply":"看到了","patch":{}}');
+  const c = createChat({ backend: be, imagesDir: tmp });
+  // 附件里传的是相对名字（upload 只返回 name/url），要能落到 imagesDir 里的真实文件
+  await c.reply({ task, thread: [], userText: '看这张图', images: ['shot.png'], projects: [] });
+
+  eq('图片传给了 backend.chat', be.calls[0].images, [imgFile]);
+  ok('用户的话也在 prompt 里', be.calls[0].text.includes('看这张图'));
+}
+
+{
+  const mdFile = path.join(tmp, 'chat-notes.md');
+  fs.writeFileSync(mdFile, '# 标题\n这一段是文件内容', 'utf8');
+
+  const be = fakeBackend('{"reply":"好的","patch":{}}');
+  const c = createChat({ backend: be, filesDir: tmp });
+  await c.reply({ task, thread: [], userText: '', files: ['chat-notes.md'], projects: [] });
+
+  const sent = be.calls[0].text;
+  ok('文件名进 prompt', sent.includes('chat-notes.md'));
+  ok('文件文本片段进 prompt', sent.includes('这一段是文件内容'));
+  // 纯文件没有文字时，prompt 里那条「用户刚说」不能是空的
+  ok('没有文字时有占位说明', sent.includes('只有附件'));
+  eq('没有图片时 images 是空数组', be.calls[0].images, []);
+}
+
+{
+  // CLI 通道不支持图片会抛错 —— 必须一路抛到调用方，不能被 chat 吞掉
+  const be = {
+    name: 'codex',
+    async chat() { throw new Error('codex 通道不支持图片，请用 magpie 或 alma'); }
+  };
+  const imgFile = path.join(tmp, 'shot2.png');
+  fs.writeFileSync(imgFile, Buffer.from('png'));
+  const c = createChat({ backend: be, imagesDir: tmp });
+  let threw = null;
+  try { await c.reply({ task, thread: [], userText: '看图', images: ['shot2.png'], projects: [] }); }
+  catch (e) { threw = e; }
+  ok('不支持图片的通道错误原样抛出', threw !== null && /不支持图片/.test(threw.message));
 }
 
 console.log('\n=== 7. FIELD_LABEL 与 core 实际能改的字段一致 ===');

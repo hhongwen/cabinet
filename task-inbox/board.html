@@ -49,6 +49,10 @@
   /* 顶部横幅（连不上服务 / 后端是旧版本）—— 只在这一处用，但别写死在规则里 */
   --banner-bad-bg:#fff1ee; --banner-bad-ink:#8a2c14; --banner-bad-edge:#e8c2b8;
   --banner-warn-bg:#fff8e6; --banner-warn-ink:#7a5810; --banner-warn-edge:#e8d9a8;
+  /* 「待澄清」：淡紫。和橙（要做）/ 绿（做完）都不撞，是"卡住了等人"的意思 */
+  --draft-ink:#6d5d86; --draft-bg:rgba(120,104,158,.15); --draft-edge:rgba(120,104,158,.34);
+  /* 「默认」= 未分配收件筐：中性灰，比橙弱一档 —— 它是提示，不是待办 */
+  --neutral-ink:#5b6b71; --neutral-bg:rgba(120,136,142,.16);
   /* 深色面（抽屉里"我说的"气泡、toast）上的文字 */
   --on-dark:#eef3f4;
 
@@ -183,6 +187,33 @@ input,select,textarea{font:inherit}
 .nav-link:hover{border-color:rgba(120,136,142,.30);background:rgba(255,255,255,.42)}
 .nav-link.active .cnt{background:var(--orange-cta);color:#fff;border-color:var(--orange-cta-deep)}
 
+/* 「待澄清」是流水线的第一道关卡：图标走淡紫，跟橙（要做）/ 绿（做完）都不撞 */
+.nav-link--draft svg{color:var(--draft-ink);opacity:1}
+/* 「归档」入口：贴在「已完成」行右侧的小字链接，不做成大按钮 —— 它是翻旧账，不是主流程 */
+.nav-act{
+  flex:0 0 auto;margin-left:2px;padding-left:7px;
+  border-left:1px solid rgba(120,136,142,.28);
+  font:9.5px var(--font-mono);color:var(--text-3);letter-spacing:.2px;
+  display:inline-flex;align-items:center;gap:3px;cursor:pointer;
+  transition:color .16s;
+}
+.nav-act:hover{color:var(--accent-text)}
+.nav-act.active{color:var(--accent-text);font-weight:700;border-left-color:var(--orange)}
+.nav-act i{font-style:normal;font-variant-numeric:tabular-nums}
+/* 「默认」不是普通项目，是未分配收件筐：名字后面淡写一句，图标也换掉 */
+.nav-sub{font:9px var(--font-mono);color:var(--text-4);letter-spacing:.2px;flex:0 0 auto}
+/* 项目拖拽排序：落点只画一条 2px 插线。整行换底在 30px 高的行上根本看不出插在哪 */
+.nav-link.proj-drop::after{
+  content:"";position:absolute;left:7px;right:7px;height:2px;border-radius:2px;
+  background:var(--orange);pointer-events:none;
+}
+.nav-link.proj-drop[data-drop="before"]::after{top:-2px}
+.nav-link.proj-drop[data-drop="after"]::after{bottom:-2px}
+.nav-link.proj-drag{opacity:.45}
+/* 「默认」永远在最上面：拖它、拖到它上面都不生效，光标也要说清楚 */
+.nav-link--inbox{cursor:pointer}
+.nav-link.proj-fixed{cursor:not-allowed}
+
 .sidebar-bottom{margin-top:auto; padding:16px 6px 0}
 /* 系统块：深色玻璃，是整块浅银里唯一的"沉下去"的面 */
 .systembox{
@@ -258,6 +289,9 @@ input,select,textarea{font:inherit}
   box-shadow:inset 0 1px 0 rgba(255,255,255,.28), 0 2px 6px -2px rgba(201,58,12,.5);
 }
 .app.side-collapsed .nav-link .cnt{display:none}
+/* 窄轨里放不下「归档」小字和「未分配」后缀，只留图标 —— 点图标仍能进视图 */
+.app.side-collapsed .nav-act,
+.app.side-collapsed .nav-sub{display:none}
 .app.side-collapsed .nav-link svg{width:18px;height:18px}
 .app.side-collapsed .nav-link::before{left:-6px}
 .app.side-collapsed .nav-link.active::before{height:20px}
@@ -324,9 +358,17 @@ header.top{
   flex:0 0 auto; position:relative;
   /* 必须高于 .board-area，否则筛选下拉弹出来会被看板整块盖住 */
   z-index:5;
-  padding:20px 24px 12px;
+  /* 筛选条并进标题行之后，上下各留的 20/12 各收一点，纵向省一行（UI-4） */
+  padding:16px 24px 12px;
 }
 .top-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+/* 标题和计数不收缩，筛选条自己决定换不换行 */
+.top-line h1,.top-line .count{flex:0 0 auto}
+.top-line .filters{flex:0 1 auto}
+/* 窗口窄下来时筛选条整行换到第二行铺满，标题不会被压 */
+@media (max-width: 1100px){
+  .top-line .filters{flex:1 0 100%;margin-top:8px}
+}
 h1{
   font-size:21px; margin:0; font-weight:800; letter-spacing:-.5px;
 }
@@ -346,7 +388,8 @@ h1{
    ========================================================================== */
 .icon-btn, .rail-toggle, .sys-btn,
 .mini, .mini-btn, .flt-reset, .dir-row .pick,
-.dlg button, .dr-row button, .pick-bar button, .dock .go, .doc-tab {
+.dlg button, .dr-row button, .pick-bar button, .dock .go, .doc-tab,
+.dr-cta button, .card-act {
   display:inline-flex;align-items:center;justify-content:center;
   font-family:var(--font-ui);
   color:var(--text-2);
@@ -360,7 +403,7 @@ h1{
 .icon-btn:hover, .rail-toggle:hover, .sys-btn:hover,
 .mini-btn:hover, .dir-row .pick:hover,
 .dlg button:hover, .dr-row button:hover, .pick-bar button:hover,
-.doc-tab:hover {
+.doc-tab:hover, .dr-cta button:hover {
   border-color:var(--ctl-edge-hi); color:var(--ink);
   box-shadow:inset 0 1px 0 #fff, var(--shadow-2);
 }
@@ -381,13 +424,15 @@ h1{
 }
 
 /* 主按钮：深橙底 + 白字。不要换回 --orange（3.53:1，不过 AA） */
-.dlg button.primary, .dr-row button.primary, .dock .go:not(:disabled) {
+.dlg button.primary, .dr-row button.primary, .dock .go:not(:disabled),
+.dr-cta button.primary {
   color:#fff; font-weight:750;
   border-color:var(--orange-cta-deep);
   background:linear-gradient(180deg,var(--orange-cta-hi),var(--orange-cta));
   box-shadow:inset 0 1px 0 rgba(255,255,255,.22), 0 2px 8px -2px rgba(191,58,15,.42);
 }
-.dlg button.primary:hover, .dr-row button.primary:hover, .dock .go:hover:not(:disabled) {
+.dlg button.primary:hover, .dr-row button.primary:hover, .dock .go:hover:not(:disabled),
+.dr-cta button.primary:hover {
   color:#fff;
   background:linear-gradient(180deg,#e04a17,#c93c10);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.26), 0 4px 12px -3px rgba(191,58,15,.5);
@@ -407,7 +452,7 @@ h1{
    ========================================================================== */
 .dock textarea, .dr-foot textarea,
 .dlg select, .dlg input[type=text], .dlg input:not([type]), .dlg textarea,
-.pick-bar input, .dir-row input {
+.pick-bar input, .dir-row input, .dr-title-in, .sect-edit, .picker-in {
   color:var(--ink);
   background:var(--ctl-inset);
   border:1px solid rgba(120,136,142,.26);
@@ -418,7 +463,8 @@ h1{
 }
 .dock textarea:focus, .dr-foot textarea:focus,
 .dlg select:focus, .dlg input:focus, .dlg textarea:focus,
-.pick-bar input:focus, .dir-row input:focus {
+.pick-bar input:focus, .dir-row input:focus, .dr-title-in:focus, .sect-edit:focus,
+.picker-in:focus {
   background:#fff;
   border-color:var(--orange);
   box-shadow:var(--ctl-inset-shadow), var(--ctl-focus-ring);
@@ -429,7 +475,8 @@ h1{
 /* ---------- 筛选条：一个整体工具条，每段都是自定义下拉 ---------- */
 .filters{
   display:inline-flex;align-items:center;gap:2px;flex-wrap:wrap;
-  margin-top:13px;padding:3px 3px 3px 10px;
+  /* 挪进 .top-line 之后不再需要自己往下顶 13px —— 那一截是给「单独一行」留的 */
+  padding:3px 3px 3px 10px;
   border:1px solid var(--glass-hair);border-radius:11px;
   background:var(--glass-fill-strong);
   -webkit-backdrop-filter:var(--glass-blur-lite); backdrop-filter:var(--glass-blur-lite);
@@ -554,6 +601,21 @@ body select.sel-native{
 }
 .sel-empty{padding:9px;font:11px var(--font-mono);color:var(--text-3);text-align:center}
 
+/* ---------- 项目选择浮层 ----------
+   挂在 body 上（脱离卡片），所以位置要自己算，材质和 .sel-menu 同一套。
+   它不是 .sel 的子元素，拿不到 .sel.open 那个显示开关，得自带一份。 */
+.picker{
+  position:fixed;left:0;top:0;z-index:72;   /* 要盖得住抽屉（71）：从抽屉里点徽章也得看得见 */
+  width:min(232px,84vw);max-height:320px;display:flex;flex-direction:column;
+  opacity:1;transform:none;pointer-events:auto;
+  /* .sel-menu 的 min-width:max(100%,172px) 在这里会解析成「视口宽度」——
+     position:fixed 的百分比基准是视口，不是父元素。不压掉的话浮层会横铺满屏。 */
+  min-width:0;max-width:min(232px,84vw);
+}
+.picker .picker-in{width:100%;height:30px;font-size:12px;padding:0 9px;margin-bottom:4px;flex:0 0 auto}
+.picker .picker-list{overflow:auto;min-height:0;flex:1}
+.picker-new > span{color:var(--accent-text)}
+
 /* ---------- 可搜索组合框（模型选择用） ---------- */
 .combo{position:relative;width:100%}
 .combo input{
@@ -624,6 +686,12 @@ body select.sel-native{
 .board-scroll{flex:1;min-height:0;overflow:auto;padding:6px 24px 24px;position:relative;z-index:1}
 .board{display:grid;grid-template-columns:repeat(3,minmax(220px,1fr));gap:14px;align-items:start}
 @media (max-width:900px){ .board{grid-template-columns:1fr} }
+/* 单列铺开：待澄清 / 归档 / 「默认」筐都不是流水线三列，
+   它们只是「一串任务」，所以用同一个 .col 壳铺成一列。 */
+.board--single{grid-template-columns:minmax(0,1fr)}
+@media (max-width:900px){ .board--single{grid-template-columns:minmax(0,1fr)} }
+/* 单列视图里卡片可以宽，别让一行标题铺到 1400px 那么长 */
+.board--single .card .t{max-width:none}
 
 .col{
   position:relative; overflow:hidden; display:flex; flex-direction:column; min-height:96px;
@@ -724,6 +792,33 @@ body select.sel-native{
   background:var(--orange-cta);color:#fff;cursor:pointer;border:0;
   display:inline-flex;align-items:center;white-space:nowrap;
 }
+/* 「默认」筐里已经明确归给默认的项目：同一个位置、同一个手势，
+   但用中性灰 —— 橙色是「处理一下」，灰色是「记着它是未分配」 */
+.badge-default{
+  font:10px/16px var(--font-mono);padding:0 6px;border-radius:999px;height:16px;
+  background:var(--neutral-bg);color:var(--neutral-ink);cursor:pointer;
+  border:1px solid var(--ctl-edge);
+  display:inline-flex;align-items:center;white-space:nowrap;
+}
+.badge-default:hover{color:var(--ink);border-color:var(--ctl-edge-hi)}
+/* 「待澄清」标签：淡紫，和橙/绿区分开。它表示"卡住了等人"，不是待办也不是完成 */
+.tag.draft{color:var(--draft-ink);background:var(--draft-bg);box-shadow:inset 0 0 0 1px var(--draft-edge)}
+/* 归档卡片：整体淡下去，但仍可读（不是 disabled，取回按钮还能点） */
+.card.archived{opacity:.68;cursor:default}
+.card.archived:hover{transform:none}
+/* 待澄清卡片：标题下面那行「还缺：…」。极小字号，只露第一条，其余在抽屉里 */
+.card-gap{
+  margin-top:5px;font:10.5px/1.5 var(--font-mono);color:var(--draft-ink);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+/* 卡片底部动作行：给「取回」这种行内小按钮一个不被裁掉的位置 */
+.card-foot{display:flex;gap:5px;margin-top:7px;flex-wrap:wrap}
+/* 归档视图的「取回」：行内小字动作。材质走按钮总则，这里只出差量 */
+.card-act{
+  font:10px var(--font-mono);padding:0 7px;height:16px;border-radius:999px;
+  color:var(--text-3);
+}
+.card-act:hover{color:var(--accent-text);border-color:var(--danger-edge)}
 .empty{color:var(--text-3);font:10.5px var(--font-mono);text-align:center;padding:12px 0}
 
 .shots{display:flex;gap:5px;margin-top:7px;flex-wrap:wrap}
@@ -736,18 +831,20 @@ body select.sel-native{
 
 /* ---------- 底栏 ---------- */
 .dock{
-  flex:0 0 auto; margin-top:auto; display:flex; align-items:flex-end; gap:8px;
+  flex:0 0 auto; margin-top:auto; display:flex; align-items:center; gap:8px;
   padding:10px 24px 13px; position:relative; z-index:3;
   border-top:1px solid var(--glass-hair);
   background:var(--glass-fill);
   -webkit-backdrop-filter:var(--glass-blur); backdrop-filter:var(--glass-blur);
   box-shadow:var(--raise-hi), 0 -1px 0 rgba(120,136,142,.06), 0 -8px 22px -16px rgba(40,58,66,.35);
 }
-.dock .grow{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
-/* 输入框：材质见「凹陷控件」总则，这里只写尺寸 */
+.dock .grow{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;position:relative}
+/* 输入框：材质见「凹陷控件」总则，这里只写尺寸。
+   上下 padding 必须对称 —— 原来只有 2px，一行字贴顶，占位符看着像没居中。 */
 .dock textarea{
   width:100%;resize:none;overflow:hidden;min-height:38px;max-height:140px;line-height:1.55;
   font-size:13px;color:var(--ink);
+  padding:7px 12px;
 }
 .dock .side{display:flex;align-items:center;gap:7px;padding-bottom:0}
 /* 主按钮的底与配色见「按钮」总则，这里只写尺寸与禁用态 */
@@ -759,7 +856,15 @@ body select.sel-native{
   opacity:1;
 }
 .dock .thumbs:empty{display:none}
-.dock .cap-msg{font:10.5px var(--font-mono);color:var(--text-3)}
+/* 提示不占位：它在 .grow 里会让整块变高，底对齐（.dock 是 flex 行）就会把
+   textarea 往上顶，右边那排按钮却不动 —— 看着就是「按钮沉下去了」。
+   改成绝对定位压在底栏的下内边距里，出现/消失都不改任何东西的位置。
+   .dock 的 padding-bottom:13px 就是给它留的地儿。 */
+.dock .cap-msg{
+  position:absolute;left:0;top:calc(100% + 2px);
+  font:10.5px/1.15 var(--font-mono);color:var(--text-3);
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
 .dock .cap-msg:empty{display:none}
 .dock .cap-msg.ok{color:var(--ok)}
 .dock .cap-msg.err{color:var(--orange)}
@@ -834,6 +939,15 @@ dialog::backdrop{background:rgba(30,40,45,.34); backdrop-filter:blur(3px)}
 .proj-row .pn{font-size:12.5px;font-weight:600}
 .proj-row .pc{margin-left:auto;font:10px var(--font-mono);color:var(--text-3)}
 .proj-row .dirs{font:9.5px var(--font-mono);color:var(--text-3);margin-top:2px}
+/* 上移/下移：手机上 HTML5 拖拽不工作，这两个按钮是那边唯一能改顺序的入口。
+   桌面端也留着 —— 挪一位比拖拽更准，不会插错行。 */
+.proj-step{
+  flex:0 0 auto;width:22px;height:20px;padding:0;margin-left:-3px;
+  font-size:11px;line-height:1;font-family:var(--font-mono);
+}
+.proj-row .proj-step + .proj-step{margin-left:-1px}
+.proj-step:disabled{opacity:.35;cursor:default}
+.proj-step:disabled:hover{border-color:var(--ctl-edge);color:var(--text-2)}
 /* 「+ 新建」这类虚线次要按钮：.mini 挂在总则里，这里只写虚线差量 */
 .mini{
   font-size:11px;color:var(--text-3);width:100%;padding:6px 10px;
@@ -996,6 +1110,38 @@ dialog::backdrop{background:rgba(30,40,45,.34); backdrop-filter:blur(3px)}
 }
 .dr-head .ttl{flex:1;min-width:0}
 .dr-head .ttl b{font-size:13.5px;font-weight:750;display:block;line-height:1.45;letter-spacing:-.2px}
+/* 标题就地编辑：点一下 b 换成 input。只写差量 —— 材质走「输入框」总则 */
+.dr-head .ttl b[data-edit]{cursor:text;border-radius:6px;transition:background .14s, box-shadow .14s}
+.dr-head .ttl b[data-edit]:hover{background:rgba(255,255,255,.72);box-shadow:inset 0 0 0 1px var(--ctl-edge)}
+.dr-title-in{
+  width:100%;font-size:13.5px;font-weight:750;line-height:1.45;letter-spacing:-.2px;
+  padding:3px 7px;
+}
+/* 抽屉头部的主按钮区：待澄清时占一行，别和「删/✕」抢位置 */
+.dr-cta{display:flex;gap:7px;align-items:center;margin-top:9px;flex-wrap:wrap}
+.dr-cta button{font-size:11.5px;padding:6px 12px}
+/* 「还缺这些」：内容层，实底，逐条列 */
+.dr-gaps{margin:0;padding-left:16px;font-size:12px;line-height:1.75;color:var(--text-2)}
+.dr-gaps li{margin:2px 0}
+/* 原文编辑：textarea 高度自适应内容（JS 写 height），这里只给范围 */
+.sect-edit{width:100%;min-height:64px;font-size:12px;line-height:1.72;padding:8px 10px;resize:vertical}
+/* 抽屉里的待发附件：复用底栏 .thumb 的材质，只差在排布 */
+.dr-thumbs{display:flex;gap:6px;flex-wrap:wrap}
+.dr-thumbs:empty{display:none}
+/* 消息气泡里的附件：图可点开（走 #lightbox），文件是链接 */
+.dm .atts{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}
+.dm .atts img{
+  width:76px;height:76px;object-fit:cover;border-radius:7px;
+  border:1px solid var(--line);cursor:zoom-in;display:block;
+}
+.dm .atts img:hover{outline:1px solid var(--orange)}
+.dm .atts a{
+  font:10.5px var(--font-mono);color:var(--accent-text);text-decoration:none;
+  padding:2px 8px;border-radius:999px;border:1px solid var(--ctl-edge);
+  background:rgba(255,255,255,.72);display:inline-flex;align-items:center;gap:4px;
+}
+.dm .atts a:hover{border-color:var(--danger-edge)}
+.dm.me .atts a{color:var(--on-dark);background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.28)}
 /* 删除是不可逆操作，默认低调，悬停才变红 —— 别让人误点 */
 #drDelete{color:var(--text-4);font-size:11px;padding:3px 8px}
 #drDelete:hover{color:var(--p0);border-color:var(--danger-edge);background:var(--banner-bad-bg)}
@@ -1095,6 +1241,12 @@ dialog::backdrop{background:rgba(30,40,45,.34); backdrop-filter:blur(3px)}
   width:100%;min-height:38px;max-height:120px;resize:none;font-size:12.5px;
   line-height:1.55;padding:9px 12px;
 }
+/* 拖文件到对话输入框上方时给个落点提示。只描边不换底 —— 输入框本身是内凹的，
+   再叠一层底色会看不出是"被覆盖"还是"坏了" */
+.dr-foot textarea.drop-hot{
+  border-color:var(--orange);
+  box-shadow:var(--ctl-inset-shadow), var(--ctl-focus-ring);
+}
 .dr-row{display:flex;align-items:center;gap:8px}
 .dr-row .hint{flex:1;font:9.5px var(--font-mono);color:var(--text-4)}
 .dr-row button{font-size:11.5px;padding:7px 14px}
@@ -1180,14 +1332,14 @@ body.solo #collapseBtn{display:none}
   .filters{background:#fbfcfc}
   .col{background:#eef2f3}
   dialog,.drawer{background:#f7fafb}
-  .sel-menu{background:#fbfdfd}
+  .sel-menu,.picker{background:#fbfdfd}
   .drawer-mask{backdrop-filter:none;-webkit-backdrop-filter:none}
 }
 /* 系统要求降低透明度：玻璃层全部变实色 */
 @media (prefers-reduced-transparency: reduce) {
   .topbar,.dock{background:#f4f7f8;-webkit-backdrop-filter:none;backdrop-filter:none}
   .filters,.col{background:#f2f5f6;-webkit-backdrop-filter:none;backdrop-filter:none}
-  dialog,.drawer,.sel-menu{background:#f8fafb;-webkit-backdrop-filter:none;backdrop-filter:none}
+  dialog,.drawer,.sel-menu,.picker{background:#f8fafb;-webkit-backdrop-filter:none;backdrop-filter:none}
   .drawer-mask{-webkit-backdrop-filter:none;backdrop-filter:none}
   .col:after,.systembox:after,.sidebar:before{display:none}
 }
@@ -1242,6 +1394,14 @@ body.solo #collapseBtn{display:none}
         </span>
         <span class="cnt" id="cntAll">0</span>
       </div>
+      <!-- 流水线第一道关卡。永远显示（0 也显示）：它的存在本身提醒「还有东西没澄清」 -->
+      <div class="nav-link nav-link--draft" data-view="clarify" title="需求还不够开工的任务，先在这里澄清">
+        <span class="name">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18z"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1 .9-1 1.6v.4"/><path d="M12 17.2h.01"/></svg>
+          <span class="ico-text">待澄清</span>
+        </span>
+        <span class="cnt" id="cntDraft">0</span>
+      </div>
       <div class="nav-link" data-filter="todo">
         <span class="name">
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
@@ -1262,6 +1422,8 @@ body.solo #collapseBtn{display:none}
           <span class="ico-text">已完成</span>
         </span>
         <span class="cnt" id="cntDone">0</span>
+        <!-- 归档是已完成之后的下一步，挂在同一行右侧：小字入口，不是第四个视图大按钮 -->
+        <span class="nav-act" id="cntArch" title="看已归档的任务">归档 <i id="cntArchNum">0</i></span>
       </div>
     </div>
 
@@ -1278,7 +1440,10 @@ body.solo #collapseBtn{display:none}
         </div>
         <div class="sys-bar" id="sysBar"></div>
         <button class="sys-btn" id="settingsBtn" title="设置">
-          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>
+          <!-- 8 齿齿轮。之前这里是「圆 + 八根等长射线」，那是亮度/太阳的画法，
+               在 13px 下看着就是一盏小灯（UI-5）。齿高 1.9px 是 13px 下还能
+               分辨齿形的下限，再矮就糊成一圈。 -->
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-linejoin="round"><path d="M10.62 5.24L10.46 1.71L13.54 1.71L13.38 5.24L14.64 5.63L15.81 6.25L18.19 3.64L20.36 5.81L17.75 8.19L18.37 9.36L18.76 10.62L22.29 10.46L22.29 13.54L18.76 13.38L18.37 14.64L17.75 15.81L20.36 18.19L18.19 20.36L15.81 17.75L14.64 18.37L13.38 18.76L13.54 22.29L10.46 22.29L10.62 18.76L9.36 18.37L8.19 17.75L5.81 20.36L3.64 18.19L6.25 15.81L5.63 14.64L5.24 13.38L1.71 13.54L1.71 10.46L5.24 10.62L5.63 9.36L6.25 8.19L3.64 5.81L5.81 3.64L8.19 6.25L9.36 5.63Z"/><circle cx="12" cy="12" r="3.4"/></svg>
           <span>设置</span>
         </button>
       </div>
@@ -1314,22 +1479,24 @@ body.solo #collapseBtn{display:none}
           <h1>全部任务</h1>
           <span class="count" id="total"></span>
           <span class="spacer"></span>
-        </div>
-        <div class="filters">
-          <span class="filters-ico" aria-hidden="true">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
-          </span>
-          <select id="project" class="sel-native"><option value="">全部项目</option></select>
-          <select id="priority" class="sel-native">
-            <option value="">全部优先级</option>
-            <option value="p0">P0 阻塞</option>
-            <option value="p1">P1 紧急</option>
-            <option value="p2">P2 常规</option>
-            <option value="p3">P3 低</option>
-            <option value="p4">P4 待定</option>
-          </select>
-          <select id="category" class="sel-native"><option value="">全部类别</option></select>
-          <button class="flt-reset" id="fltReset" type="button" hidden>清空</button>
+          <!-- 筛选条挂在标题行右侧：它单独占一行要白扔 47px 纵向空间（UI-4）。
+               < 1100px 时靠 CSS 让它自己换行铺满，标题不受影响。 -->
+          <div class="filters">
+            <span class="filters-ico" aria-hidden="true">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+            </span>
+            <select id="project" class="sel-native"><option value="">全部项目</option></select>
+            <select id="priority" class="sel-native">
+              <option value="">全部优先级</option>
+              <option value="p0">P0 阻塞</option>
+              <option value="p1">P1 紧急</option>
+              <option value="p2">P2 常规</option>
+              <option value="p3">P3 低</option>
+              <option value="p4">P4 待定</option>
+            </select>
+            <select id="category" class="sel-native"><option value="">全部类别</option></select>
+            <button class="flt-reset" id="fltReset" type="button" hidden>清空</button>
+          </div>
         </div>
       </header>
 
@@ -1461,8 +1628,9 @@ body.solo #collapseBtn{display:none}
   <div class="dr-pane">
     <div class="dr-head">
       <div class="ttl">
-        <b id="drTitle"></b>
+        <b id="drTitle" title="点一下改标题"></b>
         <div class="dr-meta" id="drMeta"></div>
+        <div class="dr-cta" id="drCta"></div>
       </div>
       <button class="icon-btn" id="drDelete" title="删除这条任务">删</button>
       <button class="icon-btn" id="drClose" title="关闭">✕</button>
@@ -1471,12 +1639,18 @@ body.solo #collapseBtn{display:none}
     <div class="dr-detail" id="drDetail"></div>
     <div class="dr-body" id="drBody"></div>
     <div class="dr-foot">
+      <div class="dr-thumbs" id="drThumbs"></div>
       <textarea id="drInput" rows="1" placeholder="说点什么：改优先级、换项目、讨论方案…"></textarea>
       <div class="dr-row">
-        <span class="hint">Enter 发送 · Shift+Enter 换行</span>
+        <!-- 独立的 input，不跟底栏共用 #fileInput：两处的待发送状态会串 -->
+        <button class="icon-btn" id="drAttachBtn" title="添加附件">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M21 12.5l-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg>
+        </button>
+        <span class="hint">Enter 发送 · Shift+Enter 换行 · 可贴图 / 拖文件</span>
         <button id="drClear" title="清空对话">清空</button>
         <button class="primary" id="drSend">发送</button>
       </div>
+      <input type="file" id="drFileInput" multiple hidden>
     </div>
   </div>
   <div class="dr-split" id="drSplit" role="separator" aria-orientation="vertical"
@@ -1514,7 +1688,9 @@ const SOLO = new URLSearchParams(location.search).has('solo');
 const LS_W = 'ti.captureWidth';
 
 let store = { projects:['默认'], tasks:[], counts:{}, total:0 };
-let filters = { project:'', priority:'', category:'' };
+// 项目筛选只有一份状态（navProject）。filters 里不放 project ——
+// 两份状态一定会出现「侧栏高亮 A、下拉写着 B」。
+let filters = { priority:'', category:'' };
 
 const $ = s => document.querySelector(s);
 
@@ -1616,49 +1792,360 @@ $('#sideToggle')?.addEventListener('click', () => setSidebar(!collapsedSide));
 
 /* ---------------- 侧栏：状态导航 / 项目导航 ---------------- */
 
-let navFilter = 'all';        // all | todo | doing | done
-let navProject = '';          // 项目名，空表示全部
+/* 视图轴：一条流水线，不是两个并列维度（见 ISSUES.md「共用判断 2」）
+     board    → 看板三列（未开始 / 进行中 / 已完成）
+     clarify  → 待澄清，单列
+     archived → 归档，单列
+   navProject 只在 board 视图里有意义；「默认」是一个特殊项目 = 未分配收件筐。 */
+let navView = 'board';        // board | clarify | archived
+let navFilter = 'all';        // board 视图内部：all | todo | doing | done
+let navProject = '';          // 项目名，空表示全部；'默认' = 未分配筐
+const INBOX = '默认';          // 收件筐的项目名（后端 core.mjs 同一个常量）
+
+/* 组内重复出现的项目名：'默认' 走收件筐语义，其余按名字比对。
+   放在一处，免得过滤、计数、徽章三处各写一遍判断。 */
+function isInbox(p){ return p === INBOX; }
+
+/* 按流水线判定一条任务属于哪个视图。顺序即优先级，命中即停：
+   归档 → 待澄清 → 未分配 → 看板列。 */
+function inView(t){
+  if (navView === 'archived') return !!t.archived_at;
+  if (t.archived_at) return false;                       // 归档的只在归档视图出现
+  if (navView === 'clarify') return t.dev_ready === false;
+  if (t.dev_ready === false) return false;               // 待澄清的不进看板
+  if (isInbox(t.project)) {
+    // 「默认」筐：只有点它的时候才看得到内容；看板三列里一条都不留
+    return navProject === INBOX;
+  }
+  if (navProject === INBOX) return false;                // 筐里不该混进真项目
+  return true;
+}
 
 function renderSidebar(){
   const c = store.counts || {};
+  const tasks = store.tasks || [];
   const set = (id, v) => { const el = $('#' + id); if (el) el.textContent = v; };
   set('cntAll', store.total || 0);
   set('cntTodo', c.todo || 0);
   set('cntDoing', c.doing || 0);
   set('cntDone', c.done || 0);
+  // 待澄清：未归档且未确认开工。始终显示（0 也显示）—— 它的存在本身就是提示
+  set('cntDraft', tasks.filter(t => !t.archived_at && t.dev_ready === false).length);
+  // 归档条数：已完成之后的那一档，单独数
+  set('cntArchNum', tasks.filter(t => !!t.archived_at).length);
 
   // 状态高亮
   document.querySelectorAll('#navMenu .nav-link').forEach(el => {
-    el.classList.toggle('active', el.dataset.filter === navFilter && !navProject);
+    const isView = el.dataset.view === 'clarify';
+    el.classList.toggle('active',
+      isView ? navView === 'clarify'
+             : navView === 'board' && el.dataset.filter === navFilter && !navProject);
   });
+  $('#cntArch')?.classList.toggle('active', navView === 'archived');
 
   // 项目列表
   const host = $('#navProjects');
   if (!host) return;
   const projects = store.projects || [];
   host.innerHTML = projects.map(p => {
-    const n = (store.tasks || []).filter(t => t.project_id === p.id || t.project === p.name).length;
+    const inbox = isInbox(p.name);
+    // 「默认」的计数只算已确认开工的：待澄清的在它自己的页签里数（DEF-1）
+    const n = tasks.filter(t => (t.project_id === p.id || t.project === p.name)
+      && !t.archived_at && (inbox ? t.dev_ready !== false : true)).length;
     const active = navProject === p.name ? ' active' : '';
     const initial = (p.name || '?').trim().slice(0, 1).toUpperCase();
-    return `<div class="nav-link${active}" data-proj="${esc(p.name)}" title="${esc(p.name)}">
+    // 「默认」用收件筐图标，不用文件夹 —— 它不是一个装文件的目录
+    const ico = inbox
+      ? '<svg class="ico-folder" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
+        + '<path d="M3 13h4l1.5 2.5h7L17 13h4"/><path d="M5.2 5.6h13.6l2.2 7.4v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4z"/></svg>'
+      : '<svg class="ico-folder" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+    const sub = inbox ? '<span class="nav-sub">未分配</span>' : '';
+    // 「默认」不可拖：它永远是第一位，是流水线的最后一道落点
+    return `<div class="nav-link${active}${inbox ? ' nav-link--inbox proj-fixed' : ''}"`
+      + ` data-proj="${esc(p.name)}" data-pid="${esc(p.id)}" title="${esc(inbox ? '未分配收件筐：还没定项目的任务落在这里' : p.name)}"`
+      + (inbox ? '' : ' draggable="true"') + `>
       <span class="name">
-        <svg class="ico-folder" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        ${ico}
         <span class="ico-initial">${esc(initial)}</span>
-        <span class="ico-text">${esc(p.name)}</span>
+        <span class="ico-text">${esc(p.name)}</span>${sub}
       </span>
       <span class="cnt">${n}</span>
     </div>`;
-  }).join('') || '<div class="nav-link" style="color:#8a969a">（暂无项目）</div>';
+  }).join('') || '<div class="nav-link" style="color:var(--text-3)">（暂无项目）</div>';
 
   host.querySelectorAll('[data-proj]').forEach(el => {
     el.addEventListener('click', () => {
       const name = el.dataset.proj;
       navProject = navProject === name ? '' : name;
+      navView = 'board';
       navFilter = navProject ? 'all' : navFilter;
       syncFilterUI();
       render();
       renderSidebar();
     });
+  });
+
+  bindProjectDrag();
+}
+
+/* ---------------- 侧栏项目拖拽排序 ----------------
+   和看板卡片是两个手势：项目行点一下是筛选，按住拖才是排序。
+   所以 mousedown 之后移动超过 4px 才算拖拽 —— 没有这个阈值，
+   点一下就触发一次 reorder（SIDE-1 明确提过）。 */
+const PROJ_DRAG_SLOP = 4;
+let projDrag = null;
+
+function bindProjectDrag(){
+  const host = $('#navProjects');
+  if (!host) return;
+
+  host.querySelectorAll('[data-proj][draggable="true"]').forEach(el => {
+    el.addEventListener('mousedown', e => {
+      // 只认左键；按下时的坐标留着，mousemove 里量位移
+      if (e.button !== 0) return;
+      projDrag = { el, x: e.clientX, y: e.clientY, id: el.dataset.pid, armed: false };
+    });
+    el.addEventListener('dragstart', e => {
+      // 阈值必须由 mousemove 来判，不能在这量：
+      // Chrome 的 dragstart 里 clientX/Y 恒为 0，拿它算位移永远是 0，
+      // 于是 armed 永远置不上、每条拖拽都被 preventDefault 掉 —— 拖不动。
+      if (!projDrag || projDrag.el !== el || !projDrag.armed) { e.preventDefault(); return; }
+      e.dataTransfer.setData('text/plain', el.dataset.pid);
+      e.dataTransfer.effectAllowed = 'move';
+      el.classList.add('proj-drag');
+    });
+    el.addEventListener('dragend', () => {
+      el.classList.remove('proj-drag');
+      clearProjDrop();
+      projDrag = null;
+    });
+  });
+
+  // 位移超过阈值才把这次按下列为「拖拽」，否则算点击（点一下是筛选）。
+  // 挂 document 上而不是行上：手指/鼠标可能在按下的那一刻就已经离开那一行了。
+  if (!bindProjectDrag.bound) {
+    bindProjectDrag.bound = true;
+    document.addEventListener('mousemove', e => {
+      if (!projDrag || projDrag.armed) return;
+      if (Math.hypot(e.clientX - projDrag.x, e.clientY - projDrag.y) > PROJ_DRAG_SLOP) {
+        projDrag.armed = true;
+      }
+    });
+    document.addEventListener('mouseup', () => {
+      // 拖拽中松手由 dragend 收尾；这里只负责清掉「按了没动」的状态
+      if (projDrag && !projDrag.armed) projDrag = null;
+    });
+  }
+
+  host.querySelectorAll('[data-proj]').forEach(el => {
+    const fixed = el.classList.contains('proj-fixed');
+
+    el.addEventListener('dragover', e => {
+      // 「默认」不接受插入：它永远在第一位，落点画在它上面会让人以为可以
+      if (fixed) { e.dataTransfer.dropEffect = 'none'; return; }
+      if (!projDrag?.armed) return;              // 没真在拖就什么都不画
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      clearProjDrop();
+      const r = el.getBoundingClientRect();
+      const after = e.clientY > r.top + r.height / 2;
+      el.classList.add('proj-drop');
+      el.dataset.drop = after ? 'after' : 'before';
+    });
+    el.addEventListener('dragleave', () => {
+      el.classList.remove('proj-drop');
+      delete el.dataset.drop;
+    });
+    el.addEventListener('drop', async e => {
+      if (fixed) return;
+      const movedId = e.dataTransfer.getData('text/plain') || projDrag?.id;
+      if (!movedId) return;
+      e.preventDefault();
+      const r = el.getBoundingClientRect();
+      const after = e.clientY > r.top + r.height / 2;
+      clearProjDrop();
+      await reorderProject(movedId, el.dataset.pid, after);
+    });
+  });
+
+  host.addEventListener('mouseup', () => { projDrag = null; });
+}
+
+function clearProjDrop(){
+  document.querySelectorAll('#navProjects .proj-drop').forEach(el => {
+    el.classList.remove('proj-drop');
+    delete el.dataset.drop;
+  });
+}
+
+/* 先改本地顺序并重绘，再提交。等请求回来才动的话，拖完会有一次可见的跳回。 */
+async function reorderProject(movedId, targetId, after){
+  const list = (store.projects || []).slice();
+  const from = list.findIndex(p => p.id === movedId);
+  if (from < 0) return;
+  const [moved] = list.splice(from, 1);
+  let to = list.findIndex(p => p.id === targetId);
+  if (to < 0) return;
+  if (after) to += 1;
+  list.splice(to, 0, moved);
+  // 「默认」固定第一位，前端自己也不许把它挪下来
+  list.sort((a, b) => (isInbox(a.name) ? -1 : 0) - (isInbox(b.name) ? -1 : 0));
+  store.projects = list;
+  renderSidebar();
+
+  try {
+    const r = await api('POST', '/api/projects/reorder',
+      { ids: list.filter(p => !isInbox(p.name)).map(p => p.id) });
+    if (r.projects) { store.projects = r.projects; renderSidebar(); }
+  } catch (e) {
+    toast('排序没存上：' + e.message);
+    await refresh();                    // 服务端才是真的，拉回来对齐
+  }
+}
+
+/* ---------------- 项目选择浮层 ----------------
+   原来这里是 prompt()：系统对话框做不了搜索、带不了任务数、也长不出「新建」那一行。
+   现在复用 .sel-menu 的玻璃材质 + .sel-opt 的行，只多一个过滤框 —— 项目超过
+   十来个的时候就该能搜，而不是让人在滚动条里找。 */
+let pickerEl = null;
+let pickerTaskId = null;
+
+// 名字比较要先归一：尾随空格 / 大小写 / 别名都算命中，
+// 否则「cabinet 」会走去新建，后端回一句「项目已存在」，人只看到一句失败。
+function normName(s){ return String(s == null ? '' : s).trim().toLowerCase(); }
+
+function findProjectByName(name){
+  const k = normName(name);
+  if (!k) return null;
+  return (store.projects || []).find(p =>
+    normName(p.name) === k || (p.aliases || []).some(a => normName(a) === k)) || null;
+}
+
+function closePicker(){
+  if (pickerEl) { pickerEl.remove(); pickerEl = null; }
+  pickerTaskId = null;
+}
+
+function projectPicker(taskId, anchor){
+  closePicker();
+  pickerTaskId = taskId;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'sel-menu picker';
+  wrap.innerHTML = '<input class="picker-in" placeholder="搜项目，或输入新名字回车新建" '
+    + 'autocomplete="off" spellcheck="false" aria-label="选项目">'
+    + '<div class="picker-list" role="listbox"></div>';
+  document.body.appendChild(wrap);
+  pickerEl = wrap;
+
+  const input = wrap.querySelector('.picker-in');
+  const list = wrap.querySelector('.picker-list');
+  let hot = 0;
+
+  function rows(){
+    const q = normName(input.value);
+    const items = (store.projects || [])
+      .filter(p => !q || normName(p.name).includes(q) || (p.aliases || []).some(a => normName(a).includes(q)))
+      .map(p => ({ name: p.name, count: Number(p.taskCount || 0) }));
+    return items;
+  }
+
+  function newName(){ return input.value.trim(); }
+
+  function render(){
+    const items = rows();
+    const nn = newName();
+    // 「新建」只在名字真的要新建时才出现：已经存在就变灰，不发出去让后端报错
+    const exists = !!findProjectByName(nn);
+    const html = items.map((p, i) =>
+      '<div class="sel-opt' + (i === hot ? ' hot' : '') + '" role="option" data-name="'
+      + esc(p.name) + '"><span>' + esc(p.name) + '</span><span class="sub">'
+      + p.count + '</span></div>').join('')
+      + (items.length ? '' : '<div class="sel-empty">没有匹配的项目</div>')
+      + (nn && !exists
+        ? '<div class="sel-opt picker-new" role="option" data-new="1"><span>+ 新建「'
+          + esc(nn) + '」</span></div>'
+        : '');
+    list.innerHTML = html;
+    hot = Math.min(hot, Math.max(0, items.length - 1));
+  }
+
+  function move(d){
+    // 只在真项目之间移动；「新建」靠「没有匹配项时它自动成为唯一选项」来选
+    const n = rows().length;
+    if (!n) return;
+    hot = (hot + d + n) % n;
+    render();
+    list.querySelector('.sel-opt.hot')?.scrollIntoView({ block: 'nearest' });
+  }
+
+  async function choose(name){
+    const nn = String(name || '').trim();
+    if (!nn) return;
+    const hit = findProjectByName(nn);
+    try {
+      let body;
+      if (hit) body = { project_id: hit.id, project: hit.name };
+      else {
+        const np = await api('POST', '/api/projects', { name: nn });
+        body = { project_id: np.id, project: np.name };
+      }
+      await api('PATCH', '/api/tasks/' + encodeURIComponent(pickerTaskId),
+        { ...body, needs_project: false });
+      closePicker();
+      await refresh();
+      toast('已归到 ' + body.project);
+    } catch (e) { toast('失败：' + e.message); }
+  }
+
+  input.addEventListener('input', () => { hot = 0; render(); });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      const items = rows();
+      const nn = newName();
+      if (items.length) choose(items[Math.min(hot, items.length - 1)].name);
+      else if (nn && !findProjectByName(nn)) choose(nn);
+    } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closePicker(); }
+  });
+  list.addEventListener('click', e => {
+    const opt = e.target.closest('.sel-opt');
+    if (!opt) return;
+    if (opt.dataset.new) choose(newName());
+    else choose(opt.dataset.name);
+  });
+
+  render();
+
+  // 贴着徽章放，但要留在视口里 —— 900px 宽时往右铺会出屏
+  const r = anchor.getBoundingClientRect();
+  wrap.style.left = Math.max(8, Math.min(r.left, window.innerWidth - wrap.offsetWidth - 8)) + 'px';
+  const below = r.bottom + 6;
+  wrap.style.top = (below + wrap.offsetHeight > window.innerHeight - 8
+    ? Math.max(8, r.top - wrap.offsetHeight - 6) : below) + 'px';
+  input.focus();
+}
+
+/* 导航点击：视图切换是纯本地操作，不打服务端 */
+function bindNavViews(){
+  document.querySelectorAll('#navMenu .nav-link[data-view]').forEach(el => {
+    el.addEventListener('click', () => {
+      navView = el.dataset.view;
+      navProject = '';                  // 视图切换退出项目筛选，否则会看到空列表
+      syncFilterUI();
+      render();
+      renderSidebar();
+    });
+  });
+  $('#cntArch')?.addEventListener('click', e => {
+    e.stopPropagation();
+    navView = navView === 'archived' ? 'board' : 'archived';
+    navProject = '';
+    syncFilterUI();
+    render();
+    renderSidebar();
   });
 }
 
@@ -1919,24 +2406,38 @@ function wireModelCombo(){
 function syncFilterUI(){
   const proj = $('#project');
   if (proj) proj.value = navProject;
-  // 选中的筛选项高亮，未选中的低调
-  [['#project', filters.project], ['#priority', filters.priority], ['#category', filters.category]]
+  // 选中的筛选项高亮，未选中的低调。项目那格看 navProject ——
+  // 项目筛选只有一个来源，filters.project 那一路已经删掉了
+  [['#project', navProject], ['#priority', filters.priority], ['#category', filters.category]]
     .forEach(([sel, val]) => { const el = $(sel); if (el) el.classList.toggle('on', !!val); });
   selSync();
   const reset = $('#fltReset');
-  if (reset) reset.hidden = !(filters.project || filters.priority || filters.category);
+  if (reset) reset.hidden = !(navProject || filters.priority || filters.category);
   const crumb = $('#crumbView');
-  if (crumb) crumb.textContent = navProject ? navProject.toUpperCase() : 'OVERVIEW';
+  // 面包屑跟着视图走：它回答「我现在在哪一层」，不是装饰
+  const VIEW_CRUMB = { clarify: 'CLARIFY', archived: 'ARCHIVED' };
+  if (crumb) {
+    crumb.textContent = navProject
+      ? (isInbox(navProject) ? 'INBOX' : navProject.toUpperCase())
+      : (VIEW_CRUMB[navView] || 'OVERVIEW');
+  }
   const h1 = document.querySelector('header.top h1');
   if (h1) {
-    const map = { all: '全部任务', todo: '未开始', doing: '进行中', done: '已完成' };
-    h1.textContent = navProject ? navProject : (map[navFilter] || '全部任务');
+    const map = { all: '全部任务', todo: '未开始', doing: '进行中', done: '已完成',
+      clarify: '待澄清', archived: '归档' };
+    // 「默认」是收件筐，标题不能只写「默认」两个字 —— 那看起来像个普通项目
+    const title = isInbox(navProject) ? '未分配' : navProject;
+    h1.textContent = title || (navView === 'board'
+      ? (map[navFilter] || '全部任务')
+      : (map[navView] || '全部任务'));
   }
 }
 
-document.querySelectorAll('#navMenu .nav-link').forEach(el => {
+/* 顶部状态导航（全部 / 未开始 / 进行中 / 已完成）*/
+document.querySelectorAll('#navMenu .nav-link[data-filter]').forEach(el => {
   el.addEventListener('click', () => {
     navFilter = el.dataset.filter;
+    navView = 'board';
     navProject = '';
     syncFilterUI();
     render();
@@ -1978,21 +2479,44 @@ function setCollapsed(v){
 
 /* ---------------- 看板 ---------------- */
 
+/* 视图内部还要过的两道门：状态列（只在 board 有意义）+ 顶部筛选条的优先级 / 类别。
+   项目筛选不在这里 —— 它已经由 inView() 按「默认」的收件筐语义处理过了。 */
 function matches(t){
-  if (navFilter !== 'all' && t.status !== navFilter) return false;
-  if (navProject && t.project !== navProject) return false;
-  if (filters.project && t.project !== filters.project) return false;
+  if (navView === 'board' && navFilter !== 'all' && t.status !== navFilter) return false;
   if (filters.priority && t.priority !== filters.priority) return false;
   if (filters.category && t.category !== filters.category) return false;
   return true;
 }
 
+/* 当前视图里该看见的任务。归档视图按 done_at 倒序 —— 那是个"翻旧账"的清单，
+   新的在上面才符合直觉。 */
+function visibleTasks(){
+  const list = (store.tasks || []).filter(t => inView(t) && matches(t));
+  if (navView === 'archived') {
+    list.sort((a, b) => String(b.done_at || b.archived_at || '')
+      .localeCompare(String(a.done_at || a.archived_at || '')));
+  }
+  return list;
+}
+
+/* 单列铺开：待澄清 / 归档 / 未分配筐都不是流水线三列，只是一串任务 */
+function singleColumn(){
+  if (navView === 'clarify') return { key: 'clarify', label: '待澄清', color: 'var(--draft-ink)' };
+  if (navView === 'archived') return { key: 'archived', label: '归档', color: 'var(--text-3)' };
+  if (isInbox(navProject)) return { key: 'inbox', label: '未分配', color: 'var(--neutral-ink)' };
+  return null;
+}
+
 function cardHTML(t){
   const meta = [];
-  meta.push(`<span class="tag" style="color:${PRI_COLOR[t.priority] || 'var(--text-3)'};background:${(PRI_COLOR[t.priority]||'#666')}22">${PRI_LABEL[t.priority] || '普通'}</span>`);
+  const isDraft = t.dev_ready === false;
+  const isArch = !!t.archived_at;
+  meta.push(`<span class="tag" style="color:${PRI_COLOR[t.priority] || 'var(--text-3)'};background:${(PRI_COLOR[t.priority]||'var(--text-3)')}22">${PRI_LABEL[t.priority] || '普通'}</span>`);
   if (t.category) meta.push(`<span class="tag cat">${esc(t.category)}</span>`);
-  if (t.project && t.project !== '默认') meta.push(`<span class="tag">${esc(t.project)}</span>`);
+  if (t.project && !isInbox(t.project)) meta.push(`<span class="tag">${esc(t.project)}</span>`);
   if (t.kind && t.kind !== 'text') meta.push(`<span class="kind">${KIND_LABEL[t.kind] || ''}</span>`);
+  // 待澄清：淡紫标签。它表示"卡住了等人"，不是待办也不是完成
+  if (isDraft) meta.push('<span class="tag draft">待澄清</span>');
   const shots = (t.payload && t.payload.images && t.payload.images.length)
     ? '<div class="shots">' + t.payload.images.slice(0, 4).map(src => `<img src="${esc(imgUrl(src))}" alt="" loading="lazy">`).join('') + '</div>'
     : '';
@@ -2003,42 +2527,97 @@ function cardHTML(t){
     ? '<span class="tag pending">判断中…</span>'
     : t.classify_state === 'failed'
       ? `<span class="tag failed" title="${esc(t.classify_reason||'')}">未判断</span>` : '';
-  const needProj = t.needs_project
-    ? '<span class="badge-need" data-assign="' + t.id + '">选项目</span>' : '';
+  /* 项目入口：两种状态都要有，位置也必须在同一处。
+     - 模型判不出项目（needs_project）→ 橙色「选项目」，是"来处理一下"
+     - 明确归到「默认」但没标 needs_project → 灰色「默认」，是"记着它未分配"
+     待澄清的卡片不给这个入口：它还没到分项目那一步，给出来会让人以为能跳过澄清。 */
+  let projBadge = '';
+  if (!isDraft && !isArch) {
+    if (t.needs_project) projBadge = '<span class="badge-need" data-assign="' + t.id + '">选项目</span>';
+    else if (isInbox(t.project)) projBadge = '<span class="badge-default" data-assign="' + t.id + '" title="它还在未分配筐里，点一下归到真项目">默认</span>';
+  }
+  // 归档视图里唯一要干的事就是取回。单独一行 —— meta 行是 nowrap+18px 定高，
+  // 塞进去会被 overflow 裁掉，正好落在"最该点的按钮点不到"这个坑里
+  const act = isArch
+    ? '<div class="card-foot"><button type="button" class="card-act" data-unarchive="'
+      + esc(t.id) + '" title="取回：回到已完成列">取回</button></div>'
+    : '';
+  // 待澄清卡片：只露第一条缺什么，其余去抽屉里看。整串塞进卡片会把高度撑爆
+  const gap = (isDraft && t.dev_gaps && t.dev_gaps.length)
+    ? `<div class="card-gap" title="${esc(t.dev_gaps.join('；'))}">还缺：${esc(t.dev_gaps[0])}${t.dev_gaps.length > 1 ? ' …' : ''}</div>`
+    : '';
+  const klass = ['card', t.status === 'done' ? 'done' : '', isArch ? 'archived' : '']
+    .filter(Boolean).join(' ');
   return `
-    <div class="card ${t.status === 'done' ? 'done' : ''}" draggable="true" data-id="${t.id}"
+    <div class="${klass}" draggable="${isArch ? 'false' : 'true'}" data-id="${esc(t.id)}"
          style="--bar:${PRI_COLOR[t.priority] || 'var(--p3)'}">
       <div class="t">${esc(t.title)}</div>
-      <div class="meta">${meta.join('')}${needProj}${cls}<span class="time">${ago(t.created_at)}</span></div>
-      ${shots}${fileRow}
+      ${gap}
+      <div class="meta">${meta.join('')}${projBadge}${cls}<span class="time">${ago(t.created_at)}</span></div>
+      ${shots}${fileRow}${act}
     </div>`;
 }
 
 function render(){
   const board = $('#board');
-  board.innerHTML = COLS.map(col => {
-    const items = store.tasks.filter(t => t.status === col.key && matches(t));
-    return `
-      <section class="col c-${col.key}" data-col="${col.key}">
+  const one = singleColumn();
+  board.classList.toggle('board--single', !!one);
+
+  if (one) {
+    const items = visibleTasks();
+    board.innerHTML = `
+      <section class="col c-${one.key}" data-col="${one.key}">
         <div class="col-head">
-          <span class="dot" style="background:${col.color}"></span>
-          <span class="col-title">${col.label}</span>
+          <span class="dot" style="background:${one.color}"></span>
+          <span class="col-title">${one.label}</span>
           <span class="col-num">${items.length}</span>
         </div>
         <div class="col-body">
-          ${items.length ? items.map(cardHTML).join('') : '<div class="empty">空</div>'}
+          ${items.length ? items.map(cardHTML).join('') : `<div class="empty">${emptyHint()}</div>`}
         </div>
       </section>`;
-  }).join('');
+  } else {
+    board.innerHTML = COLS.map(col => {
+      const items = store.tasks.filter(t => t.status === col.key && inView(t) && matches(t));
+      return `
+        <section class="col c-${col.key}" data-col="${col.key}">
+          <div class="col-head">
+            <span class="dot" style="background:${col.color}"></span>
+            <span class="col-title">${col.label}</span>
+            <span class="col-num">${items.length}</span>
+          </div>
+          <div class="col-body">
+            ${items.length ? items.map(cardHTML).join('') : '<div class="empty">空</div>'}
+          </div>
+        </section>`;
+    }).join('');
+  }
 
-  $('#total').textContent = store.total ? `${store.total} 条` : '';
+  // 计数只报「这个视图里看得见多少条」，不是全库总数 —— 后者在归档视图里会吓人
+  const shown = visibleTasks().length;
+  $('#total').textContent = shown ? `${shown} 条` : '';
   bindDrag();
   renderSidebar();
   refreshSystemBox();
 }
 
+function emptyHint(){
+  if (navView === 'clarify') return '都澄清完了';
+  if (navView === 'archived') return '还没有归档的任务';
+  if (isInbox(navProject)) return '筐是空的';
+  return '空';
+}
+
 function bindDrag(){
   document.querySelectorAll('.card').forEach(el => {
+    // 归档的卡片不可拖：它已经出了流水线，拖回去要显式「取回」
+    if (el.getAttribute('draggable') === 'false') {
+      el.addEventListener('click', (e) => {
+        if (e.target.closest('.shots img') || e.target.closest('[data-unarchive]')) return;
+        drOpen(el.dataset.id);
+      });
+      return;
+    }
     el.addEventListener('dragstart', e => {
       e.dataTransfer.setData('text/plain', el.dataset.id);
       e.dataTransfer.effectAllowed = 'move';
@@ -2046,11 +2625,15 @@ function bindDrag(){
     });
     el.addEventListener('dragend', () => { el.style.opacity = ''; });
     el.addEventListener('click', (e) => {
-      // 缩略图、徽章有自己的行为，别抢
-      if (e.target.closest('.shots img') || e.target.closest('[data-assign]')) return;
+      // 缩略图、徽章、取回按钮有自己的行为，别抢
+      if (e.target.closest('.shots img') || e.target.closest('[data-assign]')
+        || e.target.closest('[data-unarchive]')) return;
       drOpen(el.dataset.id);
     });
   });
+
+  // 单列视图（待澄清 / 归档 / 未分配）没有「列」可落，就不绑 dragover/drop
+  if (navView !== 'board' || isInbox(navProject)) return;
   document.querySelectorAll('.col').forEach(col => {
     col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('drag-over'); });
     col.addEventListener('dragleave', () => col.classList.remove('drag-over'));
@@ -2059,7 +2642,11 @@ function bindDrag(){
       col.classList.remove('drag-over');
       const id = e.dataTransfer.getData('text/plain');
       const status = col.dataset.col;
-      if (!id) return;
+      if (!id || !status) return;
+      const t = store.tasks.find(x => x.id === id);
+      // 待澄清的任务还没到能开工那一步：拖到进行中/已完成一律不动
+      if (t && t.dev_ready === false) { toast('先去「待澄清」确认可以开工'); return; }
+      if (t && t.archived_at) return;
       try {
         await api('POST', `/api/tasks/${encodeURIComponent(id)}/move`, { status });
         await refresh();
@@ -2082,9 +2669,14 @@ async function api(method, url, body){
 
 // 轮询带 since=上次的 revision。库里没变时后端只回几十字节，
 // 前端直接跳过 —— 不做 syncFilters/render，滚动位置也就不会被重置。
+//
+// 全量一次拿（include_archived=1），视图过滤全在前端做：轮询只发一条请求，
+// 切视图是纯本地操作，不用来回打服务端。只有这一个 URL，所以 since 逻辑不会串。
 async function refresh(opts){
   const since = opts && opts.poll ? store.revision : null;
-  const url = '/api/state' + (since ? '?since=' + encodeURIComponent(since) : '');
+  const qs = ['include_archived=1'];
+  if (since) qs.push('since=' + encodeURIComponent(since));
+  const url = '/api/state?' + qs.join('&');
   const next = await api('GET', url);
   if (next.unchanged) {
     // 库没变，但 build 信息可能变了（比如磁盘代码被改了）——顺手更新一下
@@ -2122,7 +2714,20 @@ let images = [];   // {path,url,name}
 let files = [];    // {path,name,original,size}
 let pending = 0;
 
-function say(t, cls){ const el = $('#msg'); el.textContent = t; el.className = 'cap-msg ' + (cls||''); }
+// 提示只活 6 秒。以前只写不清，判完那条「P2 常规 · 工作」会一直卡在底栏，
+// 看着像默认标签 —— 其实它是上一次判断的回声（DOCK-1）。
+const SAY_TTL = 6000;
+function say(t, cls){
+  const el = $('#msg');
+  el.textContent = t;
+  el.className = 'cap-msg ' + (cls||'');
+  clearTimeout(say._t);
+  if (!t) return;
+  say._t = setTimeout(() => {
+    // 只清自己写的那句：这 6 秒里可能又有新提示写进来了，别把新的抹掉
+    if (el.textContent === t) { el.textContent = ''; el.className = 'cap-msg'; }
+  }, SAY_TTL);
+}
 
 function refreshGo(){
   $('#go').disabled = (! $('#text').value.trim()) && !images.length && !files.length;
@@ -2240,6 +2845,7 @@ async function watchClassify(id){
 initLayout();
 buildSels();
 selSync();
+bindNavViews();
 wireModelCombo();
 
 $('#collapseBtn')?.addEventListener('click', () => setCollapsed(true));
@@ -2576,9 +3182,17 @@ function buildSections(t){
   if (t.payload?.text) raw.push(String(t.payload.text));
   if (t.payload?.urls?.length) raw.push('链接：\n' + t.payload.urls.join('\n'));
 
-  if (raw.length) {
-    secs.push({ key: 'raw', title: '原始描述', body: '<div>' + esc(raw.join('\n\n')) + '</div>' });
-  }
+  // 原文就地编辑：抄进来的原始记录是唯一的「事实来源」，
+  // 改它只能走 PATCH payload.text，不能让模型代写（chat.mjs 也不给它开字段）
+  // 空原文也给这一节：没有它就没地方「补一句」，而补原文是修好一条模糊任务最快的手段
+  secs.push({
+    key: 'raw',
+    title: '原始描述',
+    action: '<button class="mini-btn" data-raw-edit="1">' + (raw.length ? '编辑' : '补一句') + '</button>',
+    body: raw.length
+      ? '<div>' + esc(raw.join('\n\n')) + '</div>'
+      : '<span style="color:var(--text-3)">还没有原文。</span>'
+  });
 
   // 2. 图片
   if (t.payload?.images?.length) {
@@ -2611,16 +3225,33 @@ function buildSections(t){
   return secs;
 }
 
+/* 「还缺这些」：只有待澄清、且初判真的说了缺什么时才出现。
+   它跟原始描述分开放 —— 一个是用户抄进来的原话，一个是模型给的疑问，
+   混在一个 section 里会让人以为那些疑问也是自己写的。 */
+function gapsSection(t){
+  if (t.dev_ready !== false || !(t.dev_gaps || []).length) return null;
+  return {
+    key: 'gaps',
+    title: '还缺这些',
+    body: '<ul class="dr-gaps">'
+      + t.dev_gaps.map(g => '<li>' + esc(g) + '</li>').join('')
+      + '</ul>'
+  };
+}
+
 let drTask = null;
 
 function drRenderDetail(t){
   drTask = t;
   const host = $('#drDetail');
   const secs = buildSections(t);
+  const gaps = gapsSection(t);
+  if (gaps) secs.unshift(gaps);      // 「还缺什么」排最前：它是这一屏最该看的东西
 
   // 记住哪些是展开的
   const opened = new Set([...host.querySelectorAll('.sect.open')].map(e => e.dataset.k));
   if (!host.dataset.init) { opened.add('raw'); opened.add('brief'); host.dataset.init = '1'; }
+  if (gaps && !host.dataset.gapsInit) { opened.add('gaps'); host.dataset.gapsInit = '1'; }
 
   host.innerHTML = secs.map(sec => {
     const open = opened.has(sec.key) ? ' open' : '';
@@ -2633,7 +3264,8 @@ function drRenderDetail(t){
   // 折叠
   host.querySelectorAll('.sect-h').forEach(h => {
     h.addEventListener('click', (e) => {
-      if (e.target.closest('[data-brief]') || e.target.closest('[data-doc-open]')) return;
+      if (e.target.closest('[data-brief]') || e.target.closest('[data-doc-open]')
+        || e.target.closest('[data-raw-edit]')) return;
       h.parentElement.classList.toggle('open');
     });
   });
@@ -2641,6 +3273,10 @@ function drRenderDetail(t){
   // 展开到右侧预览栏
   const openBtn = host.querySelector('[data-doc-open]');
   if (openBtn) openBtn.addEventListener('click', (e) => { e.stopPropagation(); drDocOpen('brief'); });
+
+  // 原文就地编辑：「编辑」把正文换成 textarea，保存走 PATCH payload.text
+  const rawBtn = host.querySelector('[data-raw-edit]');
+  if (rawBtn) rawBtn.addEventListener('click', (e) => { e.stopPropagation(); drEditRaw(); });
 
   // 生成 / 重新生成
   const btn = host.querySelector('[data-brief]');
@@ -2669,16 +3305,27 @@ function drRenderDetail(t){
 }
 
 function drRenderHead(t){
-  $('#drTitle').textContent = t.title || '（无标题）';
+  const titleEl = $('#drTitle');
+  titleEl.textContent = t.title || '（无标题）';
+  // 点标题进编辑态：只换 input，不用 contenteditable（那东西会把换行、
+  // 粘贴富文本、IME 组合一堆行为一起放进来，收不住）
+  titleEl.dataset.edit = '1';
+  titleEl.onclick = () => drEditTitle(t);
 
   const tags = [];
   tags.push('<span class="tag" style="color:' + (PRI_COLOR[t.priority] || 'var(--text-3)')
-    + ';background:' + ((PRI_COLOR[t.priority] || '#666') + '22') + '">'
+    + ';background:' + ((PRI_COLOR[t.priority] || 'var(--text-3)') + '22') + '">'
     + (PRI_LABEL[t.priority] || '普通') + '</span>');
-  if (t.project) tags.push('<span class="tag">' + esc(t.project) + '</span>');
+  // 项目标签：『默认』要显式写成「未分配」，别让人以为有个叫默认的项目
+  if (t.project) {
+    tags.push('<span class="tag">'
+      + esc(isInbox(t.project) ? '未分配' : t.project) + '</span>');
+  }
   if (t.category) tags.push('<span class="tag cat">' + esc(t.category) + '</span>');
   // 状态用中文，别把 todo / doing 原样丢给用户看
   tags.push('<span class="tag">' + esc(STATUS_LABEL[t.status] || t.status) + '</span>');
+  if (t.dev_ready === false) tags.push('<span class="tag draft">待澄清</span>');
+  if (t.archived_at) tags.push('<span class="tag">已归档</span>');
 
   // 分类失败 / 卡住时给一个重判入口。以前这里什么都没有，
   // 判失败就只能删了重记 —— 而卡片上的「未判断」徽章又不可点。
@@ -2691,10 +3338,27 @@ function drRenderHead(t){
   }
   $('#drMeta').innerHTML = tags.join('');
 
-  // 快速改字段
-  const opts = (store.projects || []).map(p =>
-    '<option value="' + esc(p.name) + '"' + (p.name === t.project ? ' selected' : '') + '>'
-    + esc(p.name) + '</option>').join('');
+  // 头部主按钮：待澄清时是「确认可以开工」，归档时是「取回」。
+  // 这两个都是「这一步唯一该做的事」，所以放头部而不是塞进字段行。
+  const cta = [];
+  if (t.dev_ready === false) {
+    cta.push('<button type="button" class="primary" id="drReady">确认可以开工</button>');
+  }
+  if (t.archived_at) {
+    cta.push('<button type="button" id="drUnarchive">取回</button>');
+  }
+  const ctaHost = $('#drCta');
+  if (ctaHost) ctaHost.innerHTML = cta.join('');
+  $('#drReady')?.addEventListener('click', () => drConfirmReady(t));
+  $('#drUnarchive')?.addEventListener('click', () => drUnarchive(t));
+
+  // 快速改字段。项目条目后面带任务数 —— 重名时靠这个才分得清
+  const opts = (store.projects || []).map(p => {
+    const n = Number(p.taskCount || 0);
+    const label = isInbox(p.name) ? '未分配（' + n + '）' : p.name + '（' + n + '）';
+    return '<option value="' + esc(p.name) + '"' + (p.name === t.project ? ' selected' : '') + '>'
+      + esc(label) + '</option>';
+  }).join('');
   $('#drFields').innerHTML =
     '<select id="drPri" class="sel-native" data-sel="inline">'
       + ['p0','p1','p2','p3','p4'].map(k =>
@@ -2753,6 +3417,20 @@ async function drQuick(patch){
   } catch (e) { toast('改不了：' + e.message); }
 }
 
+/* 对话附件：形状跟 tasks.payload 的 images/files 一样，
+   所以图片能用 imgUrl()、文件能用 /files/<name> —— 不必另造一套。 */
+function attsHTML(att){
+  if (!att) return '';
+  const imgs = (att.images || []).map(src =>
+    '<img src="' + esc(imgUrl(src)) + '" alt="" loading="lazy">').join('');
+  const links = (att.files || []).map(f => {
+    const name = String(f).split(/[\\/]/).pop();
+    return '<a href="/files/' + encodeURIComponent(name) + '" target="_blank" rel="noopener">'
+      + esc(name) + '</a>';
+  }).join('');
+  return (imgs || links) ? '<div class="atts">' + imgs + links + '</div>' : '';
+}
+
 function drRenderThread(list){
   const body = $('#drBody');
   if (!list.length) {
@@ -2765,27 +3443,88 @@ function drRenderThread(list){
       ? '<span class="applied">已改 ' + Object.keys(m.patch)
           .map(k => ({title:'标题',priority:'优先级',category:'类别',project:'项目',status:'状态',note:'备注'}[k] || k))
           .join(' · ') + '</span>' : '';
+    // 纯附件消息没有文字：给个空 div 会在气泡里留一条空白，跳过
+    const bub = m.text ? '<div class="bub">' + esc(m.text) + '</div>' : '';
     return '<div class="dm ' + (m.role === 'user' ? 'me' : '') + '">'
-      + '<div class="bub">' + esc(m.text) + '</div>' + applied + '</div>';
+      + bub + attsHTML(m.attachments) + applied + '</div>';
   }).join('');
   body.scrollTop = body.scrollHeight;
+}
+
+/* ---------- 抽屉里的待发附件 ----------
+   独立一份状态，不跟底栏共用 images / files：底栏那批是「随手记新任务」的，
+   抽屉这批是「给这条任务补话」的，共用一个数组会串（贴一张图到抽屉，
+   底栏的「存下」按钮就自己亮了）。 */
+let drImages = [];
+let drFiles = [];
+
+function drRenderThumbs(){
+  const host = $('#drThumbs');
+  if (!host) return;
+  const parts = [];
+  drImages.forEach((im, k) => {
+    parts.push('<div class="thumb"><img src="' + esc(im.url) + '" alt="">'
+      + '<button data-k="img" data-i="' + k + '" title="移除">✕</button></div>');
+  });
+  drFiles.forEach((f, k) => {
+    const ext = (f.original || f.name || '').split('.').pop()?.slice(0, 4) || 'FILE';
+    parts.push('<div class="thumb file" title="' + esc(f.original || f.name) + '">'
+      + '<span class="fext">' + esc(ext) + '</span>'
+      + '<small>' + esc(humanSize(f.size || 0)) + '</small>'
+      + '<button data-k="file" data-i="' + k + '" title="移除">✕</button></div>');
+  });
+  host.innerHTML = parts.join('');
+  host.querySelectorAll('button').forEach(b => {
+    b.addEventListener('click', () => {
+      if (b.dataset.k === 'img') drImages.splice(+b.dataset.i, 1);
+      else drFiles.splice(+b.dataset.i, 1);
+      drRenderThumbs();
+    });
+  });
+}
+
+// 跟底栏 uploadFile 同一套流程，但落到 drImages / drFiles。
+// 没有直接复用它：那个函数把结果 push 进底栏的 images/files，是它的一部分语义。
+async function drUpload(f){
+  try {
+    const dataUrl = await readAsDataUrl(f);
+    const isImage = f.type.startsWith('image/');
+    const body = isImage ? { dataUrl } : { dataUrl, filename: f.name };
+    const d = await api('POST', '/api/upload', body);
+    if (isImage) drImages.push({ path: d.path, url: d.url, name: f.name });
+    else drFiles.push({ path: d.path, name: d.name, original: d.original || d.name, size: d.size || f.size });
+    drRenderThumbs();
+    return true;
+  } catch (e) {
+    toast('上传失败：' + e.message);
+    return false;
+  }
 }
 
 async function drSend(){
   const input = $('#drInput');
   const text = input.value.trim();
-  if (!text || drBusy || !drTaskId) return;
+  const imgs = drImages.map(i => i.path);
+  const fls = drFiles.map(f => f.path);
+  // 三者全空才算"什么都没说"：纯文件、纯图片也要能发出去
+  if ((!text && !imgs.length && !fls.length) || drBusy || !drTaskId) return;
 
   drBusy = true;
   $('#drSend').disabled = true;
   input.value = '';
   input.style.height = 'auto';
+  const pendingImgs = imgs.slice();
+  const pendingFiles = fls.slice();
+  drImages = [];
+  drFiles = [];
+  drRenderThumbs();
 
-  // 先乐观渲染用户这句
+  // 先乐观渲染用户这句（附件也用同一套渲染，发完再被服务端返回值覆盖）
   const body = $('#drBody');
   if (body.querySelector('.dr-empty')) body.innerHTML = '';
   body.insertAdjacentHTML('beforeend',
-    '<div class="dm me"><div class="bub">' + esc(text) + '</div></div>');
+    '<div class="dm me">' + (text ? '<div class="bub">' + esc(text) + '</div>' : '')
+    + attsHTML({ images: pendingImgs, files: pendingFiles }) + '</div>');
   body.scrollTop = body.scrollHeight;
 
   const thinking = document.createElement('div');
@@ -2795,18 +3534,162 @@ async function drSend(){
   body.scrollTop = body.scrollHeight;
 
   try {
-    const r = await api('POST', '/api/chat', { taskId: drTaskId, text });
+    const r = await api('POST', '/api/chat',
+      { taskId: drTaskId, text, images: pendingImgs, files: pendingFiles });
     thinking.remove();
     drRenderThread((await api('GET', '/api/tasks/' + encodeURIComponent(drTaskId))).messages || []);
     if (r.task) drRenderHead(r.task);
     await refresh();
   } catch (e) {
     thinking.innerHTML = '<div class="bub bad">失败：' + esc(e.message) + '</div>';
+    // 发失败要把附件放回去，否则用户得重新传一遍（文件已经在磁盘上了，重建引用就够）
+    pendingImgs.forEach(p => drImages.push({ path: p, url: imgUrl(p), name: '' }));
+    pendingFiles.forEach(p => drFiles.push({ path: p, name: p, original: String(p).split(/[\\/]/).pop(), size: 0 }));
+    drRenderThumbs();
   } finally {
     drBusy = false;
     $('#drSend').disabled = false;
     input.focus();
   }
+}
+
+/* ---------- 标题 / 原文就地编辑 ---------- */
+
+/* 标题：点 b 变 input。Enter 提交、Esc 取消（值回滚、不发请求）、失焦提交。
+   空标题前端就拦掉 —— 后端也拦，但让用户等一个来回才知道不行是没必要的。 */
+function drEditTitle(t){
+  const titleEl = $('#drTitle');
+  if (!titleEl || titleEl._editing) return;
+  const before = t.title || '';
+  const input = document.createElement('input');
+  input.className = 'dr-title-in';
+  input.value = before;
+  input.setAttribute('aria-label', '任务标题');
+  titleEl._editing = true;
+  titleEl.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let done = false;
+  const restore = () => {
+    titleEl._editing = false;
+    input.replaceWith(titleEl);
+  };
+  const cancel = () => {
+    if (done) return;
+    done = true;
+    restore();
+  };
+  const commit = async () => {
+    if (done) return;
+    const next = input.value.trim();
+    // 没改就什么都不发：点一下标题再点别处不应该产生 PATCH
+    if (next === before) { cancel(); return; }
+    if (!next) { toast('标题不能为空'); input.focus(); return; }
+    done = true;
+    try {
+      const r = await api('PATCH', '/api/tasks/' + encodeURIComponent(t.id), { title: next });
+      restore();
+      drRenderHead(r);
+      // 就地更新那条任务再重绘，不整页刷新 —— 卡片的滚动位置和展开态都留着
+      const hit = (store.tasks || []).find(x => x.id === t.id);
+      if (hit) hit.title = r.title;
+      render();
+      toast('标题已改');
+    } catch (e) {
+      toast('改不了：' + e.message);
+      done = false;
+      input.focus();
+    }
+  };
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancel(); }
+  });
+  input.addEventListener('blur', () => { commit(); });
+}
+
+/* 原文：把「原始描述」的正文换成 textarea。
+   保存走 PATCH { payload: { text } } —— core.patch 是深合并，images/files 原样留着。 */
+function drEditRaw(){
+  const host = $('#drDetail');
+  const sect = host?.querySelector('.sect[data-k="raw"]');
+  if (!sect || !drTask) return;
+  const bodyEl = sect.querySelector('.sect-b');
+  if (!bodyEl || bodyEl.querySelector('.sect-edit')) return;
+
+  const before = String(drTask.payload?.text || '');
+  bodyEl.innerHTML = '<textarea class="sect-edit" aria-label="原始描述"></textarea>'
+    + '<div class="dr-row" style="margin-top:7px">'
+    + '<span class="hint">保存只改原文，不动图片和附件</span>'
+    + '<button type="button" data-raw-cancel="1">取消</button>'
+    + '<button type="button" class="primary" data-raw-save="1">保存</button>'
+    + '</div>';
+  const ta = bodyEl.querySelector('.sect-edit');
+  ta.value = before;
+  sect.classList.add('open');
+  // 高度自适应内容：先归零再读 scrollHeight，否则只会越来越矮
+  const fit = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight + 2, 420) + 'px'; };
+  fit();
+  ta.addEventListener('input', fit);
+  ta.focus();
+  ta.setSelectionRange(ta.value.length, ta.value.length);
+
+  const cancel = () => drRenderDetail(drTask);
+  bodyEl.querySelector('[data-raw-cancel]').addEventListener('click', cancel);
+  bodyEl.querySelector('[data-raw-save]').addEventListener('click', async () => {
+    const next = ta.value;
+    if (next === before) { cancel(); return; }
+    try {
+      const r = await api('PATCH', '/api/tasks/' + encodeURIComponent(drTaskId),
+        { payload: { text: next } });
+      drTask = r;
+      drRenderDetail(r);
+      drDocRender();          // 预览栏的「原始描述」页签跟着变，别让两边说的不是一份
+      const hit = (store.tasks || []).find(x => x.id === r.id);
+      if (hit) hit.payload = r.payload;
+      toast('原文已保存');
+    } catch (e) { toast('保存失败：' + e.message); }
+  });
+  ta.addEventListener('keydown', e => {
+    // Ctrl/Cmd+Enter 保存：Enter 本身要留给换行（原文是多行的）
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      bodyEl.querySelector('[data-raw-save]').click();
+    } else if (e.key === 'Escape') {
+      e.preventDefault(); e.stopPropagation(); cancel();
+    }
+  });
+}
+
+/* 「确认可以开工」：这是流水线上的放行闸门。
+   放行后落哪一列由后端已有的项目决定，前端只负责把结果说清楚 ——
+   不然用户点完看不出任务去哪了（可能直接进了未分配筐，看板上没有）。 */
+async function drConfirmReady(t){
+  const btn = $('#drReady');
+  if (btn) { btn.disabled = true; btn.textContent = '提交中…'; }
+  try {
+    const r = await api('PATCH', '/api/tasks/' + encodeURIComponent(t.id), { dev_ready: true });
+    drRenderHead(r);
+    drRenderDetail(r);
+    await refresh();
+    const inbox = isInbox(r.project);
+    toast(inbox ? '已进未分配（点侧栏「默认」筐分项目）' : '已进看板');
+  } catch (e) {
+    toast('操作失败：' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = '确认可以开工'; }
+  }
+}
+
+async function drUnarchive(t){
+  try {
+    await api('PATCH', '/api/tasks/' + encodeURIComponent(t.id), { archived_at: null });
+    await refresh();
+    // 取回后它就不在当前（归档）视图里了，留着抽屉看一条已经不在这儿的任务没意义
+    drClose();
+    toast('已取回，回到已完成列');
+  } catch (e) { toast('取回失败：' + e.message); }
 }
 
 $('#drClose')?.addEventListener('click', drClose);
@@ -2839,6 +3722,39 @@ $('#drInput')?.addEventListener('input', e => {
   const ta = e.target;
   ta.style.height = 'auto';
   ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+});
+
+/* 抽屉对话的附件入口：按钮点文件、Ctrl+V 贴图、拖文件进来。
+   三条路都落到 drUpload()，跟底栏那套逻辑一致但状态独立。 */
+$('#drAttachBtn')?.addEventListener('click', () => $('#drFileInput')?.click());
+$('#drFileInput')?.addEventListener('change', async e => {
+  for (const f of [...e.target.files]) await drUpload(f);
+  e.target.value = '';
+});
+
+$('#drInput')?.addEventListener('paste', async e => {
+  const items = [...(e.clipboardData?.items || [])];
+  const imgs = items.filter(i => i.type.startsWith('image/')).map(i => i.getAsFile()).filter(Boolean);
+  const other = [...(e.clipboardData?.files || [])].filter(f => !f.type.startsWith('image/'));
+  if (!imgs.length && !other.length) return;      // 纯文字粘贴走浏览器默认行为
+  e.preventDefault();
+  for (const f of [...imgs, ...other]) await drUpload(f);
+});
+
+$('#drInput')?.addEventListener('dragover', e => {
+  if (!e.dataTransfer?.types?.includes('Files')) return;
+  e.preventDefault();
+  e.stopPropagation();          // 别让全页那个「松手就收进来」的遮罩接管
+  $('#drInput').classList.add('drop-hot');
+});
+$('#drInput')?.addEventListener('dragleave', () => $('#drInput').classList.remove('drop-hot'));
+$('#drInput')?.addEventListener('drop', async e => {
+  const dropped = [...(e.dataTransfer?.files || [])];
+  if (!dropped.length) return;
+  e.preventDefault();
+  e.stopPropagation();
+  $('#drInput').classList.remove('drop-hot');
+  for (const f of dropped) await drUpload(f);
 });
 
 /* ---------------- 目录浏览 ---------------- */
@@ -2926,23 +3842,69 @@ let editingProjectId = null;
 function renderProjList(){
   const host = $('#projList');
   if (!host) return;
-  host.innerHTML = (store.projects || []).map(p => {
+  const list = store.projects || [];
+  host.innerHTML = list.map((p, i) => {
     const dirs = (p.dirs || []).map(d => {
       const base = String(d.path || '').split(/[\\/]/).filter(Boolean).pop() || d.path;
       return base + (d.note ? '（' + d.note + '）' : '');
     }).join('、');
-    return `<div class="proj-row" data-pid="${p.id}">
+    // 手机上 HTML5 拖拽整个不工作（没有 dragstart/drop），
+    // 所以排序不能只靠拖。这两个按钮是触屏上唯一能改顺序的入口，
+    // 桌面端也留着 —— 一次挪一位比拖拽更准，不会插错位置。
+    const fixed = isInbox(p.name);
+    const canUp = !fixed && i > 1;                 // 0 号永远是「默认」，1 号上面就是它
+    const canDown = !fixed && i < list.length - 1;
+    return `<div class="proj-row" data-pid="${p.id}" data-idx="${i}">
       <div>
         <div class="pn">${esc(p.name)}</div>
         ${dirs ? `<div class="dirs">${esc(dirs)}</div>` : ''}
       </div>
       <span class="pc">${p.taskCount || 0}</span>
+      ${fixed ? '' : `<button type="button" class="mini-btn proj-step" data-step="-1" data-pid="${p.id}"
+        title="上移一位" ${canUp ? '' : 'disabled'}>↑</button>
+      <button type="button" class="mini-btn proj-step" data-step="1" data-pid="${p.id}"
+        title="下移一位" ${canDown ? '' : 'disabled'}>↓</button>`}
     </div>`;
   }).join('') || '<div class="proj-row"><div class="pn" style="color:var(--text-3)">还没有项目</div></div>';
 
   host.querySelectorAll('.proj-row[data-pid]').forEach(row => {
-    row.addEventListener('click', () => openProjectEditor(row.dataset.pid));
+    row.addEventListener('click', (e) => {
+      // 上下移按钮有自己的行为，别让它顺手把项目编辑器也打开
+      if (e.target.closest('.proj-step')) return;
+      openProjectEditor(row.dataset.pid);
+    });
   });
+  host.querySelectorAll('.proj-step').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await moveProjectStep(btn.dataset.pid, Number(btn.dataset.step));
+    });
+  });
+}
+
+/* 把项目往上/下挪一位。和拖拽走同一个接口，只是用「相邻交换」算目标顺序 —
+   挪一位不需要知道落点在哪一行，比拖拽更不容易插错。 */
+async function moveProjectStep(id, step){
+  const list = (store.projects || []).slice();
+  const from = list.findIndex(p => p.id === id);
+  if (from < 0) return;
+  // 「默认」钉在 0，「其它项目」从 1 开始，所以越界判断是 1 和 length-1
+  const to = from + step;
+  if (to < 1 || to >= list.length) return;
+  const [moved] = list.splice(from, 1);
+  list.splice(to, 0, moved);
+  store.projects = list;
+  renderProjList();
+  try {
+    const r = await api('POST', '/api/projects/reorder',
+      { ids: list.filter(p => !isInbox(p.name)).map(p => p.id) });
+    if (r.projects) { store.projects = r.projects; renderProjList(); renderSidebar(); }
+    else renderSidebar();
+  } catch (err) {
+    toast('排序没存上：' + err.message);
+    await refresh();
+    renderProjList();
+  }
 }
 
 function dirRow(d = {}){
@@ -3075,9 +4037,11 @@ $('#fileInput').addEventListener('change', async e => {
 });
 
 $('#project').addEventListener('change', e => {
-  filters.project = e.target.value;
+  // 顶部筛选条的项目下拉和侧栏项目行是同一个状态（navProject），
+  // 两处各存一份的话会出现「侧栏高亮着 A、下拉写着 B」
   navProject = e.target.value;
   navFilter = 'all';
+  navView = 'board';       // 筛选项目就等于回看板：待澄清/归档没有「项目」这一维
   syncFilterUI();
   render();
   renderSidebar();
@@ -3098,26 +4062,29 @@ document.addEventListener('click', async e => {
   const assign = e.target.closest('[data-assign]');
   if (assign) {
     e.stopPropagation();
-    const id = assign.dataset.assign;
-    const names = (store.projects || []).map(p => p.name);
-    const pick = prompt('选项目（输入名字）\n可选：' + names.join('、') + '\n\n直接输入新项目名也可以：');
-    if (!pick) return;
-    try {
-      const hit = (store.projects || []).find(p => p.name === pick || (p.aliases||[]).includes(pick));
-      const body = hit ? { project_id: hit.id, project: hit.name } : { project: pick.trim(), needs_project: false };
-      if (!hit) {
-        const np = await api('POST', '/api/projects', { name: pick.trim() });
-        body.project_id = np.id;
-        body.project = np.name;
-      }
-      await api('PATCH', '/api/tasks/' + encodeURIComponent(id), { ...body, needs_project: false });
-      await refresh();
-      toast('已归到 ' + pick.trim());
-    } catch (err) { toast('失败：' + err.message); }
+    // 用页面内的浮层，不再弹系统 prompt：后者做不了搜索、带不了任务数
+    projectPicker(assign.dataset.assign, assign);
     return;
   }
 
-  const img = e.target.closest('.shots img');
+  // 点浮层外面收起
+  if (pickerEl && !pickerEl.contains(e.target)) closePicker();
+
+  const unarchive = e.target.closest('[data-unarchive]');
+  if (unarchive) {
+    e.stopPropagation();
+    const t = (store.tasks || []).find(x => x.id === unarchive.dataset.unarchive);
+    try {
+      await api('PATCH', '/api/tasks/' + encodeURIComponent(unarchive.dataset.unarchive),
+        { archived_at: null });
+      await refresh();
+      toast('已取回' + (t ? '：「' + t.title + '」' : ''));
+    } catch (err) { toast('取回失败：' + err.message); }
+    return;
+  }
+
+  // 缩略图和对话气泡里的图都能点开放大
+  const img = e.target.closest('.shots img, .dm .atts img');
   if (img) {
     const lb = $('#lightbox');
     lb.querySelector('img').src = img.src;

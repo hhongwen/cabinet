@@ -21,7 +21,7 @@ const reloadTag = '?t=' + Date.now();
 const coreMod = await import(pathToFileURL(path.join(HERE, 'core.mjs')).href + reloadTag);
 const serverMod = await import(pathToFileURL(path.join(HERE, 'server.mjs')).href + reloadTag);
 
-const { createCore, STATUSES, PRIORITIES, KINDS } = coreMod;
+const { createCore, STATUSES, PRIORITIES, KINDS, DEFAULT_PROJECT_NAME } = coreMod;
 const { start, DEFAULT_DATA_DIR, DEFAULT_PORT } = serverMod;
 
 let server = null;
@@ -67,21 +67,55 @@ const TOOL_DEFS = (api) => {
   });
 
   reg('task_list', {
-    description: '看任务列表。可按项目、状态、类别过滤。',
+    description: '看任务列表。可按项目、状态、类别、以及流水线阶段（待澄清 / 未分配 / 归档）过滤。',
     parameters: {
       type: 'object',
       properties: {
         project: { type: 'string' },
         status: { type: 'string', enum: STATUSES },
         category: { type: 'string' },
-        limit: { type: 'number' }
+        limit: { type: 'number' },
+        // 流水线阶段。界面上是三个视图，对话里也得能问「有哪些待澄清的」
+        stage: {
+          type: 'string',
+          enum: ['clarify', 'inbox', 'archived', 'active'],
+          description: 'clarify=待澄清（dev_ready 为假）/ inbox=未分配（项目是「默认」）/ archived=已归档 / active=看板上的（默认）'
+        }
       },
       required: []
     },
     execute: async (a) => {
-      const r = core.list(a || {});
-      const lines = r.tasks.map((t) => `[${t.status}] ${t.priority} ${t.title}  (${t.project}${t.category ? ' / ' + t.category : ''})`);
-      return { success: true, ...r, message: `${r.total} 条任务\n` + lines.join('\n') };
+      const opt = a || {};
+      // stage 翻译成 core.list 认识的过滤参数，四个阶段互斥，
+      // 所以这里不用再排除一遍 —— 但为了避免「stage=active 又把归档拖回来」，
+      // core.list 默认就不含归档，这里只在 archived 时显式要。
+      const q = { project: opt.project, status: opt.status, category: opt.category, limit: opt.limit };
+      let label = '任务';
+      if (opt.stage === 'clarify') { q.dev_ready = 0; label = '待澄清'; }
+      else if (opt.stage === 'archived') { q.include_archived = true; label = '已归档'; }
+      else if (opt.stage === 'inbox') { q.project = opt.project || DEFAULT_PROJECT_NAME; label = '未分配'; }
+
+      const r = core.list(q);
+      let tasks = r.tasks;
+      // core.list 没有「只要归档」这个谓词（include_archived 是"连归档一起要"），
+      // 所以 archived 这一档在前端也不该装作有 —— 在这里自己收一次
+      if (opt.stage === 'archived') tasks = tasks.filter((t) => t.archived_at);
+      // active = 看板上的（已澄清、且不是未分配筐里的）
+      if (!opt.stage || opt.stage === 'active') {
+        tasks = tasks.filter((t) => t.dev_ready && t.project !== DEFAULT_PROJECT_NAME);
+      }
+      // 未分配筐里也不该有待澄清的：它们是流水线的上一道关卡（DEF-1）
+      if (opt.stage === 'inbox') tasks = tasks.filter((t) => t.dev_ready);
+
+      const lines = tasks.map((t) => `[${t.status}] ${t.priority} ${t.title}  (${t.project}${t.category ? ' / ' + t.category : ''})`
+        + (t.dev_gaps && t.dev_gaps.length ? '  还缺：' + t.dev_gaps.join('；') : ''));
+      return {
+        success: true,
+        projects: r.projects,
+        tasks,
+        total: tasks.length,
+        message: `${tasks.length} 条${label}任务\n` + lines.join('\n')
+      };
     }
   });
 
