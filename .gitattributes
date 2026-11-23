@@ -1,0 +1,7 @@
+# shell 脚本必须是 LF，否则 mac/Linux 上 shebang 变成 "#!/bin/bash\r" 直接跑不起来
+*.command text eol=lf
+*.sh      text eol=lf
+
+# Windows 批处理反过来：CRLF，否则 cmd.exe 解析会出鬼
+*.cmd     text eol=crlf
+*.ps1     text eol=crlf

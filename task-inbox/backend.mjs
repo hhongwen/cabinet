@@ -156,10 +156,25 @@ function almaBackend() {
 
 // Windows 上 opencode/codex 是 .cmd，spawn 直接给名字会 ENOENT。
 // 这里绕开：找到 npm 全局装的真实 js 入口，用 node 跑。
-function resolveCliBin(name) {
+// mac/Linux 上 npm 全局是可直接执行的 shim，但同样别猜 —— 挨个真实路径探一遍。
+function npmGlobalDirs() {
   const home = os.homedir();
-  const npmDir = path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'npm');
-  const map = {
+  if (process.platform === 'win32') {
+    return [path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'npm')];
+  }
+  // Intel mac / Linux：/usr/local/lib/node_modules
+  // Apple Silicon（Homebrew）：/opt/homebrew/lib/node_modules
+  // 用户自己配的：~/.npm-global/lib/node_modules
+  const dirs = ['/opt/homebrew/lib/node_modules', '/usr/local/lib/node_modules'];
+  if (process.env.NPM_GLOBAL_DIR) dirs.unshift(process.env.NPM_GLOBAL_DIR);
+  dirs.push(path.join(home, '.npm-global', 'lib', 'node_modules'));
+  return dirs;
+}
+
+function resolveCliBin(name) {
+  const win = process.platform === 'win32';
+  // 同一份产物在不同平台的上架形式不一样，各自列清楚
+  const map = win ? {
     // opencode 装的是原生 exe，可以直接当命令跑
     opencode: [
       { file: ['node_modules', 'opencode-ai', 'bin', 'opencode.exe'], asExe: true },
@@ -169,13 +184,25 @@ function resolveCliBin(name) {
     codex: [
       { file: ['node_modules', '@openai', 'codex', 'bin', 'codex.js'], asExe: false }
     ]
+  } : {
+    // mac 上是无后缀的原生二进制
+    opencode: [
+      { file: ['opencode-ai', 'bin', 'opencode'], asExe: true },
+      { file: ['opencode', 'bin', 'opencode'], asExe: true }
+    ],
+    codex: [
+      { file: ['@openai', 'codex', 'bin', 'codex.js'], asExe: false }
+    ]
   };
-  for (const rel of map[name] || []) {
-    const p = path.join(npmDir, ...rel.file);
-    if (fs.existsSync(p)) {
-      return rel.asExe
-        ? { command: p, args: [] }
-        : { command: process.execPath, args: [p] };
+
+  for (const base of npmGlobalDirs()) {
+    for (const rel of map[name] || []) {
+      const p = path.join(base, ...rel.file);
+      if (fs.existsSync(p)) {
+        return rel.asExe
+          ? { command: p, args: [] }
+          : { command: process.execPath, args: [p] };
+      }
     }
   }
   return { command: name, args: [] };
