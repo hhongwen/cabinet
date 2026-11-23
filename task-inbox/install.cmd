@@ -16,7 +16,7 @@ if errorlevel 1 (
 echo [OK] node found
 
 if not exist "%DST%" mkdir "%DST%"
-for %%f in (manifest.json main.mjs core.mjs server.mjs board.html quick.html) do (
+for %%f in (manifest.json main.mjs core.mjs server.mjs board.html) do (
   if exist "%%f" (
     copy /Y "%%f" "%DST%" >nul
     echo [OK] %%f

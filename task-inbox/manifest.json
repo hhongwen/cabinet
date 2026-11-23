@@ -1,7 +1,7 @@
 {
   "id": "task-inbox",
   "name": "Task Inbox",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "统一任务入口：文字 / 截图 / 链接都收进来，按项目+状态+优先级看板管理",
   "author": { "name": "Alma" },
   "main": "main.mjs",

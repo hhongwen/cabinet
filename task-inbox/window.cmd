@@ -16,7 +16,7 @@ if /I "%~1"=="quick" goto :quick
 goto :board
 
 :quick
-set "URL=%BASE%/quick"
+set "URL=%BASE%/?solo=1"
 set "SIZE=460,340"
 goto :launch
 

@@ -70,7 +70,9 @@ export function createHandler(core, opts = {}) {
         return serveFile(res, path.join(webDir, 'board.html'), 'text/html; charset=utf-8');
       }
       if (p === '/quick' || p === '/quick.html') {
-        return serveFile(res, path.join(webDir, 'quick.html'), 'text/html; charset=utf-8');
+        // 同一个页面，solo 模式只留随手记那一栏
+        res.writeHead(302, { location: '/?solo=1' });
+        return res.end();
       }
       if (p.startsWith('/images/')) {
         const name = path.basename(p);
