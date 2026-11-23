@@ -89,6 +89,7 @@ input,select,textarea{font:inherit}
 .nav-link .name{display:flex;align-items:center;gap:9px;min-width:0}
 .nav-link svg{width:14px;height:14px;stroke-width:1.6;flex:0 0 auto;opacity:.85;
   stroke-linecap:round;stroke-linejoin:round}
+.ico-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ico-initial{
   display:none;width:18px;height:18px;line-height:18px;text-align:center;
   font:600 10.5px var(--font-mono);color:#4b585d;
@@ -160,7 +161,7 @@ input,select,textarea{font:inherit}
   width:42px;height:40px;padding:0;justify-content:center;border-radius:11px;
 }
 .app.side-collapsed .nav-link .name{gap:0;justify-content:center}
-.app.side-collapsed .nav-link .name > span:not(.ico-initial){display:none}
+.app.side-collapsed .nav-link .ico-text{display:none}
 .app.side-collapsed .nav-link .ico-folder{display:none}
 .app.side-collapsed .nav-link .ico-initial{display:block}
 .app.side-collapsed .nav-link .cnt{display:none}
@@ -588,7 +589,7 @@ body.solo #collapseBtn{display:none}
   .menu{gap:6px;width:100%;align-items:center}
   .nav-link{width:42px;height:40px;padding:0;justify-content:center;border-radius:11px}
   .nav-link .name{gap:0;justify-content:center}
-  .nav-link .name > span:not(.ico-initial){display:none}
+  .nav-link .ico-text{display:none}
   .nav-link .ico-folder{display:none}
   .nav-link .ico-initial{display:block}
   .nav-link .cnt{display:none}
@@ -1018,6 +1019,7 @@ function renderSidebar(){
       <span class="name">
         <svg class="ico-folder" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
         <span class="ico-initial">${esc(initial)}</span>
+        <span class="ico-text">${esc(p.name)}</span>
       </span>
       <span class="cnt">${n}</span>
     </div>`;
