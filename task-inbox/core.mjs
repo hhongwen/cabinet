@@ -10,20 +10,22 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export const STATUSES = ['todo', 'doing', 'done'];
-export const PRIORITIES = ['p0', 'p1', 'p2', 'p3'];
-export const KINDS = ['text', 'image', 'image_text', 'link'];
+export const PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4'];
+export const KINDS = ['text', 'image', 'image_text', 'link', 'file', 'mixed'];
 
 export const PRIORITY_LABEL = {
-  p0: '紧急重要', p1: '重要', p2: '紧急', p3: '普通'
+  p0: 'P0 阻塞', p1: 'P1 紧急', p2: 'P2 常规', p3: 'P3 低', p4: 'P4 待定'
 };
 
 export const KIND_LABEL = {
-  text: '文字', image: '截图', image_text: '截图+文字', link: '链接'
+  text: '文字', image: '图片', image_text: '图+文', link: '链接',
+  file: '附件', mixed: '混合'
 };
 
 export function createCore(dataDir) {
   const dataFile = path.join(dataDir, 'tasks.json');
   const imagesDir = path.join(dataDir, 'images');
+  const filesDir = path.join(dataDir, 'files');
 
   function emptyStore() {
     return { version: 1, projects: ['默认'], tasks: [] };
@@ -81,6 +83,7 @@ export function createCore(dataDir) {
       payload: {
         text: input.text ?? null,
         images: Array.isArray(input.images) ? input.images : [],
+        files: Array.isArray(input.files) ? input.files : [],
         urls: Array.isArray(input.urls) ? input.urls : [],
         path: input.path ?? null
       },
@@ -90,6 +93,10 @@ export function createCore(dataDir) {
       priority: PRIORITIES.includes(input.priority) ? input.priority : 'p3',
       note: input.note ?? '',
       source: String(input.source || 'chat'),
+      // 自动分类的状态：pending 排队中 / done 已完成 / failed 失败 / off 不需要
+      classify_state: input.classify_state || 'off',
+      classify_reason: '',
+      classify_model: '',
       claimed_by: null,
       created_at: now,
       updated_at: now,
@@ -122,7 +129,8 @@ export function createCore(dataDir) {
     const t = d.tasks.find((x) => x.id === id);
     if (!t) throw new Error('任务不存在: ' + id);
 
-    for (const k of ['title', 'kind', 'project', 'category', 'priority', 'note', 'claimed_by']) {
+    for (const k of ['title', 'kind', 'project', 'category', 'priority', 'note', 'claimed_by',
+                     'classify_state', 'classify_reason', 'classify_model']) {
       if (fields[k] !== undefined) t[k] = fields[k];
     }
     if (fields.payload && typeof fields.payload === 'object') {
@@ -148,7 +156,7 @@ export function createCore(dataDir) {
   }
 
   function sortTasks(arr) {
-    const order = { p0: 0, p1: 1, p2: 2, p3: 3 };
+    const order = { p0: 0, p1: 1, p2: 2, p3: 3, p4: 4 };
     return [...arr].sort((a, b) => {
       const oa = order[a.priority] ?? 9;
       const ob = order[b.priority] ?? 9;
@@ -194,7 +202,27 @@ export function createCore(dataDir) {
     fs.mkdirSync(imagesDir, { recursive: true });
     const name = 'img_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6) + '.' + ext;
     fs.writeFileSync(path.join(imagesDir, name), buf);
-    return { path: path.join(imagesDir, name), url: '/images/' + name };
+    return { path: path.join(imagesDir, name), url: '/images/' + name, name };
+  }
+
+  // 存任意附件（base64），保留原文件名便于识别
+  function saveFile(dataUrl, filename) {
+    const m = String(dataUrl || '').match(/^data:[^;]*;base64,(.+)$/i);
+    if (!m) throw new Error('需要 dataUrl');
+    const buf = Buffer.from(m[1], 'base64');
+    if (buf.length > 25 * 1024 * 1024) throw new Error('附件太大（>25MB）');
+    fs.mkdirSync(filesDir, { recursive: true });
+    const safe = String(filename || 'file')
+      .replace(/[\\/:*?"<>|]/g, '_')
+      .replace(/^[.]+/, '')
+      .slice(-80);
+    const name = Date.now().toString(36) + '_' + (safe || 'file');
+    fs.writeFileSync(path.join(filesDir, name), buf);
+    return { path: path.join(filesDir, name), name, original: safe, size: buf.length };
+  }
+
+  function filePath(name) {
+    return path.join(filesDir, path.basename(name));
   }
 
   function imagePath(name) {
@@ -202,8 +230,8 @@ export function createCore(dataDir) {
   }
 
   return {
-    dataDir, dataFile, imagesDir,
+    dataDir, dataFile, imagesDir, filesDir,
     load, save, add, patch, move, remove, list, state, addProject,
-    saveImage, imagePath
+    saveImage, imagePath, saveFile, filePath
   };
 }

@@ -9,7 +9,7 @@
     --bg:#0f1115; --panel:#171a21; --card:#1e222b; --card-hover:#242935;
     --text:#e6e8ee; --muted:#8b93a7; --line:#262b36;
     --p0:#ef4444; --p1:#f59e0b; --p2:#3b82f6; --p3:#64748b;
-    --todo:#60a5fa; --doing:#fbbf24; --done:#4ade80;
+    --todo:#60a5fa; --doing:#fbbf24; --done:#4ade80; --p4:#4b5563;
     --cap-w: 340px;
   }
   @media (prefers-color-scheme: light){
@@ -158,6 +158,16 @@
   .card:hover .time{opacity:.75}
   .empty{color:var(--muted); font-size:12px; text-align:center; padding:14px 0; opacity:.7}
 
+  .thumb.file{
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:var(--bg); gap:1px; position:relative;
+  }
+  .thumb.file .fext{font-size:9.5px; font-weight:700; color:var(--muted); letter-spacing:.4px}
+  .thumb.file small{font-size:9px; color:var(--muted); opacity:.8}
+  .tag.pending{color:var(--doing); background:rgba(251,191,36,.15)}
+  .tag.failed{color:var(--p0); background:rgba(239,68,68,.15)}
+  .files{font-size:10.5px; color:var(--muted); margin-top:6px; opacity:.85}
+
   .shots{display:flex; gap:5px; margin-top:7px; flex-wrap:wrap}
   .shots img{width:50px;height:50px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:zoom-in;display:block}
   .shots img:hover{outline:1px solid var(--todo)}
@@ -225,29 +235,16 @@
       <button class="icon-btn collapse" id="collapseBtn" title="收起">»</button>
     </div>
     <div class="cap-body">
-      <textarea id="text" placeholder="随手丢进来… Ctrl+V 贴图，Enter 存下"></textarea>
+      <textarea id="text" placeholder="想到什么丢进来，截图、文件、链接都行&#10;Enter 存下 · Shift+Enter 换行"></textarea>
       <div class="thumbs" id="thumbs"></div>
       <div class="cap-row">
         <select id="f-project"></select>
-        <select id="f-priority">
-          <option value="p3">普通</option>
-          <option value="p0">紧急重要</option>
-          <option value="p1">重要</option>
-          <option value="p2">紧急</option>
-        </select>
-        <input type="text" id="f-category" placeholder="类别">
-      </div>
-      <div class="cap-row">
-        <select id="f-kind">
-          <option value="text">文字</option>
-          <option value="image">截图</option>
-          <option value="image_text">截图 + 文字</option>
-          <option value="link">链接</option>
-        </select>
         <span class="spacer"></span>
+        <button class="icon-btn" id="attachBtn" title="添加附件">📎</button>
         <button class="go" id="go" disabled>存下</button>
       </div>
       <div class="cap-msg" id="msg"></div>
+      <input type="file" id="fileInput" multiple hidden>
     </div>
   </aside>
 </div>
@@ -264,9 +261,10 @@ const COLS = [
   { key:'doing', label:'进行中', color:'var(--doing)' },
   { key:'done',  label:'已完成', color:'var(--done)' }
 ];
-const PRI_LABEL = { p0:'紧急重要', p1:'重要', p2:'紧急', p3:'普通' };
-const PRI_COLOR = { p0:'var(--p0)', p1:'var(--p1)', p2:'var(--p2)', p3:'var(--p3)' };
-const KIND_LABEL = { text:'文字', image:'截图', image_text:'截图+文字', link:'链接' };
+const PRI_LABEL = { p0:'P0 阻塞', p1:'P1 紧急', p2:'P2 常规', p3:'P3 低', p4:'P4 待定' };
+const PRI_COLOR = { p0:'var(--p0)', p1:'var(--p1)', p2:'var(--p2)', p3:'var(--p3)', p4:'var(--p4)' };
+const KIND_LABEL = { text:'文字', image:'图片', image_text:'图文', link:'链接', file:'附件', mixed:'混合' };
+const KIND_ICON = { text:'', image:'🖼', image_text:'🖼', link:'🔗', file:'📎', mixed:'📎' };
 
 const SOLO = new URLSearchParams(location.search).has('solo');
 const LS_W = 'ti.captureWidth';
@@ -274,7 +272,6 @@ const LS_C = 'ti.captureCollapsed';
 
 let store = { projects:['默认'], tasks:[], counts:{}, total:0 };
 let filters = { project:'', priority:'', category:'' };
-let images = [];
 let collapsed = false;
 
 const $ = s => document.querySelector(s);
@@ -396,12 +393,19 @@ function cardHTML(t){
   const shots = (t.payload && t.payload.images && t.payload.images.length)
     ? '<div class="shots">' + t.payload.images.slice(0, 4).map(src => `<img src="${esc(imgUrl(src))}" alt="" loading="lazy">`).join('') + '</div>'
     : '';
+  const fileCount = (t.payload && t.payload.files && t.payload.files.length) || 0;
+  const fileRow = fileCount
+    ? `<div class="files">📎 ${fileCount} 个附件</div>` : '';
+  const cls = t.classify_state === 'pending'
+    ? '<span class="tag pending">判断中…</span>'
+    : t.classify_state === 'failed'
+      ? `<span class="tag failed" title="${esc(t.classify_reason||'')}">未判断</span>` : '';
   return `
     <div class="card ${t.status === 'done' ? 'done' : ''}" draggable="true" data-id="${t.id}"
          style="--bar:${PRI_COLOR[t.priority] || 'var(--p3)'}">
       <div class="t">${esc(t.title)}</div>
-      <div class="meta">${meta.join('')}<span class="time">${ago(t.created_at)}</span></div>
-      ${shots}
+      <div class="meta">${meta.join('')}${cls}<span class="time">${ago(t.created_at)}</span></div>
+      ${shots}${fileRow}
     </div>`;
 }
 
@@ -492,68 +496,120 @@ function syncFilters(){
 
 /* ---------------- 随手记 ---------------- */
 
+let images = [];   // {path,url,name}
+let files = [];    // {path,name,original,size}
+let pending = 0;
+
 function say(t, cls){ const el = $('#msg'); el.textContent = t; el.className = 'cap-msg ' + (cls||''); }
 
 function refreshGo(){
-  $('#go').disabled = !$('#text').value.trim() && !images.length;
+  $('#go').disabled = (! $('#text').value.trim()) && !images.length && !files.length;
+}
+
+function humanSize(n){
+  if (n < 1024) return n + 'B';
+  if (n < 1024*1024) return Math.round(n/1024) + 'KB';
+  return (n/1024/1024).toFixed(1) + 'MB';
 }
 
 function renderThumbs(){
-  $('#thumbs').innerHTML = images.map((im, i) => `
-    <div class="thumb">
-      <img src="${esc(im.url)}" alt="">
-      <button data-i="${i}" title="移除">✕</button>
-    </div>`).join('');
+  const parts = [];
+  images.forEach((im, k) => {
+    parts.push(`<div class="thumb"><img src="${esc(im.url)}" alt="">
+      <button data-k="img" data-i="${k}" title="移除">✕</button></div>`);
+  });
+  files.forEach((f, k) => {
+    parts.push(`<div class="thumb file" title="${esc(f.original || f.name)}">
+      <span class="fext">${esc((f.original||'').split('.').pop()?.slice(0,4) || 'FILE')}</span>
+      <small>${esc(humanSize(f.size||0))}</small>
+      <button data-k="file" data-i="${k}" title="移除">✕</button></div>`);
+  });
+  $('#thumbs').innerHTML = parts.join('');
   $('#thumbs').querySelectorAll('button').forEach(b => {
-    b.addEventListener('click', () => { images.splice(+b.dataset.i, 1); renderThumbs(); refreshGo(); });
+    b.addEventListener('click', () => {
+      if (b.dataset.k === 'img') images.splice(+b.dataset.i, 1);
+      else files.splice(+b.dataset.i, 1);
+      renderThumbs(); refreshGo();
+    });
   });
   refreshGo();
 }
 
-async function upload(blob){
-  const dataUrl = await new Promise(res => {
+function readAsDataUrl(f){
+  return new Promise(res => {
     const fr = new FileReader();
     fr.onload = () => res(fr.result);
-    fr.readAsDataURL(blob);
+    fr.readAsDataURL(f);
   });
-  const d = await api('POST', '/api/upload', { dataUrl });
-  images.push({ path: d.path, url: d.url });
-  renderThumbs();
-  say('图片已收，' + images.length + ' 张', 'ok');
+}
+
+// 图片走 /api/upload（会自动落到 images/），其他文件带 filename
+async function uploadFile(f){
+  pending++;
+  try {
+    const dataUrl = await readAsDataUrl(f);
+    const isImage = f.type.startsWith('image/');
+    const body = isImage ? { dataUrl } : { dataUrl, filename: f.name };
+    const d = await api('POST', '/api/upload', body);
+    if (isImage) images.push({ path: d.path, url: d.url, name: f.name });
+    else files.push({ path: d.path, name: d.name, original: d.original || d.name, size: d.size || f.size });
+    renderThumbs();
+    return true;
+  } catch (e) {
+    say('上传失败：' + e.message, 'err');
+    return false;
+  } finally {
+    pending--;
+  }
 }
 
 async function submit(){
   const text = $('#text').value.trim();
-  if (!text && !images.length) return;
+  if (!text && !images.length && !files.length) return;
+  if (pending) { say('还有文件正在上传…', 'err'); return; }
 
-  const kind = images.length && text ? 'image_text' : images.length ? 'image' : 'text';
-  const title = text || ('截图：' + new Date().toLocaleString('zh-CN', { hour12: false }));
+  // 类型和优先级都交给模型判断，这里只给个兜底标题
+  const fallback = text || (images.length ? '截图' : files[0]?.original || '附件');
 
   const body = {
-    title: title.split('\n')[0].slice(0, 120),
-    kind,
+    title: fallback.split('\n')[0].slice(0, 120),
     text: text || null,
     images: images.map(i => i.path),
+    files: files.map(f => f.path),
     project: $('#f-project').value || '默认',
-    priority: $('#f-priority').value,
-    category: $('#f-category').value.trim(),
     source: 'quick'
   };
 
   $('#go').disabled = true;
   try {
-    await api('POST', '/api/tasks', body);
+    const t = await api('POST', '/api/tasks', body);
     $('#text').value = '';
     images = [];
+    files = [];
     renderThumbs();
-    $('#f-category').value = '';
     refreshGo();
-    say('已收下：' + (body.title || '（图）'), 'ok');
+    say('已收下，正在判断…', 'ok');
     $('#text').focus();
     await refresh();
+    watchClassify(t.id);
   } catch (err) {
     say(err.message, 'err');
     refreshGo();
+  }
+}
+
+// 盯着这一条，分类完成后刷新看板
+async function watchClassify(id){
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 700));
+    const t = store.tasks.find(x => x.id === id);
+    if (!t) { await refresh(); continue; }
+    if (t.classify_state && t.classify_state !== 'pending') {
+      await refresh();
+      const now = store.tasks.find(x => x.id === id);
+      if (now) say((PRI_LABEL[now.priority] || '') + ' · ' + (now.category || '未分类'), 'ok');
+      return;
+    }
   }
 }
 
@@ -573,17 +629,19 @@ $('#text').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
 });
 $('#text').addEventListener('paste', async e => {
-  const files = [...(e.clipboardData?.items || [])]
-    .filter(i => i.type.startsWith('image/'))
-    .map(i => i.getAsFile())
-    .filter(Boolean);
-  if (!files.length) return;
+  const items = [...(e.clipboardData?.items || [])];
+  const imgs = items.filter(i => i.type.startsWith('image/')).map(i => i.getAsFile()).filter(Boolean);
+  const otherFiles = [...(e.clipboardData?.files || [])].filter(f => !f.type.startsWith('image/'));
+  if (!imgs.length && !otherFiles.length) return;
   e.preventDefault();
-  for (const f of files) {
-    try { await upload(f); } catch (err) { say(err.message, 'err'); }
-  }
+  for (const f of [...imgs, ...otherFiles]) await uploadFile(f);
 });
 $('#go').addEventListener('click', submit);
+$('#attachBtn').addEventListener('click', () => $('#fileInput').click());
+$('#fileInput').addEventListener('change', async e => {
+  for (const f of [...e.target.files]) await uploadFile(f);
+  e.target.value = '';
+});
 
 $('#project').addEventListener('change', e => { filters.project = e.target.value; render(); });
 $('#priority').addEventListener('change', e => { filters.priority = e.target.value; render(); });
@@ -609,15 +667,13 @@ document.addEventListener('dragleave', e => {
 });
 document.addEventListener('dragover', e => { if (e.dataTransfer?.types?.includes('Files')) e.preventDefault(); });
 document.addEventListener('drop', async e => {
-  const files = [...(e.dataTransfer?.files || [])].filter(f => f.type.startsWith('image/'));
-  if (!files.length) return;
+  const dropped = [...(e.dataTransfer?.files || [])];
+  if (!dropped.length) return;
   e.preventDefault();
   dragDepth = 0;
   $('#drop').classList.remove('on');
   if (collapsed) setCollapsed(false);
-  for (const f of files) {
-    try { await upload(f); } catch (err) { say(err.message, 'err'); }
-  }
+  for (const f of dropped) await uploadFile(f);
 });
 
 // 快捷键

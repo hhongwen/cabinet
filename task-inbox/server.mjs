@@ -12,6 +12,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createCore } from './core.mjs';
+import { createClassifier } from './classify.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -58,8 +59,75 @@ const MIME = {
   '.webp': 'image/webp', '.gif': 'image/gif'
 };
 
+// ---------- 自动分类 ----------
+
+export function createClassifyQueue(core, opts = {}) {
+  const classifier = opts.classifier || createClassifier({
+    ...opts,
+    imagesDir: core.imagesDir,
+    filesDir: core.filesDir
+  });
+  const onDone = opts.onDone || (() => {});
+  let running = 0;
+  const MAX = 2;
+
+  async function runOne(id) {
+    const t = core.load().tasks.find((x) => x.id === id);
+    if (!t) return null;
+
+    core.patch(id, { classify_state: 'pending' });
+    try {
+      const r = await classifier.classify({
+        text: t.payload?.text || t.title,
+        title: t.title,
+        urls: t.payload?.urls || [],
+        images: t.payload?.images || [],
+        files: t.payload?.files || []
+      });
+      const updated = core.patch(id, {
+        priority: r.priority,
+        kind: r.kind,
+        title: r.title || t.title,
+        category: t.category || r.category,
+        classify_state: 'done',
+        classify_reason: r.reason || '',
+        classify_model: r.model || ''
+      });
+      onDone(updated);
+      return updated;
+    } catch (e) {
+      core.patch(id, {
+        classify_state: 'failed',
+        classify_reason: String(e.message || e).slice(0, 200)
+      });
+      return null;
+    }
+  }
+
+  // 收下就先返回，分类在后台跑 —— 入口不能等 3 秒
+  function enqueue(id) {
+    if (running >= MAX) {
+      return new Promise((resolve) => {
+        const tick = setInterval(() => {
+          if (running < MAX) { clearInterval(tick); resolve(runOne(id)); }
+        }, 200);
+      });
+    }
+    running++;
+    return runOne(id).finally(() => { running--; });
+  }
+
+  return { enqueue, runOne, classifier };
+}
+
 export function createHandler(core, opts = {}) {
   const webDir = opts.webDir || HERE;
+  const queue = opts.queue || null;
+
+  const runClassify = async (id) => {
+    if (!queue) throw new Error('分类器未启用');
+    return await queue.runOne(id);
+  };
 
   return async function handle(req, res) {
     const url = new URL(req.url || '/', 'http://127.0.0.1');
@@ -87,14 +155,27 @@ export function createHandler(core, opts = {}) {
 
       if (p === '/api/tasks' && req.method === 'POST') {
         const b = await readBody(req);
-        return json(res, 200, core.add(b));
+        const auto = b.classify !== false;
+        const t = core.add({ ...b, classify_state: auto ? 'pending' : 'off' });
+        if (auto && queue) queue.enqueue(t.id);   // 后台跑，不等
+        return json(res, 200, t);
       }
       if (p === '/api/tasks' && req.method === 'GET') {
         return json(res, 200, core.list(Object.fromEntries(url.searchParams)));
       }
       if (p === '/api/upload' && req.method === 'POST') {
         const b = await readBody(req);
+        if (b.filename) return json(res, 200, core.saveFile(b.dataUrl, b.filename));
         return json(res, 200, core.saveImage(b.dataUrl));
+      }
+      if (p.startsWith('/files/')) {
+        const name = path.basename(p);
+        const full = core.filePath(name);
+        return serveFile(res, full, MIME[path.extname(name).toLowerCase()] || 'application/octet-stream');
+      }
+      if (p === '/api/classify' && req.method === 'POST') {
+        const b = await readBody(req);
+        return json(res, 200, await runClassify(b.id));
       }
       if (p === '/api/projects' && req.method === 'POST') {
         const b = await readBody(req);
@@ -126,19 +207,20 @@ export function createHandler(core, opts = {}) {
 // 起服务。返回 { server, port } 或 null（所有端口都被占）
 export function start(core, opts = {}) {
   const preferred = opts.port || DEFAULT_PORT;
-  const handler = createHandler(core, opts);
-  const queue = [preferred, ...FALLBACK_PORTS.filter((x) => x !== preferred)];
+  const queue = opts.queue || createClassifyQueue(core, opts);
+  const handler = createHandler(core, { ...opts, queue });
+  const portQueue = [preferred, ...FALLBACK_PORTS.filter((x) => x !== preferred)];
 
   return new Promise((resolve) => {
     const tryNext = (i) => {
-      if (i >= queue.length) return resolve(null);
-      const p = queue[i];
+      if (i >= portQueue.length) return resolve(null);
+      const p = portQueue[i];
       const s = http.createServer((req, res) => { handler(req, res).catch(() => {}); });
       s.once('error', (e) => {
         if (e && e.code === 'EADDRINUSE') return tryNext(i + 1);
         resolve(null);
       });
-      s.listen(p, '127.0.0.1', () => resolve({ server: s, port: p }));
+      s.listen(p, '127.0.0.1', () => resolve({ server: s, port: p, queue }));
     };
     tryNext(0);
   });
