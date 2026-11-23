@@ -112,6 +112,7 @@ export function createCore(dataDir) {
 
     for (const t of d.tasks) {
       if (!Array.isArray(t.messages)) t.messages = [];
+      if (typeof t.brief !== 'string') t.brief = '';
       if (!t.project_id || !objects.some((x) => x.id === t.project_id)) {
         const name = String(t.project || '默认');
         const proj = byName.get(name) || objects[0];
@@ -216,6 +217,9 @@ export function createCore(dataDir) {
       source: String(input.source || 'chat'),
       // 卡片抽屉里的对话，元素 { id, role, text, at, patch }
       messages: [],
+      // 整理后的需求说明（markdown）+ 生成时间
+      brief: '',
+      brief_at: null,
       // 自动分类的状态：pending 排队中 / done 已完成 / failed 失败 / off 不需要
       classify_state: input.classify_state || 'off',
       classify_reason: '',
@@ -288,6 +292,17 @@ export function createCore(dataDir) {
     t.updated_at = nowIso();
     save(d);
     return m;
+  }
+
+  function setBrief(id, text) {
+    const d = load();
+    const t = d.tasks.find((x) => x.id === id);
+    if (!t) throw new Error('任务不存在: ' + id);
+    t.brief = String(text || '').slice(0, 20000);
+    t.brief_at = t.brief ? nowIso() : null;
+    t.updated_at = nowIso();
+    save(d);
+    return t;
   }
 
   function clearMessages(id) {
@@ -441,7 +456,7 @@ export function createCore(dataDir) {
   return {
     dataDir, dataFile, imagesDir, filesDir, settingsFile,
     load, save, add, patch, move, remove, list, state,
-    pushMessage, clearMessages,
+    pushMessage, clearMessages, setBrief,
     listProjects, addProject, updateProject, deleteProject, findProject,
     loadSettings, saveSettings,
     saveImage, imagePath, saveFile, filePath

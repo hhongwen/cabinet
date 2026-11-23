@@ -22,6 +22,7 @@ const { createCore } = await loadLocal('core.mjs');
 const { createClassifier } = await loadLocal('classify.mjs');
 const { listRoots, listDir } = await loadLocal('browse.mjs');
 const { createChat } = await loadLocal('chat.mjs');
+const { createBriefWriter } = await loadLocal('brief.mjs');
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -375,6 +376,46 @@ export function createHandler(core, opts = {}) {
           if (!t) return json(res, 404, { error: '任务不存在' });
           return json(res, 200, { task: t, messages: t.messages || [] });
         }
+      }
+
+      // 生成 / 重生成需求说明
+      if (p === '/api/brief' && req.method === 'POST') {
+        if (!queue) return json(res, 400, { error: '模型未启用' });
+        const b = await readBody(req);
+        const t = core.load().tasks.find((x) => x.id === b.taskId);
+        if (!t) return json(res, 404, { error: '任务不存在' });
+
+        // 用户手改过的说明，不覆盖
+        if (t.brief && b.force !== true) {
+          return json(res, 200, { brief: t.brief, brief_at: t.brief_at, cached: true });
+        }
+
+        const project = t.project_id
+          ? core.load().projects.find((x) => x.id === t.project_id)
+          : core.listProjects().find((x) => x.name === t.project);
+
+        const writer = createBriefWriter({
+          ...opts,
+          imagesDir: core.imagesDir,
+          filesDir: core.filesDir,
+          mode: core.loadSettings().backend,
+          model: core.loadSettings().model
+        });
+
+        try {
+          const r = await writer.write({ task: t, project });
+          const updated = core.setBrief(t.id, r.brief);
+          return json(res, 200, { brief: updated.brief, brief_at: updated.brief_at, from: r.backend });
+        } catch (e) {
+          return json(res, 500, { error: '生成失败：' + String(e.message || e).slice(0, 200) });
+        }
+      }
+
+      // 手改保存
+      if (p === '/api/brief' && (req.method === 'PUT' || req.method === 'PATCH')) {
+        const b = await readBody(req);
+        const t = core.setBrief(b.taskId, b.brief);
+        return json(res, 200, { brief: t.brief, brief_at: t.brief_at });
       }
 
       if (p === '/api/chat' && req.method === 'POST') {

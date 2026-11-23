@@ -232,6 +232,32 @@
   .dr-head .ttl{flex:1; min-width:0}
   .dr-head .ttl b{font-size:14px; font-weight:600; display:block; line-height:1.4}
   .dr-meta{display:flex; gap:5px; flex-wrap:wrap; margin-top:6px}
+  .dr-detail{flex:0 0 auto; max-height:46vh; overflow:auto; border-bottom:1px solid var(--line);
+    padding:0 15px 10px; display:flex; flex-direction:column; gap:8px}
+  .dr-detail:empty{display:none}
+  .sect{border:1px solid var(--line); border-radius:9px; overflow:hidden}
+  .sect-h{display:flex; align-items:center; gap:7px; padding:7px 10px;
+    background:var(--bg); cursor:pointer; font-size:12px; color:var(--muted); user-select:none}
+  .sect-h:hover{color:var(--text)}
+  .sect-h .arw{font-size:9px; transition:transform .15s}
+  .sect.open .sect-h .arw{transform:rotate(90deg)}
+  .sect-h .spacer{flex:1}
+  .sect-h .mini-btn{font:inherit; font-size:11px; color:var(--muted); background:transparent;
+    border:1px solid var(--line); border-radius:6px; padding:2px 8px; cursor:pointer}
+  .sect-h .mini-btn:hover{color:var(--text); border-color:var(--todo)}
+  .sect-b{display:none; padding:9px 10px; font-size:12.5px; line-height:1.65;
+    white-space:pre-wrap; word-break:break-word; color:var(--text)}
+  .sect.open .sect-b{display:block}
+  .sect-b img{max-width:100%; border-radius:6px; margin-top:6px; display:block}
+  .sect-b .md h1,.sect-b .md h2,.sect-b .md h3{font-size:13px; margin:10px 0 5px; font-weight:600}
+  .sect-b .md h2:first-child{margin-top:0}
+  .sect-b .md ul,.sect-b .md ol{margin:4px 0; padding-left:18px}
+  .sect-b .md li{margin:2px 0}
+  .sect-b .md code{background:var(--card); padding:1px 4px; border-radius:4px; font-size:11.5px}
+  .sect-b .md p{margin:5px 0}
+  .sect-b .files{display:flex; flex-direction:column; gap:4px}
+  .sect-b .files a{color:var(--todo); text-decoration:none; font-size:12px}
+  .sect-b .files a:hover{text-decoration:underline}
   .dr-body{flex:1; overflow:auto; padding:12px 15px; display:flex; flex-direction:column; gap:10px}
   .dr-empty{color:var(--muted); font-size:12.5px; text-align:center; padding:24px 8px; line-height:1.7}
   .dm{display:flex; flex-direction:column; gap:4px; max-width:92%}
@@ -436,6 +462,7 @@
     <button class="icon-btn" id="drClose" title="关闭">✕</button>
   </div>
   <div class="dr-fields" id="drFields"></div>
+  <div class="dr-detail" id="drDetail"></div>
   <div class="dr-body" id="drBody"></div>
   <div class="dr-foot">
     <textarea id="drInput" rows="1" placeholder="说点什么：改优先级、换项目、讨论方案…"></textarea>
@@ -868,9 +895,145 @@ async function drLoad(){
     const r = await api('GET', '/api/tasks/' + encodeURIComponent(drTaskId));
     const t = r.task || r;
     drRenderHead(t);
+    drRenderDetail(t);
     drRenderThread(r.messages || []);
   } catch (e) {
     body.innerHTML = '<div class="dr-empty">读不到任务：' + esc(e.message) + '</div>';
+  }
+}
+
+// 极简 markdown：只处理标题、列表、粗体、行内代码。够用了。
+function mdToHtml(src){
+  const esc2 = (x) => esc(x);
+  const lines = String(src || '').split('\n');
+  const out = [];
+  let inList = null;
+
+  const closeList = () => { if (inList) { out.push('</' + inList + '>'); inList = null; } };
+
+  for (const raw of lines) {
+    const line = raw.replace(/\s+$/, '');
+    if (!line.trim()) { closeList(); continue; }
+
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) { closeList(); const lv = Math.min(h[1].length + 1, 4); out.push('<h' + lv + '>' + esc2(h[2]) + '</h' + lv + '>'); continue; }
+
+    const ul = line.match(/^\s*[-*]\s+(.*)$/);
+    if (ul) {
+      if (inList !== 'ul') { closeList(); out.push('<ul>'); inList = 'ul'; }
+      out.push('<li>' + inline(ul[1]) + '</li>'); continue;
+    }
+
+    const ol = line.match(/^\s*\d+[.)]\s+(.*)$/);
+    if (ol) {
+      if (inList !== 'ol') { closeList(); out.push('<ol>'); inList = 'ol'; }
+      out.push('<li>' + inline(ol[1]) + '</li>'); continue;
+    }
+
+    closeList();
+    out.push('<p>' + inline(line) + '</p>');
+  }
+  closeList();
+  return out.join('');
+
+  function inline(x){
+    return esc2(x)
+      .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+      .replace(/`(.+?)`/g, '<code>$1</code>');
+  }
+}
+
+function buildSections(t){
+  const secs = [];
+
+  // 1. 原始描述
+  const raw = [];
+  if (t.payload?.text) raw.push(String(t.payload.text));
+  if (t.payload?.urls?.length) raw.push('链接：\n' + t.payload.urls.join('\n'));
+
+  if (raw.length) {
+    secs.push({ key: 'raw', title: '原始描述', body: '<div>' + esc(raw.join('\n\n')) + '</div>' });
+  }
+
+  // 2. 图片
+  if (t.payload?.images?.length) {
+    const imgs = t.payload.images.map(src =>
+      '<img src="' + esc(imgUrl(src)) + '" alt="" loading="lazy">').join('');
+    secs.push({ key: 'imgs', title: '图片 ' + t.payload.images.length, body: imgs });
+  }
+
+  // 3. 附件
+  if (t.payload?.files?.length) {
+    const links = t.payload.files.map(f => {
+      const name = String(f).split(/[\\/]/).pop();
+      return '<a href="/files/' + encodeURIComponent(name) + '" target="_blank">' + esc(name) + '</a>';
+    }).join('');
+    secs.push({ key: 'files', title: '附件 ' + t.payload.files.length, body: '<div class="files">' + links + '</div>' });
+  }
+
+  // 4. 需求说明
+  secs.push({
+    key: 'brief',
+    title: '整理后的需求',
+    action: '<button class="mini-btn" data-brief="1">' +
+      (t.brief ? '重新生成' : '生成需求') + '</button>',
+    body: t.brief
+      ? '<div class="md">' + mdToHtml(t.brief) + '</div>'
+      : '<span style="color:var(--muted)">还没有整理。点右上角生成一份能直接派给 agent 的需求说明。</span>'
+  });
+
+  return secs;
+}
+
+let drTask = null;
+
+function drRenderDetail(t){
+  drTask = t;
+  const host = $('#drDetail');
+  const secs = buildSections(t);
+
+  // 记住哪些是展开的
+  const opened = new Set([...host.querySelectorAll('.sect.open')].map(e => e.dataset.k));
+  if (!host.dataset.init) { opened.add('raw'); opened.add('brief'); host.dataset.init = '1'; }
+
+  host.innerHTML = secs.map(sec => {
+    const open = opened.has(sec.key) ? ' open' : '';
+    return '<div class="sect' + open + '" data-k="' + sec.key + '">'
+      + '<div class="sect-h"><span class="arw">▶</span><span>' + esc(sec.title) + '</span>'
+      + '<span class="spacer"></span>' + (sec.action || '') + '</div>'
+      + '<div class="sect-b">' + sec.body + '</div></div>';
+  }).join('');
+
+  // 折叠
+  host.querySelectorAll('.sect-h').forEach(h => {
+    h.addEventListener('click', (e) => {
+      if (e.target.closest('[data-brief]')) return;
+      h.parentElement.classList.toggle('open');
+    });
+  });
+
+  // 生成 / 重新生成
+  const btn = host.querySelector('[data-brief]');
+  if (btn) {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const old = btn.textContent;
+      btn.textContent = '整理中…';
+      btn.disabled = true;
+      try {
+        const r = await api('POST', '/api/brief', { taskId: drTaskId, force: true });
+        if (r.error) throw new Error(r.error);
+        drTask.brief = r.brief;
+        drTask.brief_at = r.brief_at;
+        drRenderDetail(drTask);
+        host.querySelector('.sect[data-k="brief"]').classList.add('open');
+        toast('需求已整理');
+      } catch (err) {
+        toast('失败：' + err.message);
+        btn.textContent = old;
+        btn.disabled = false;
+      }
+    });
   }
 }
 
