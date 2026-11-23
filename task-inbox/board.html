@@ -151,6 +151,10 @@ h1{
 .filters select:hover{background:#fff;border-color:#95a5a9}
 
 /* ---------- 看板 ---------- */
+.board-area{
+  flex:1; min-height:0; min-width:0; display:flex; flex-direction:column;
+  overflow:hidden; position:relative; z-index:1;
+}
 .board-scroll{flex:1;min-height:0;overflow:auto;padding:6px 24px 24px;position:relative;z-index:1}
 .board{display:grid;grid-template-columns:repeat(3,minmax(220px,1fr));gap:14px;align-items:start}
 @media (max-width:900px){ .board{grid-template-columns:1fr} }
@@ -217,7 +221,7 @@ h1{
 
 /* ---------- 底栏 ---------- */
 .dock{
-  flex:0 0 auto; display:flex; align-items:flex-end; gap:8px;
+  flex:0 0 auto; margin-top:auto; display:flex; align-items:flex-end; gap:8px;
   padding:10px 24px 13px; border-top:1px solid #c5ced0; position:relative; z-index:2;
   background:rgba(246,248,248,.78); backdrop-filter:blur(10px);
 }
