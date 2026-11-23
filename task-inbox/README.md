@@ -237,16 +237,35 @@ TASK_INBOX_MODEL=auto/deepseek-v4.1-flash   // 默认这个，看图也够用
 `http://localhost:23001/api/gallery/cache/xxx.png` 才能用，否则模型会说"没看到图片"。
 （本地路径、dataUrl、自建服务 url 我都试过，全失败。）
 
-### 配置
+### 在页面上选
 
-```bash
-TASK_INBOX_BACKEND=auto        # auto | magpie | alma | opencode | codex
-TASK_INBOX_MODEL=auto/deepseek-v4.1-flash
-MAGPIE_URL=http://127.0.0.1:3425/v1
-ALMA_API_URL=http://localhost:23001
+点看板右上角的 **⚙**（或按 `,`），出来一个设置面板：
+
+- **模型通道** —— auto / magpie / alma / opencode / codex
+- **模型** —— 输入框带下拉，65 个模型现拉，标了哪些支持图片
+- **开关** —— 关掉就只收不判，纯记事本
+
+保存后**立刻生效**，下一条任务就用新设置，不用重启服务。
+
+设置存在 `~/.config/alma/task-inbox/settings.json`：
+
+```json
+{
+  "backend": "auto",
+  "model": "auto/deepseek-v4.1-flash",
+  "classify": true
+}
 ```
 
-想固定用某一条就写死，不用它自己探。
+### 环境变量（可选，覆盖设置文件）
+
+```bash
+MAGPIE_URL=http://127.0.0.1:3425/v1
+ALMA_API_URL=http://localhost:23001
+TASK_INBOX_CLI_TIMEOUT=60000
+```
+
+这两个只是改地址，不改选哪家 —— 选哪家在页面上点就行。
 
 ### 关于 magpie 的 agents
 

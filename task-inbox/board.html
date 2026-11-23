@@ -172,6 +172,21 @@
   .shots img{width:50px;height:50px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:zoom-in;display:block}
   .shots img:hover{outline:1px solid var(--todo)}
 
+  .dlg h2{margin:0 0 14px; font-size:15px; font-weight:600}
+  .dlg .field{margin-bottom:12px}
+  .dlg .field label{display:block; font-size:12px; color:var(--muted); margin-bottom:5px}
+  .dlg select,.dlg input[type=text],.dlg input:not([type]){
+    width:100%; font:inherit; font-size:13px; color:var(--text); background:var(--bg);
+    border:1px solid var(--line); border-radius:8px; padding:8px 10px;
+  }
+  .dlg .hint{font-size:11px; color:var(--muted); margin-top:5px; line-height:1.5}
+  .dlg .dlg-foot{display:flex; gap:8px; justify-content:flex-end; margin-top:16px}
+  .dlg button{font:inherit; font-size:13px; color:var(--text); background:var(--card);
+    border:1px solid var(--line); border-radius:8px; padding:7px 15px; cursor:pointer}
+  .dlg button.primary{background:var(--todo); color:#0b1020; border-color:transparent; font-weight:600}
+  #cfg{border:1px solid var(--line); background:var(--panel); color:var(--text);
+    border-radius:14px; padding:0; width:min(400px,92vw)}
+  #cfg::backdrop{background:rgba(0,0,0,.5)}
   #lightbox{position:fixed; inset:0; background:rgba(0,0,0,.82); display:none; place-items:center; z-index:99; cursor:zoom-out}
   #lightbox.on{display:grid}
   #lightbox img{max-width:92vw; max-height:92vh; border-radius:8px}
@@ -205,6 +220,7 @@
         <h1>全部任务</h1>
         <span class="count" id="total"></span>
         <span class="spacer"></span>
+        <button class="icon-btn" id="settingsBtn" title="设置">⚙</button>
         <button class="icon-btn" id="focusCapture" title="记一条（n）">+</button>
       </div>
       <div class="filters">
@@ -250,6 +266,43 @@
 </div>
 
 <button class="reopen" id="reopen">📝 随手记</button>
+
+<dialog id="cfg">
+  <form class="dlg" id="cfgForm" method="dialog">
+    <h2>设置</h2>
+
+    <div class="field">
+      <label>模型通道</label>
+      <select id="c-backend">
+        <option value="auto">自动（magpie → alma → cli）</option>
+        <option value="magpie">magpie 网关</option>
+        <option value="alma">Alma</option>
+        <option value="opencode">opencode CLI</option>
+        <option value="codex">codex CLI</option>
+      </select>
+      <div class="hint" id="backendHint"></div>
+    </div>
+
+    <div class="field">
+      <label>模型</label>
+      <input id="c-model" list="modelList" placeholder="auto/deepseek-v4.1-flash" autocomplete="off">
+      <datalist id="modelList"></datalist>
+      <div class="hint" id="modelHint"></div>
+    </div>
+
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="c-classify" style="width:auto">
+        收下时自动判断类型和优先级
+      </label>
+    </div>
+
+    <div class="dlg-foot">
+      <button type="button" id="cfgCancel">取消</button>
+      <button type="submit" class="primary">保存</button>
+    </div>
+  </form>
+</dialog>
 
 <div id="lightbox"><img alt=""></div>
 <div class="drop" id="drop">松手就收进来</div>
@@ -637,6 +690,69 @@ $('#text').addEventListener('paste', async e => {
   for (const f of [...imgs, ...otherFiles]) await uploadFile(f);
 });
 $('#go').addEventListener('click', submit);
+
+/* ---------------- 设置面板 ---------------- */
+
+let backendStatus = null;
+
+async function openSettings(){
+  try {
+    const cfg = await api('GET', '/api/settings');
+    $('#c-backend').value = cfg.backend || 'auto';
+    $('#c-model').value = cfg.model || '';
+    $('#c-classify').checked = cfg.classify !== false;
+  } catch (e) {
+    toast('读设置失败：' + e.message);
+  }
+
+  // 通道可用性
+  try {
+    backendStatus = await api('GET', '/api/backend');
+    const up = Object.entries(backendStatus).filter(([, v]) => v).map(([k]) => k);
+    $('#backendHint').textContent = up.length
+      ? '当前可用：' + up.join(' · ')
+      : '四条通道都不可用，任务仍能收下，但不会自动判断';
+  } catch {
+    $('#backendHint').textContent = '探测失败';
+  }
+
+  // 模型清单
+  try {
+    const m = await api('GET', '/api/models');
+    const list = (m.data || []).slice();
+    list.sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    $('#modelList').innerHTML = list
+      .map((x) => `<option value="${esc(x.id)}">${esc(x.name || '')}${x.vision ? ' · 支持图片' : ''}</option>`)
+      .join('');
+    $('#modelHint').textContent = m.data?.length
+      ? `来自 ${m.from}，共 ${m.data.length} 个模型`
+      : '没有拉到模型清单';
+  } catch {
+    $('#modelHint').textContent = '没有拉到模型清单';
+  }
+
+  $('#cfg').showModal();
+}
+
+$('#settingsBtn').addEventListener('click', openSettings);
+$('#cfgCancel').addEventListener('click', () => $('#cfg').close());
+
+$('#cfgForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  try {
+    await api('POST', '/api/settings', {
+      backend: $('#c-backend').value,
+      model: $('#c-model').value.trim(),
+      classify: $('#c-classify').checked
+    });
+    $('#cfg').close();
+    toast('已保存，下一条任务就用新设置');
+    await refresh();
+  } catch (err) {
+    toast('保存失败：' + err.message);
+  }
+});
+
 $('#attachBtn').addEventListener('click', () => $('#fileInput').click());
 $('#fileInput').addEventListener('change', async e => {
   for (const f of [...e.target.files]) await uploadFile(f);
@@ -684,6 +800,9 @@ document.addEventListener('keydown', e => {
 
   if (e.key === '[' && !typing && !e.metaKey && !e.ctrlKey) {
     e.preventDefault(); setCollapsed(!collapsed); return;
+  }
+  if (e.key === ',' && !typing && !e.metaKey && !e.ctrlKey) {
+    e.preventDefault(); openSettings(); return;
   }
   if (e.key === 'n' && !typing && !e.metaKey && !e.ctrlKey) {
     e.preventDefault();

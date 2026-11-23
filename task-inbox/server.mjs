@@ -68,14 +68,32 @@ const MIME = {
 // ---------- 自动分类 ----------
 
 export function createClassifyQueue(core, opts = {}) {
-  const classifier = opts.classifier || createClassifier({
-    ...opts,
-    imagesDir: core.imagesDir,
-    filesDir: core.filesDir
-  });
   const onDone = opts.onDone || (() => {});
   let running = 0;
   const MAX = 2;
+
+  // 分类器要能随设置变化重建 —— 用户在页面上换模型，不用重启服务。
+  // 用 createClassifier 每次现建，切换时只换这一个对象。
+  let classifier = null;
+  let classifierKey = '';
+
+  function buildClassifier() {
+    const st = core.loadSettings();
+    const key = st.backend + '|' + st.model;
+    if (classifier && key === classifierKey) return classifier;
+    const { createClassifier: make } = opts._classifyMod || {};
+    classifier = createClassifier({
+      ...opts,
+      imagesDir: core.imagesDir,
+      filesDir: core.filesDir,
+      mode: st.backend,
+      model: st.model
+    });
+    classifierKey = key;
+    return classifier;
+  }
+
+  function resetClassifier() { classifier = null; classifierKey = ''; }
 
   async function runOne(id) {
     const t = core.load().tasks.find((x) => x.id === id);
@@ -83,7 +101,7 @@ export function createClassifyQueue(core, opts = {}) {
 
     core.patch(id, { classify_state: 'pending' });
     try {
-      const r = await classifier.classify({
+      const r = await buildClassifier().classify({
         text: t.payload?.text || t.title,
         title: t.title,
         urls: t.payload?.urls || [],
@@ -123,7 +141,55 @@ export function createClassifyQueue(core, opts = {}) {
     return runOne(id).finally(() => { running--; });
   }
 
-  return { enqueue, runOne, classifier };
+  return {
+    enqueue, runOne, resetClassifier,
+    get classifier() { return buildClassifier(); }
+  };
+}
+
+// ---------- 模型清单 ----------
+
+let modelCache = { at: 0, data: null, from: '' };
+
+async function listModels() {
+  if (modelCache.data && Date.now() - modelCache.at < 5 * 60 * 1000) return modelCache;
+
+  // 先从 magpie 拉，字段最全
+  try {
+    const r = await fetch((process.env.MAGPIE_URL || 'http://127.0.0.1:3425/v1') + '/models',
+      { signal: AbortSignal.timeout(4000) });
+    if (r.ok) {
+      const d = await r.json();
+      const list = (d.data || []).map((m) => ({
+        id: m.id,
+        name: m.display_name || m.magpie_label || m.id,
+        vision: (m.modalities?.input || []).includes('image'),
+        context: m.context_window || m.context_length || 0,
+        owner: m.owned_by || ''
+      }));
+      modelCache = { at: Date.now(), data: list, from: 'magpie' };
+      return modelCache;
+    }
+  } catch { /* 继续试 alma */ }
+
+  try {
+    const r = await fetch((process.env.ALMA_API_URL || 'http://localhost:23001') + '/api/models',
+      { signal: AbortSignal.timeout(4000) });
+    if (r.ok) {
+      const d = await r.json();
+      const list = (d.data || []).map((m) => ({
+        id: m.id,
+        name: m.name || m.id,
+        vision: !!m.capabilities?.vision,
+        context: m.capabilities?.contextWindow || 0,
+        owner: m.providerName || ''
+      }));
+      modelCache = { at: Date.now(), data: list, from: 'alma' };
+      return modelCache;
+    }
+  } catch { /* 都没有 */ }
+
+  return { at: Date.now(), data: [], from: 'none' };
 }
 
 export function createHandler(core, opts = {}) {
@@ -159,6 +225,8 @@ export function createHandler(core, opts = {}) {
       }
       if (p === '/api/state' && req.method === 'GET') {
         const st = core.state();
+        const cfg = core.loadSettings();
+        st.settings = { backend: cfg.backend, model: cfg.model, classify: cfg.classify };
         if (queue && queue.classifier?.backend) st.backend = { name: queue.classifier.backend.name };
         return json(res, 200, st);
       }
@@ -167,6 +235,19 @@ export function createHandler(core, opts = {}) {
         const b = queue.classifier && queue.classifier.backend;
         if (!b) return json(res, 200, { error: '后端未初始化' });
         return json(res, 200, await b.status());
+      }
+      if (p === '/api/settings' && req.method === 'GET') {
+        return json(res, 200, core.loadSettings());
+      }
+      if (p === '/api/settings' && (req.method === 'POST' || req.method === 'PUT')) {
+        const b = await readBody(req);
+        const next = core.saveSettings(b);
+        if (queue) queue.resetClassifier();     // 立刻生效，不用重启
+        return json(res, 200, next);
+      }
+      // 可用模型清单：从 magpie 或 alma 现拉，缓存 5 分钟
+      if (p === '/api/models' && req.method === 'GET') {
+        return json(res, 200, await listModels());
       }
 
       if (p === '/api/tasks' && req.method === 'POST') {

@@ -22,6 +22,12 @@ export const KIND_LABEL = {
   file: '附件', mixed: '混合'
 };
 
+export const DEFAULT_SETTINGS = {
+  backend: 'auto',                      // auto | magpie | alma | opencode | codex
+  model: 'auto/deepseek-v4.1-flash',
+  classify: true                        // 关掉就只收不判
+};
+
 export function createCore(dataDir) {
   const dataFile = path.join(dataDir, 'tasks.json');
   const imagesDir = path.join(dataDir, 'images');
@@ -60,6 +66,40 @@ export function createCore(dataDir) {
     const tmp = dataFile + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(d, null, 2), 'utf8');
     fs.renameSync(tmp, dataFile);
+  }
+
+  const settingsFile = path.join(dataDir, 'settings.json');
+
+  function loadSettings() {
+    try {
+      const raw = fs.readFileSync(settingsFile, 'utf8');
+      return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    } catch {
+      return { ...DEFAULT_SETTINGS };
+    }
+  }
+
+  function saveSettings(patch = {}) {
+    const cur = loadSettings();
+    const next = { ...cur };
+
+    if (patch.backend !== undefined) {
+      const ok = ['auto', 'magpie', 'alma', 'opencode', 'codex'];
+      if (!ok.includes(patch.backend)) throw new Error('未知通道: ' + patch.backend);
+      next.backend = patch.backend;
+    }
+    if (patch.model !== undefined) {
+      const m = String(patch.model || '').trim();
+      if (!m) throw new Error('模型不能为空');
+      next.model = m;
+    }
+    if (patch.classify !== undefined) next.classify = !!patch.classify;
+
+    fs.mkdirSync(dataDir, { recursive: true });
+    const tmp = settingsFile + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(next, null, 2), 'utf8');
+    fs.renameSync(tmp, settingsFile);
+    return next;
   }
 
   function nowIso() { return new Date().toISOString(); }
@@ -230,8 +270,9 @@ export function createCore(dataDir) {
   }
 
   return {
-    dataDir, dataFile, imagesDir, filesDir,
+    dataDir, dataFile, imagesDir, filesDir, settingsFile,
     load, save, add, patch, move, remove, list, state, addProject,
+    loadSettings, saveSettings,
     saveImage, imagePath, saveFile, filePath
   };
 }
