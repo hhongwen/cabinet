@@ -322,6 +322,29 @@ console.log('\n=== 7. FIELD_LABEL 与 core 实际能改的字段一致 ===');
   fs.rmSync(db, { recursive: true, force: true });
 }
 
+console.log('\n=== 8. 分类队列（P2-5） ===');
+{
+  // 队列必须是零定时器的：跑满之后 wake 下一个，而不是每 200ms 空转
+  const src = fs.readFileSync(new URL('./server.mjs', import.meta.url), 'utf8');
+  ok('没有 setInterval 轮询空位', !/setInterval\(\(\) => \{\s*if \(running < MAX\)/.test(src));
+  ok('有显式等待队列', src.includes('const waiting = []'));
+  ok('有 pump()', src.includes('function pump()'));
+  ok('暴露排队水位给 /api/backend', src.includes("queue: { running: queue.runningCount, waiting: queue.pendingCount() }"));
+}
+
+console.log('\n=== 9. 任务路由（P2-4） ===');
+{
+  const src = fs.readFileSync(new URL('./server.mjs', import.meta.url), 'utf8');
+
+  // classify_* 是引擎字段，PATCH 时要剥掉
+  ok('PATCH 会剥掉 classify_state', /for \(const k of \['classify_state', 'classify_reason', 'classify_model'\]\) delete body\[k\]/.test(src));
+
+  // 子路径路由必须分开处理，不能拿 move 的 handler 去接 reclassify
+  ok('路由正则认 reclassify', src.includes('(?:move|reclassify)'));
+  ok('/move 只在 POST 时生效', /if \(action === '\/move'\) \{[\s\S]{0,80}req\.method !== 'POST'/.test(src));
+  ok('/reclassify 防止重复排队', /already running/.test(src));
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log('\n────────────────────────');
 console.log(`通过 ${pass} / 共 ${pass + fail}` + (fail ? `  失败 ${fail}` : '  全绿'));

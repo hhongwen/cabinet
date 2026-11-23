@@ -348,7 +348,7 @@ SQLite 加 `LIKE` 查询半天就能做，加 FTS5 一天。
 
 ### ✅ P2-3 非存储层的测试
 
-> **已修**：`node test-parsers.mjs` → 57 项，注入假 backend，不碰真模型。
+> **已修**：`node test-parsers.mjs` → 65 项，注入假 backend，不碰真模型。
 > 覆盖 classify 的畸形输出（code fence、前后夹废话、非法枚举、缺标题、
 > 无信息量标题、完全不返回 JSON）、chat 的 patch 白名单（拒 `id` / `claimed_by` /
 > `created_at`）、以及两个模块的 prompt 拼装。
@@ -366,33 +366,57 @@ classify / chat / brief / backend   一行测试都没有
 最该补的是 `classify` 的字段解析和 `chat` 的 patch 白名单 ——
 这两个都是「模型返回不规范就会炸」的地方。
 
-### P2-4 分类失败不重试
+### ✅ P2-4 分类失败不重试（实际比 P2 严重）
 
-`runOne()` 的 catch 里直接把 `classify_state` 标成 `failed`，没有重试。
-网络抖动一次就永久失败，得手动点。
+> **已修**。查的时候发现比「不重试」糟得多 —— 是**失败之后完全没救**：
+>
+> 1. 前端从不调用 `/api/classify`（`grep -c` 结果是 0），接口写好了没人用
+> 2. `classify_state` 在 `PATCHABLE` 里，所以能被 PATCH 成 `pending`，
+>    但 PATCH 只写库不触发分类 —— 实测卡片会永远停在「判断中…」，没有东西在跑
+>
+> 也就是说：判失败一次，只能删了重记。
+>
+> **修法**：
+> - 新增 `POST /api/tasks/:id/reclassify`，走队列重判，已经在跑的直接返回 `queued:false`
+> - PATCH 剥掉 `classify_*` 三个引擎字段（只剥这几个，同一请求里其它字段照常生效）
+> - 抽屉头部在 `failed` / `pending` 时显示一个可点的「未判断 · 重试」胶囊
+>
+> 顺带修了路由：`/^\/api\/tasks\/([^/]+)(\/move)?$/` 原来只认 `move`，
+> 加 `reclassify` 之后 `m[2] && POST` 会把两个路径都塞进 move handler。
+> 改成 `(\/(?:move|reclassify))?` 加显式分支，带子路径时 PATCH/DELETE 一律 405。
 
-**修法**：失败计数写进 `classify_reason`，或者简单点 —— 启动时把所有
-`failed` 的重新排一次队（代价是模型挂了会一直重试，得加次数上限）。
+### ✅ P2-5 分类队列用 `setInterval` 轮询等位
 
-### P2-5 分类队列用 `setInterval` 轮询等位
+> **已修**。换成显式等待队列 + `pump()`：跑满就 wake 下一个，零定时器。
+> 顺带把水位暴露出来：`GET /api/backend` 现在带 `queue: {running, waiting}`。
+>
+> 实测一次提交 10 条 → `{running:2, waiting:8}`，判完自动清空。
 
-```
-server.mjs : enqueue()   if (running >= MAX) { setInterval(..., 200) }
-```
+### ❌ P2-6 桌面快捷方式没装 —— 这条是误报
 
-并发满了就每 200ms 空转一次等空位。现在 MAX=2、任务少，看不出来。
-但如果一次粘 50 条进去，就是 50 个 interval 在转。
+> **已确认装在位**，是写这条时没核实：
+>
+> ```
+> C:\Users\hongwen.han\Desktop\任务看板.url   11-23 14:04
+> C:\Users\hongwen.han\Desktop\随手记.url     11-23 14:04
+>
+> 内容：URL=http://127.0.0.1:46001/
+>       IconFile=...\icons\cabinet-light.ico
+> ```
+>
+> `mklinks.cmd` 早就跑过了，图标也带上了。
 
-**修法**：换成简单的 Promise 队列（一个待办数组 + `running` 计数）。
+### 🟡 P2-7 界面图标是文字符号 —— 基本已经不成立
 
-### P2-6 桌面快捷方式没装
-
-Startup 里有 `task-inbox.cmd`（开机自启已生效），但桌面上没有图标。
-`mklinks.cmd` 是现成的，没跑过。
-
-### P2-7 界面图标是文字符号
-
-`✕`、`📁`、`⚙` 这些直接写在 HTML 里。macOS 上渲染出来的样式和 Windows 不一样。
+> **大部分已被换掉**：文件里有 13 个内联 `<svg>`，`📎` `📁` `⚙` 这些 emoji
+> 一个都不剩了（`grep` 无命中）。
+>
+> 只剩三处单字符几何符号：`✕`（关闭/移除，5 处）、`↑`（上一层目录）、
+> `▶`（折叠箭头）。这三个不是 emoji，`✕` 还是排版学里正确的关闭符号，
+> 跨平台渲染一致。
+>
+> **结论：不用改**。真要在意视觉统一，等下次动那块 UI 时顺手换成 SVG，
+> 不值得单开一次改动。
 
 ---
 
@@ -427,17 +451,17 @@ Startup 里有 `task-inbox.cmd`（开机自启已生效），但桌面上没有�
 
 第三批（P2）        ✅ 2026-11-23
   P2-3  classify / chat 的解析层测试
+  P2-4  分类失败后能重试（顺手堵掉「PATCH 造出卡死态」）
+  P2-5  分类队列换显式等待队列，暴露水位
+  P2-6  误报，桌面快捷方式早就装了
+  P2-7  已被换掉大半，剩下三处不必改
 
-还留着
-  P2-1  搜索
-  P2-2  分页
-  P2-4  分类失败不重试
-  P2-5  分类队列的 setInterval 等位
-  P2-6  桌面快捷方式没装
-  P2-7  界面图标是文字符号
+还留着（都要等规模上来才值得做）
+  P2-1  搜索        ← 任务过 100 条再说
+  P2-2  分页        ← 跟搜索一起做
 
 之后
-  → 回 ROADMAP.md 的阶段 1，开始做 Session
+  → 先把现有功能用起来，再进 ROADMAP 的阶段 1
 ```
 
 ### 验收记录（2026-11-23）
@@ -447,7 +471,7 @@ Startup 里有 `task-inbox.cmd`（开机自启已生效），但桌面上没有�
 | 脚本 | 覆盖 | 结果 |
 |---|---|---|
 | `node test-sqlite.mjs` | 迁移、增删改、项目、级联删除、排序过滤、批量 id、revision、导出备份、schema 升级 | **100 / 100** |
-| `node test-parsers.mjs` | classify 的畸形模型输出、chat 的 patch 白名单、两处 prompt 拼装、字段一致性 | **57 / 57** |
+| `node test-parsers.mjs` | classify 的畸形模型输出、chat 的 patch 白名单、prompt 拼装、字段一致性、分类队列与路由 | **65 / 65** |
 | `node style-audit.mjs` | 样式规范 | 0 error / 1 warning（历史遗留 63 处写死颜色） |
 
 **HTTP 层实测**：
