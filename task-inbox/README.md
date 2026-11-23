@@ -327,6 +327,8 @@ task-inbox/
   cli.mjs        命令行
   pickdir.ps1    Windows 选文件夹对话框（mac 用 osascript，写在 server.mjs 里）
   board.html     全部界面（单文件，无构建）
+  STYLE.md       样式规范：三层材质 / 颜色 / 控件总则 / z-index / 降级
+  style-audit.mjs 样式体检脚本（提交前跑，见下）
 
   # Windows
   install.cmd / start.cmd / serve.cmd / window.cmd / mklinks.cmd / autostart.cmd
@@ -338,26 +340,61 @@ task-inbox/
 
 `core.mjs` 和 `server.mjs` 都不 import 宿主 API，所以插件只是个外壳。
 
+### 改样式之前
+
+界面全在 `board.html` 一个文件里，改之前读 [STYLE.md](STYLE.md)，改完跑：
+
+```bash
+node style-audit.mjs
+```
+
+它会拦住几类最常见的跑偏：`:root` 外写死颜色、绕过控件总则自己重写按钮材质、
+重复定义同一个选择器、白字配 `--orange`（对比度不够）、玻璃层漏登记降级。
+
+`board.html` 里那三段 `@supports` / `@media (prefers-reduced-*)` 是材质降级，
+新增任何 `backdrop-filter` 都要去登记，否则老浏览器上会糊成一片。
+
 ---
 
 ## 已知限制
 
-1. **Alma 状态栏点击没接线** —— 后端注册了，渲染层没监听。只能当指示器。
+### 项目自己的问题
+
+完整的清单在 [ISSUES.md](ISSUES.md)，带证据和复现步骤。
+
+**2026-11-23 已修（P0 全部 + P1 前三条）**：
+
+| 原来 | 现在 |
+|---|---|
+| 改了代码不重启不生效，还看不出来 | `/api/ping` 和 `/api/state` 带 `stale`；磁盘代码比进程新时页面顶部挂黄条；`install.cmd` 装完自动停旧服务 |
+| 「选项目」徽章从不出现 | `needs_project` 真的进了库（schema v2） |
+| 删任务后附件永久残留 | 删任务时一起清附件，且只清 payload 里指向本目录的文件 |
+| 超 12 MB 传不上去，报错 `fetch failed` | 请求体上限 40 MB，超限返回 413 和一句人话；附件 25 MB、图片 12 MB 都真的能到 |
+| 分类卡在「判断中…」永不恢复 | 启动时把超 5 分钟的 `pending` 收成 `failed` |
+| 界面不能删任务 | 抽屉右上角「删」，带确认和附件数提示 |
+| 每 3 秒全量轮询，后台也拉 | 页面隐藏时不轮询，切回前台立刻补一次 |
+| 首屏失败只插一行红字 | 有「重试」按钮 |
+
+**还留着的（P1 剩余 + P2）**：轮询仍是全量（只是不再空转）、没有搜索、没有备份导出、
+非存储层没有测试。详见 [ISSUES.md](ISSUES.md)。
+
+### Alma 插件系统本身的缺口（不是本项目的 bug）
+
+1. **状态栏点击没接线** —— 后端注册了，渲染层没监听。只能当指示器。
 2. **`contributes.components.sidebar` 是空壳** —— schema 接受，前端无消费代码。
 3. **`ui.openExternal` 在无头模式只打日志** —— 不真的开浏览器。
 4. **卸载插件不清理状态栏项** —— 要重新激活同名插件手动 dispose。
-
-前三条是 Alma 插件系统本身的缺口，不是本项目的 bug。
 
 ---
 
 ## 下一步
 
-按优先级：
+**先修问题，再加功能。** 顺序见 [ISSUES.md](ISSUES.md) 末尾，
+路线图见 [../ROADMAP.md](../ROADMAP.md)。
 
-1. **派活** —— 把任务派给 alma / codex / opencode，结果回卡片
-2. **截止时间** —— 派活时 agent 需要知道「什么时候要」
-3. **依赖关系** —— 「等这个做完再做那个」
+当前的方向是「多 Agent Session 协作」，但在开始之前要先清掉
+[ISSUES.md](ISSUES.md) 里的 P0 和 P1 —— 那些是已经坏了、或者马上会坏的东西。
+带着这些问题做 Session，同一个坑会重复三次。
 
 ---
 
