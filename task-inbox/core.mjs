@@ -34,14 +34,94 @@ export function createCore(dataDir) {
   const filesDir = path.join(dataDir, 'files');
 
   function emptyStore() {
-    return { version: 1, projects: ['默认'], tasks: [] };
+    return {
+      version: 2,
+      projects: [{ id: 'p_default', name: '默认', aliases: [], dirs: [], created_at: new Date().toISOString(), updated_at: new Date().toISOString() }],
+      tasks: []
+    };
   }
 
   // 只认带 version 字段的对象格式。别的形状（比如 Alma 自己那个数组）
   // 一律当成「不是我的文件」，绝不覆盖 —— 这是踩过的坑。
   function looksLikeMine(obj) {
     return !!obj && typeof obj === 'object' && !Array.isArray(obj)
-      && obj.version === 1 && Array.isArray(obj.tasks);
+      && (obj.version === 1 || obj.version === 2) && Array.isArray(obj.tasks);
+  }
+
+  let pidSeq = 0;
+  function newProjectId() {
+    pidSeq = (pidSeq + 1) % 1000;
+    return 'p_' + Date.now().toString(36) + pidSeq.toString(36).padStart(2, '0');
+  }
+
+  function makeProject(name, opts = {}) {
+    const n = String(name || '').trim();
+    if (!n) throw new Error('项目名不能为空');
+    return {
+      id: newProjectId(),
+      name: n,
+      aliases: Array.isArray(opts.aliases) ? opts.aliases.map(String) : [],
+      dirs: Array.isArray(opts.dirs) ? opts.dirs.map(normalizeDir) : [],
+      created_at: nowIso(),
+      updated_at: nowIso()
+    };
+  }
+
+  function normalizeDir(d = {}) {
+    const raw = typeof d === 'string' ? { path: d } : d;
+    return {
+      path: String(raw.path || '').trim(),
+      note: String(raw.note || '').trim().slice(0, 200),
+      primary: !!raw.primary
+    };
+  }
+
+  // 老数据里 projects 是字符串数组，任务只有 project 名字。
+  // 这里统一升级成对象，并给任务补 project_id。
+  function migrate(d) {
+    if (!Array.isArray(d.projects)) d.projects = [];
+    const objects = [];
+    const byName = new Map();
+
+    for (const item of d.projects) {
+      if (typeof item === 'string') {
+        const name = item.trim() || '默认';
+        if (byName.has(name)) continue;
+        const proj = { id: newProjectId(), name, aliases: [], dirs: [], created_at: nowIso(), updated_at: nowIso() };
+        objects.push(proj);
+        byName.set(name, proj);
+      } else if (item && typeof item === 'object' && item.name) {
+        const proj = {
+          id: item.id || newProjectId(),
+          name: String(item.name),
+          aliases: Array.isArray(item.aliases) ? item.aliases.map(String) : [],
+          dirs: Array.isArray(item.dirs) ? item.dirs.map(normalizeDir) : [],
+          created_at: item.created_at || nowIso(),
+          updated_at: item.updated_at || nowIso()
+        };
+        objects.push(proj);
+        byName.set(proj.name, proj);
+      }
+    }
+
+    if (!objects.length) {
+      const proj = { id: newProjectId(), name: '默认', aliases: [], dirs: [], created_at: nowIso(), updated_at: nowIso() };
+      objects.push(proj);
+      byName.set('默认', proj);
+    }
+
+    for (const t of d.tasks) {
+      if (!t.project_id || !objects.some((x) => x.id === t.project_id)) {
+        const name = String(t.project || '默认');
+        const proj = byName.get(name) || objects[0];
+        t.project_id = proj.id;
+        t.project = proj.name;
+      }
+    }
+
+    d.projects = objects;
+    d.version = 2;
+    return d;
   }
 
   function load() {
@@ -56,8 +136,7 @@ export function createCore(dataDir) {
     if (!looksLikeMine(d)) {
       throw new Error('数据文件格式不属于 task-inbox，拒绝读写: ' + dataFile);
     }
-    if (!Array.isArray(d.projects) || !d.projects.length) d.projects = ['默认'];
-    return d;
+    return migrate(d);
   }
 
   // 先写临时文件再 rename：中途崩溃不会留下半个 JSON
@@ -128,6 +207,7 @@ export function createCore(dataDir) {
         path: input.path ?? null
       },
       project: String(input.project || '默认'),
+      project_id: input.project_id || null,
       category: String(input.category || ''),
       status: STATUSES.includes(input.status) ? input.status : 'todo',
       priority: PRIORITIES.includes(input.priority) ? input.priority : 'p3',
@@ -169,7 +249,7 @@ export function createCore(dataDir) {
     const t = d.tasks.find((x) => x.id === id);
     if (!t) throw new Error('任务不存在: ' + id);
 
-    for (const k of ['title', 'kind', 'project', 'category', 'priority', 'note', 'claimed_by',
+    for (const k of ['title', 'kind', 'project', 'project_id', 'category', 'priority', 'note', 'claimed_by',
                      'classify_state', 'classify_reason', 'classify_model']) {
       if (fields[k] !== undefined) t[k] = fields[k];
     }
@@ -208,7 +288,7 @@ export function createCore(dataDir) {
   function list(opts = {}) {
     const d = load();
     let arr = d.tasks;
-    if (opts.project) arr = arr.filter((t) => t.project === opts.project);
+    if (opts.project) arr = arr.filter((t) => t.project === opts.project || t.project_id === opts.project);
     if (opts.status) arr = arr.filter((t) => t.status === opts.status);
     if (opts.category) arr = arr.filter((t) => t.category === opts.category);
     arr = sortTasks(arr);
@@ -224,12 +304,68 @@ export function createCore(dataDir) {
     return { projects: d.projects, tasks, counts, total: tasks.length };
   }
 
-  function addProject(name) {
+  function listProjects() {
     const d = load();
-    const n = String(name || '').trim();
-    if (!n) throw new Error('项目名不能为空');
-    if (!d.projects.includes(n)) { d.projects.push(n); save(d); }
-    return d.projects;
+    const counts = {};
+    for (const t of d.tasks) counts[t.project_id] = (counts[t.project_id] || 0) + 1;
+    return d.projects.map((p) => ({ ...p, taskCount: counts[p.id] || 0 }));
+  }
+
+  function addProject(name, opts = {}) {
+    const d = load();
+    const proj = makeProject(name, opts);
+    if (d.projects.some((x) => x.name === proj.name)) {
+      throw new Error('项目已存在: ' + proj.name);
+    }
+    d.projects.push(proj);
+    save(d);
+    return proj;
+  }
+
+  function updateProject(id, patch = {}) {
+    const d = load();
+    const p = d.projects.find((x) => x.id === id);
+    if (!p) throw new Error('项目不存在: ' + id);
+
+    if (patch.name !== undefined) {
+      const n = String(patch.name).trim();
+      if (!n) throw new Error('项目名不能为空');
+      if (d.projects.some((x) => x.id !== id && x.name === n)) throw new Error('项目名重复: ' + n);
+      p.name = n;
+    }
+    if (patch.aliases !== undefined) p.aliases = (patch.aliases || []).map(String).filter(Boolean);
+    if (patch.dirs !== undefined) p.dirs = (patch.dirs || []).map(normalizeDir).filter((x) => x.path);
+
+    p.updated_at = nowIso();
+    // 同步任务上的冗余名字，方便外部直接读
+    for (const t of d.tasks) if (t.project_id === id) t.project = p.name;
+    save(d);
+    return p;
+  }
+
+  function deleteProject(id) {
+    const d = load();
+    const i = d.projects.findIndex((x) => x.id === id);
+    if (i < 0) throw new Error('项目不存在: ' + id);
+    if (d.projects.length <= 1) throw new Error('至少要保留一个项目');
+
+    const fallback = d.projects.find((x) => x.id !== id);
+    for (const t of d.tasks) {
+      if (t.project_id === id) { t.project_id = fallback.id; t.project = fallback.name; }
+    }
+    const [removed] = d.projects.splice(i, 1);
+    save(d);
+    return { removed, movedTo: fallback.name };
+  }
+
+  // 按 id 或名字（含别名）找项目
+  function findProject(key) {
+    if (!key) return null;
+    const d = load();
+    return d.projects.find((x) => x.id === key)
+        || d.projects.find((x) => x.name === key)
+        || d.projects.find((x) => x.aliases.includes(key))
+        || null;
   }
 
   // 存一张 base64 图片，返回 { path, url }
@@ -271,7 +407,8 @@ export function createCore(dataDir) {
 
   return {
     dataDir, dataFile, imagesDir, filesDir, settingsFile,
-    load, save, add, patch, move, remove, list, state, addProject,
+    load, save, add, patch, move, remove, list, state,
+    listProjects, addProject, updateProject, deleteProject, findProject,
     loadSettings, saveSettings,
     saveImage, imagePath, saveFile, filePath
   };

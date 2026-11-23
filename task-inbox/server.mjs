@@ -101,14 +101,24 @@ export function createClassifyQueue(core, opts = {}) {
 
     core.patch(id, { classify_state: 'pending' });
     try {
+      const projects = core.listProjects();
       const r = await buildClassifier().classify({
         text: t.payload?.text || t.title,
         title: t.title,
         urls: t.payload?.urls || [],
         images: t.payload?.images || [],
         files: t.payload?.files || []
-      });
-      const updated = core.patch(id, {
+      }, { projects });
+
+      // 模型给的是项目名，这里对回 id。对不上就保持原样，标 needs_project
+      let projectId = null;
+      let projectName = null;
+      if (r.project) {
+        const hit = core.findProject(r.project);
+        if (hit) { projectId = hit.id; projectName = hit.name; }
+      }
+
+      const patch = {
         priority: r.priority,
         kind: r.kind,
         title: r.title || t.title,
@@ -116,7 +126,15 @@ export function createClassifyQueue(core, opts = {}) {
         classify_state: 'done',
         classify_reason: r.reason || '',
         classify_model: (r.backend ? r.backend + ':' : '') + (r.model || '')
-      });
+      };
+      if (projectId && projectId !== t.project_id) {
+        patch.project_id = projectId;
+        patch.project = projectName;
+      }
+      // 没判出项目：保留用户手选的，没有就留在「默认」并打标记
+      patch.needs_project = !projectId && (!t.project_id || t.project === '默认');
+
+      const updated = core.patch(id, patch);
       onDone(updated);
       return updated;
     } catch (e) {
@@ -274,10 +292,25 @@ export function createHandler(core, opts = {}) {
         const b = await readBody(req);
         return json(res, 200, await runClassify(b.id));
       }
+      if (p === '/api/projects' && req.method === 'GET') {
+        return json(res, 200, { projects: core.listProjects() });
+      }
       if (p === '/api/projects' && req.method === 'POST') {
         const b = await readBody(req);
-        return json(res, 200, { projects: core.addProject(b.name) });
+        return json(res, 200, core.addProject(b.name, { aliases: b.aliases, dirs: b.dirs }));
       }
+      {
+        const pm = p.match(/^\/api\/projects\/([^/]+)$/);
+        if (pm) {
+          const id = decodeURIComponent(pm[1]);
+          if (req.method === 'PATCH' || req.method === 'PUT') {
+            const b = await readBody(req);
+            return json(res, 200, core.updateProject(id, b));
+          }
+          if (req.method === 'DELETE') return json(res, 200, core.deleteProject(id));
+        }
+      }
+
 
       const m = p.match(/^\/api\/tasks\/([^/]+)(\/move)?$/);
       if (m) {

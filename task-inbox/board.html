@@ -187,6 +187,22 @@
   #cfg{border:1px solid var(--line); background:var(--panel); color:var(--text);
     border-radius:14px; padding:0; width:min(400px,92vw)}
   #cfg::backdrop{background:rgba(0,0,0,.5)}
+  .badge-need{font-size:10.5px; padding:1px 6px; border-radius:999px;
+    background:rgba(245,158,11,.18); color:var(--doing); cursor:pointer}
+  .proj-list{max-height:240px; overflow:auto; border:1px solid var(--line); border-radius:9px; margin-bottom:10px}
+  .proj-row{display:flex; align-items:center; gap:8px; padding:9px 10px; border-bottom:1px solid var(--line); cursor:pointer}
+  .proj-row:last-child{border-bottom:none}
+  .proj-row:hover{background:var(--card-hover)}
+  .proj-row .pn{font-size:13px}
+  .proj-row .pc{margin-left:auto; font-size:11px; color:var(--muted)}
+  .proj-row .dirs{font-size:10.5px; color:var(--muted); margin-top:2px}
+  .proj-edit{border:1px solid var(--line); border-radius:9px; padding:10px; margin-bottom:10px}
+  .dir-row{display:flex; gap:6px; align-items:center; margin-bottom:6px}
+  .dir-row input{flex:1; min-width:0}
+  .dir-row .rm{border:0; background:transparent; color:var(--muted); cursor:pointer; font-size:13px}
+  .mini{font-size:11.5px; border:1px dashed var(--line); background:transparent;
+    color:var(--muted); border-radius:7px; padding:5px 9px; cursor:pointer; width:100%}
+  .mini:hover{color:var(--text); border-color:var(--todo)}
   #lightbox{position:fixed; inset:0; background:rgba(0,0,0,.82); display:none; place-items:center; z-index:99; cursor:zoom-out}
   #lightbox.on{display:grid}
   #lightbox img{max-width:92vw; max-height:92vh; border-radius:8px}
@@ -254,7 +270,6 @@
       <textarea id="text" placeholder="想到什么丢进来，截图、文件、链接都行&#10;Enter 存下 · Shift+Enter 换行"></textarea>
       <div class="thumbs" id="thumbs"></div>
       <div class="cap-row">
-        <select id="f-project"></select>
         <span class="spacer"></span>
         <button class="icon-btn" id="attachBtn" title="添加附件">📎</button>
         <button class="go" id="go" disabled>存下</button>
@@ -297,8 +312,42 @@
       </label>
     </div>
 
+    <div class="field">
+      <label>项目</label>
+      <div class="proj-list" id="projList"></div>
+      <button type="button" class="mini" id="newProjectBtn">+ 新建项目</button>
+    </div>
+
     <div class="dlg-foot">
       <button type="button" id="cfgCancel">取消</button>
+      <button type="submit" class="primary">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="projDlg">
+  <form class="dlg" id="projForm" method="dialog">
+    <h2 id="projTitle">项目</h2>
+
+    <div class="field">
+      <label>名称</label>
+      <input id="p-name" placeholder="诺华-数据分析平台" autocomplete="off">
+    </div>
+
+    <div class="field">
+      <label>别名（逗号分隔，用于自动判断）</label>
+      <input id="p-aliases" placeholder="诺华, novartis, NVRP" autocomplete="off">
+    </div>
+
+    <div class="field">
+      <label>源目录</label>
+      <div id="dirList"></div>
+      <button type="button" class="mini" id="addDir">+ 添加目录</button>
+    </div>
+
+    <div class="dlg-foot">
+      <button type="button" id="projDelete" style="margin-right:auto;color:var(--p0)">删除</button>
+      <button type="button" id="projCancel">取消</button>
       <button type="submit" class="primary">保存</button>
     </div>
   </form>
@@ -453,11 +502,13 @@ function cardHTML(t){
     ? '<span class="tag pending">判断中…</span>'
     : t.classify_state === 'failed'
       ? `<span class="tag failed" title="${esc(t.classify_reason||'')}">未判断</span>` : '';
+  const needProj = t.needs_project
+    ? '<span class="badge-need" data-assign="' + t.id + '">选项目</span>' : '';
   return `
     <div class="card ${t.status === 'done' ? 'done' : ''}" draggable="true" data-id="${t.id}"
          style="--bar:${PRI_COLOR[t.priority] || 'var(--p3)'}">
       <div class="t">${esc(t.title)}</div>
-      <div class="meta">${meta.join('')}${cls}<span class="time">${ago(t.created_at)}</span></div>
+      <div class="meta">${meta.join('')}${needProj}${cls}<span class="time">${ago(t.created_at)}</span></div>
       ${shots}${fileRow}
     </div>`;
 }
@@ -531,8 +582,9 @@ function syncFilters(){
   const proj = $('#project');
   const keep = proj.value;
   proj.innerHTML = '<option value="">全部项目</option>' +
-    store.projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
-  if (store.projects.includes(keep)) proj.value = keep;
+    store.projects.map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join('');
+  const names = store.projects.map(p => p.name);
+  if (names.includes(keep)) proj.value = keep;
 
   const cats = [...new Set(store.tasks.map(t => t.category).filter(Boolean))].sort();
   const cat = $('#category');
@@ -541,10 +593,7 @@ function syncFilters(){
     cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
   if (cats.includes(keepCat)) cat.value = keepCat;
 
-  const fp = $('#f-project');
-  const keepFp = fp.value;
-  fp.innerHTML = store.projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
-  if (store.projects.includes(keepFp)) fp.value = keepFp;
+
 }
 
 /* ---------------- 随手记 ---------------- */
@@ -629,7 +678,6 @@ async function submit(){
     text: text || null,
     images: images.map(i => i.path),
     files: files.map(f => f.path),
-    project: $('#f-project').value || '默认',
     source: 'quick'
   };
 
@@ -731,8 +779,114 @@ async function openSettings(){
     $('#modelHint').textContent = '没有拉到模型清单';
   }
 
+  renderProjList();
   $('#cfg').showModal();
 }
+
+/* ---------------- 项目管理 ---------------- */
+
+let editingProjectId = null;
+
+function renderProjList(){
+  const host = $('#projList');
+  if (!host) return;
+  host.innerHTML = (store.projects || []).map(p => {
+    const dirs = (p.dirs || []).map(d => {
+      const base = String(d.path || '').split(/[\\/]/).filter(Boolean).pop() || d.path;
+      return base + (d.note ? '（' + d.note + '）' : '');
+    }).join('、');
+    return `<div class="proj-row" data-pid="${p.id}">
+      <div>
+        <div class="pn">${esc(p.name)}</div>
+        ${dirs ? `<div class="dirs">${esc(dirs)}</div>` : ''}
+      </div>
+      <span class="pc">${p.taskCount || 0}</span>
+    </div>`;
+  }).join('') || '<div class="proj-row"><div class="pn" style="color:var(--muted)">还没有项目</div></div>';
+
+  host.querySelectorAll('.proj-row[data-pid]').forEach(row => {
+    row.addEventListener('click', () => openProjectEditor(row.dataset.pid));
+  });
+}
+
+function dirRow(d = {}){
+  const wrap = document.createElement('div');
+  wrap.className = 'dir-row';
+  wrap.innerHTML = `
+    <input class="dp" placeholder="D:\\WorkFiles\\code\\xxx" value="${esc(d.path || '')}">
+    <input class="dn" placeholder="说明（可选）" value="${esc(d.note || '')}" style="max-width:120px">
+    <select class="dm" style="max-width:76px">
+      <option value="">副</option>
+      <option value="1" ${d.primary ? 'selected' : ''}>主要</option>
+    </select>
+    <button type="button" class="rm" title="移除">✕</button>
+  `;
+  wrap.querySelector('.rm').addEventListener('click', () => wrap.remove());
+  return wrap;
+}
+
+function openProjectEditor(id){
+  editingProjectId = id || null;
+  const p = id ? (store.projects || []).find(x => x.id === id) : null;
+
+  $('#projTitle').textContent = p ? '编辑项目' : '新建项目';
+  $('#p-name').value = p?.name || '';
+  $('#p-aliases').value = (p?.aliases || []).join(', ');
+  $('#projDelete').style.display = p ? '' : 'none';
+
+  const list = $('#dirList');
+  list.innerHTML = '';
+  const dirs = (p?.dirs || []);
+  if (dirs.length) dirs.forEach(d => list.appendChild(dirRow(d)));
+  else list.appendChild(dirRow({}));
+
+  $('#projDlg').showModal();
+  setTimeout(() => $('#p-name').focus(), 40);
+}
+
+$('#newProjectBtn')?.addEventListener('click', () => openProjectEditor(null));
+
+$('#addDir')?.addEventListener('click', () => $('#dirList').appendChild(dirRow({})));
+$('#projCancel')?.addEventListener('click', () => $('#projDlg').close());
+
+$('#projForm')?.addEventListener('submit', async e => {
+  e.preventDefault();
+  const name = $('#p-name').value.trim();
+  if (!name) { toast('项目名不能为空'); return; }
+
+  const aliases = $('#p-aliases').value.split(',').map(x => x.trim()).filter(Boolean);
+  const dirs = [...$('#dirList').querySelectorAll('.dir-row')].map(row => ({
+    path: row.querySelector('.dp').value.trim(),
+    note: row.querySelector('.dn').value.trim(),
+    primary: row.querySelector('.dm').value === '1'
+  })).filter(d => d.path);
+
+  try {
+    if (editingProjectId) await api('PATCH', '/api/projects/' + encodeURIComponent(editingProjectId), { name, aliases, dirs });
+    else await api('POST', '/api/projects', { name, aliases, dirs });
+
+    $('#projDlg').close();
+    await refresh();
+    renderProjList();
+    toast('项目已保存');
+  } catch (err) {
+    toast('保存失败：' + err.message);
+  }
+});
+
+$('#projDelete')?.addEventListener('click', async () => {
+  if (!editingProjectId) return;
+  if (!confirm('删除这个项目？它的任务会移到别的项目。')) return;
+  try {
+    await api('DELETE', '/api/projects/' + encodeURIComponent(editingProjectId));
+    $('#projDlg').close();
+    await refresh();
+    renderProjList();
+    toast('已删除');
+  } catch (err) {
+    toast('删除失败：' + err.message);
+  }
+});
 
 $('#settingsBtn').addEventListener('click', openSettings);
 $('#cfgCancel').addEventListener('click', () => $('#cfg').close());
@@ -763,7 +917,29 @@ $('#project').addEventListener('change', e => { filters.project = e.target.value
 $('#priority').addEventListener('change', e => { filters.priority = e.target.value; render(); });
 $('#category').addEventListener('change', e => { filters.category = e.target.value; render(); });
 
-document.addEventListener('click', e => {
+document.addEventListener('click', async e => {
+  const assign = e.target.closest('[data-assign]');
+  if (assign) {
+    e.stopPropagation();
+    const id = assign.dataset.assign;
+    const names = (store.projects || []).map(p => p.name);
+    const pick = prompt('选项目（输入名字）\n可选：' + names.join('、') + '\n\n直接输入新项目名也可以：');
+    if (!pick) return;
+    try {
+      const hit = (store.projects || []).find(p => p.name === pick || (p.aliases||[]).includes(pick));
+      const body = hit ? { project_id: hit.id, project: hit.name } : { project: pick.trim(), needs_project: false };
+      if (!hit) {
+        const np = await api('POST', '/api/projects', { name: pick.trim() });
+        body.project_id = np.id;
+        body.project = np.name;
+      }
+      await api('PATCH', '/api/tasks/' + encodeURIComponent(id), { ...body, needs_project: false });
+      await refresh();
+      toast('已归到 ' + pick.trim());
+    } catch (err) { toast('失败：' + err.message); }
+    return;
+  }
+
   const img = e.target.closest('.shots img');
   if (img) {
     const lb = $('#lightbox');

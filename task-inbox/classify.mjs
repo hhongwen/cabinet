@@ -46,8 +46,14 @@ ${PRIORITY_RUBRIC}
 类别从这些里选（也可以自拟，但优先用这些）：
 工作、学习、生活、开发、运维、沟通、研究、杂事
 
+项目判断：用户有一个项目清单，每个项目有名字、别名、若干个目录。
+你要根据内容判断这条记录属于哪个项目：
+- 提到项目名或别名 → 那个项目
+- 提到目录名、文件路径、接口名、客户名 → 找对应项目
+- 完全判断不出来 → 项目填 null，不要瞎猜
+
 输出 JSON，字段：
-{"kind":"...","priority":"p0-p4","title":"...","category":"...","reason":"一句话说明为什么是这个优先级"}
+{"kind":"...","priority":"p0-p4","title":"...","category":"...","project":"项目名或null","reason":"一句话说明为什么是这个优先级"}
 
 不要输出任何解释、不要说"好的"、不要 markdown 代码块。`;
 
@@ -130,8 +136,26 @@ export function createClassifier(opts = {}) {
     return fs.existsSync(s) ? path.resolve(s) : null;
   }
 
-  async function classify(task) {
+  async function classify(task, opts = {}) {
     const lines = [];
+
+    // 项目清单给模型参考：名字 + 别名 + 目录
+    const projects = opts.projects || [];
+    if (projects.length) {
+      const spec = projects.map((p) => {
+        const bits = ['- ' + p.name];
+        if (p.aliases && p.aliases.length) bits.push('别名：' + p.aliases.join('、'));
+        if (p.dirs && p.dirs.length) {
+          const ds = p.dirs.slice(0, 6).map((d) => {
+            const base = String(d.path || '').split(/[\\/]/).filter(Boolean).pop() || d.path;
+            return d.note ? base + '（' + d.note + '）' : base;
+          });
+          bits.push('目录：' + ds.join('、'));
+        }
+        return bits.join(''); 
+      }).join('\n');
+      lines.push('可选项目清单：\n' + spec);
+    }
 
     if (task.text) lines.push('用户写的原文：\n' + String(task.text).slice(0, 4000));
     if (task.title && task.title !== task.text) lines.push('（标题候选：' + task.title + '）');
@@ -168,6 +192,7 @@ export function createClassifier(opts = {}) {
         ? parsed.title.trim().slice(0, 120)
         : buildFallbackTitle(task, parsed),
       category: typeof parsed.category === 'string' ? parsed.category.trim().slice(0, 20) : '',
+      project: typeof parsed.project === 'string' ? parsed.project.trim() : null,
       reason: typeof parsed.reason === 'string' ? parsed.reason.trim().slice(0, 200) : '',
       model: r.model || '',
       backend: backend.name
