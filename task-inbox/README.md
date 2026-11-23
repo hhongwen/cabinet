@@ -394,3 +394,18 @@ GET /api/browse?path=D:\xxx   → 该目录的子目录、父目录、是否 git
 - 系统调用失败时自动退回页面里的逐层浏览（`browse.mjs`）
 
 Linux/macOS 上没有这条路径，会直接走页面浏览。
+
+---
+
+## 目录对话框：Vista+ 风格
+
+之前用的是 `FolderBrowserDialog`（老式树形控件，标题还是乱码），
+现在换成 `IFileOpenDialog` + `FOS_PICKFOLDERS`：
+
+- 就是 Win11 资源管理器那种界面：地址栏、搜索、详细信息、排序
+- 标题用系统本地化的「选择文件夹」，不写死中文，绕开编码问题
+- `.ps1` 存成 **UTF-8 with BOM** —— PowerShell 5.1 按 ANSI 读无 BOM 文件，
+  中文必然乱码（这就是上一版显示「删除殡傍主妇绫 绔」的原因）
+
+实现要点：COM 接口在 C# 里声明（`IShellItem` / `IFileOpenDialog`），
+`Add-Type` 编译后调用；`SetFolder` 把初始路径设进去，用户从那儿开始。
