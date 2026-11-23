@@ -229,13 +229,43 @@ h1{
 .icon-btn:active{transform:scale(.96)}
 .icon-btn:disabled{opacity:.4;cursor:default;transform:none}
 
-.filters{display:flex;gap:7px;flex-wrap:wrap;margin-top:13px}
+/* 筛选条：一个整体工具条，三个下拉只是它的分段 */
+.filters{
+  display:inline-flex;align-items:center;gap:2px;flex-wrap:wrap;
+  margin-top:13px;padding:3px 3px 3px 10px;
+  border:1px solid #b7c2c5;border-radius:11px;
+  background:rgba(255,255,255,.55);
+  box-shadow:0 1px 2px #36495008;
+  transition:border-color .16s, background .16s;
+}
+.filters:hover{border-color:#a6b4b8;background:rgba(255,255,255,.72)}
+.filters-ico{display:grid;place-items:center;width:13px;height:13px;color:#7c898d;margin-right:5px;flex:0 0 auto}
+.filters-ico svg{width:13px;height:13px;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .filters select{
-  font-size:11.5px;color:#394549;background:rgba(255,255,255,.62);
-  border:1px solid #b7c2c5;border-radius:9px;padding:6px 10px;cursor:pointer;
+  -webkit-appearance:none;appearance:none;
+  font:500 11.5px/1 var(--font-ui);color:#394549;
+  height:26px;padding:0 21px 0 9px;cursor:pointer;
+  background-color:transparent;background-repeat:no-repeat;
+  background-position:right 7px center;background-size:11px 11px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.6 4.6L6 8l3.4-3.4' fill='none' stroke='%23667277' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  border:1px solid transparent;border-radius:8px;
+  transition:background-color .16s, border-color .16s, color .16s;
+}
+.filters select:hover{background-color:rgba(255,255,255,.9);border-color:#c2cccf}
+.filters select:focus{outline:none;border-color:var(--orange);box-shadow:0 0 0 3px #fa461614}
+.filters select.on{
+  color:#b83c13;font-weight:600;background-color:var(--orange-soft);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.6 4.6L6 8l3.4-3.4' fill='none' stroke='%23b83c13' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+.filters select.on:hover{border-color:#e9b6a4;background-color:#ffe0d5}
+.flt-reset{
+  height:22px;padding:0 8px;margin-left:3px;
+  font:11px/1 var(--font-ui);color:#8a5a49;
+  background:transparent;border:1px solid transparent;border-radius:7px;
   transition:.16s;
 }
-.filters select:hover{background:#fff;border-color:#95a5a9}
+.flt-reset:hover{color:#b83c13;background:rgba(250,70,22,.09)}
+.flt-reset[hidden]{display:none}
 
 /* ---------- 看板 ---------- */
 .board-area{
@@ -251,10 +281,6 @@ h1{
   border:1px solid #b7c2c5; border-radius:19px; position:relative; overflow:hidden;
   box-shadow:0 8px 22px #3649500b; display:flex; flex-direction:column; min-height:96px;
 }
-.col:before{
-  content:"";position:absolute;width:48px;height:17px;right:0;top:0;pointer-events:none;
-  border-right:1px solid #9daeb36e;border-bottom:1px solid #9daeb36e;
-}
 .col-head{
   display:flex;align-items:center;gap:8px;padding:12px 13px 10px;
   border-bottom:1px dashed #bcc7ca;
@@ -262,12 +288,15 @@ h1{
 .col .dot{width:6px;height:6px;border-radius:50%}
 .col-title{font-size:11.5px;font-weight:750;letter-spacing:.2px}
 .col-num{
-  margin-left:auto;margin-right:26px;
-  font:10px var(--font-mono);color:#78858a;
-  background:rgba(255,255,255,.62);border:1px solid #c3cccf;
-  border-radius:999px;padding:0 6px;min-width:18px;text-align:center;
+  margin-left:auto;
+  font:500 10px/16px var(--font-mono);color:#6d7a7f;
+  background:rgba(255,255,255,.7);border:1px solid #c6d0d3;
+  border-radius:999px;padding:0 7px;min-width:20px;text-align:center;
+  font-variant-numeric:tabular-nums;
 }
-.col:before{width:38px;height:14px}
+.col.c-todo .col-num{color:#c2540f;border-color:#f0c9b5;background:#fdf0e9}
+.col.c-doing .col-num{color:#95601f;border-color:#e8d2b4;background:#fdf4e8}
+.col.c-done .col-num{color:#2c7364;border-color:#c2ddd6;background:#eef7f4}
 .col-body{padding:9px;display:flex;flex-direction:column;gap:7px;min-height:48px}
 .col.drag-over .col-body{background:rgba(250,70,22,.05);border-radius:0 0 18px 18px}
 
@@ -723,6 +752,9 @@ body.solo #collapseBtn{display:none}
           <span class="spacer"></span>
         </div>
         <div class="filters">
+          <span class="filters-ico" aria-hidden="true">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+          </span>
           <select id="project"><option value="">全部项目</option></select>
           <select id="priority">
             <option value="">全部优先级</option>
@@ -733,6 +765,7 @@ body.solo #collapseBtn{display:none}
             <option value="p4">P4 待定</option>
           </select>
           <select id="category"><option value="">全部类别</option></select>
+          <button class="flt-reset" id="fltReset" type="button" hidden>清空</button>
         </div>
       </header>
 
@@ -1042,6 +1075,11 @@ function renderSidebar(){
 function syncFilterUI(){
   const proj = $('#project');
   if (proj) proj.value = navProject;
+  // 选中的筛选项高亮，未选中的低调
+  [['#project', filters.project], ['#priority', filters.priority], ['#category', filters.category]]
+    .forEach(([sel, val]) => { const el = $(sel); if (el) el.classList.toggle('on', !!val); });
+  const reset = $('#fltReset');
+  if (reset) reset.hidden = !(filters.project || filters.priority || filters.category);
   const crumb = $('#crumbView');
   if (crumb) crumb.textContent = navProject ? navProject.toUpperCase() : 'OVERVIEW';
   const h1 = document.querySelector('header.top h1');
@@ -1136,7 +1174,7 @@ function render(){
   board.innerHTML = COLS.map(col => {
     const items = store.tasks.filter(t => t.status === col.key && matches(t));
     return `
-      <section class="col" data-col="${col.key}">
+      <section class="col c-${col.key}" data-col="${col.key}">
         <div class="col-head">
           <span class="dot" style="background:${col.color}"></span>
           <span class="col-title">${col.label}</span>
@@ -1709,7 +1747,8 @@ async function openPicker(startPath, onPick) {
     // 打不开（路径不存在 / 没权限）：退到父目录
     const cut = start.replace(/[\\/]+$/, '').split(/[\\/]/);
     cut.pop();
-    start = cut.length ? cut.join('\\') : '';
+    // 分隔符要跟着路径本身走：mac/Linux 是 /，Windows 是 \
+    start = cut.length ? cut.join(start.includes('\\') ? '\\' : '/') : '';
   }
 
   if (!start) {
@@ -1932,8 +1971,17 @@ $('#project').addEventListener('change', e => {
   render();
   renderSidebar();
 });
-$('#priority').addEventListener('change', e => { filters.priority = e.target.value; render(); });
-$('#category').addEventListener('change', e => { filters.category = e.target.value; render(); });
+$('#priority').addEventListener('change', e => { filters.priority = e.target.value; syncFilterUI(); render(); });
+$('#category').addEventListener('change', e => { filters.category = e.target.value; syncFilterUI(); render(); });
+$('#fltReset').addEventListener('click', () => {
+  filters = { project:'', priority:'', category:'' };
+  navProject = '';
+  $('#priority').value = '';
+  $('#category').value = '';
+  syncFilterUI();
+  render();
+  renderSidebar();
+});
 
 document.addEventListener('click', async e => {
   const assign = e.target.closest('[data-assign]');
