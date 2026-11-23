@@ -89,6 +89,13 @@ input,select,textarea{font:inherit}
 .nav-link .name{display:flex;align-items:center;gap:9px;min-width:0}
 .nav-link svg{width:14px;height:14px;stroke-width:1.6;flex:0 0 auto;opacity:.85;
   stroke-linecap:round;stroke-linejoin:round}
+.ico-initial{
+  display:none;width:18px;height:18px;line-height:18px;text-align:center;
+  font:600 10.5px var(--font-mono);color:#4b585d;
+  background:rgba(255,255,255,.62);border:1px solid #c3cccf;border-radius:6px;
+  flex:0 0 auto;
+}
+.nav-link.active .ico-initial{background:var(--orange);border-color:var(--orange);color:#fff}
 .nav-link .cnt{
   font:9.5px/15px var(--font-mono); color:#7b878b; min-width:19px; text-align:center;
   padding:0 5px; border-radius:999px; background:rgba(255,255,255,.52);
@@ -119,13 +126,14 @@ input,select,textarea{font:inherit}
 .sidebar-foot{font:8.5px/1.7 var(--font-mono);letter-spacing:.9px;color:#829094;padding:12px 6px 0}
 
 /* 侧栏开关 */
-.side-toggle{
-  width:23px;height:23px;flex:0 0 auto;display:grid;place-items:center;padding:0;
-  border:1px solid #b0bcc0;background:rgba(255,255,255,.55);color:#5a666b;
-  border-radius:7px;transition:.16s;
+.rail-toggle{
+  width:30px;height:30px;flex:0 0 auto;display:grid;place-items:center;padding:0;
+  border:1px solid #b0bcc0;background:rgba(255,255,255,.6);color:#5a666b;
+  border-radius:9px;transition:.16s cubic-bezier(.2,0,0,1);
 }
-.side-toggle svg{width:13px;height:13px;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
-.side-toggle:hover{background:#fff;border-color:#8c9da2;color:var(--ink)}
+.rail-toggle svg{width:16px;height:16px}
+.rail-toggle:hover{background:#fff;border-color:#8c9da2;color:var(--ink)}
+.rail-toggle:active{transform:scale(.95)}
 
 /* 系统块里的设置按钮 */
 .sys-btn{
@@ -143,11 +151,6 @@ input,select,textarea{font:inherit}
 .app.side-collapsed .brand{justify-content:center;padding:2px 0 18px;gap:0}
 .app.side-collapsed .brand > div:nth-child(2){display:none}
 .app.side-collapsed .brand-mark{width:32px;height:32px}
-.app.side-collapsed .side-toggle{
-  position:absolute;right:-11px;top:20px;z-index:5;
-  width:22px;height:22px;border-radius:50%;background:#eef1f1;
-}
-.app.side-collapsed .side-toggle svg{transform:rotate(180deg)}
 .app.side-collapsed .section-title{
   font-size:0;padding:0;width:100%;height:1px;background:#b9c3c6;
   margin:10px 0 12px;opacity:.6;
@@ -157,7 +160,9 @@ input,select,textarea{font:inherit}
   width:42px;height:40px;padding:0;justify-content:center;border-radius:11px;
 }
 .app.side-collapsed .nav-link .name{gap:0;justify-content:center}
-.app.side-collapsed .nav-link .name > span{display:none}
+.app.side-collapsed .nav-link .name > span:not(.ico-initial){display:none}
+.app.side-collapsed .nav-link .ico-folder{display:none}
+.app.side-collapsed .nav-link .ico-initial{display:block}
 .app.side-collapsed .nav-link .cnt{display:none}
 .app.side-collapsed .nav-link svg{width:17px;height:17px}
 .app.side-collapsed .nav-link::before{left:-6px}
@@ -186,13 +191,13 @@ input,select,textarea{font:inherit}
 }
 
 .topbar{
-  height:56px; flex:0 0 auto; display:flex; align-items:center; justify-content:space-between;
+  height:56px; flex:0 0 auto; display:flex; align-items:center; justify-content:flex-start; gap:12px;
   padding:0 24px; border-bottom:1px solid #cbd2d5; position:relative; z-index:2;
   background:rgba(246,248,248,.72); backdrop-filter:blur(10px);
 }
 .breadcrumb{display:flex;gap:9px;align-items:center;font:9.5px var(--font-mono);letter-spacing:.6px;color:#829095}
 .breadcrumb b{color:#313b3f}
-.top-actions{display:flex;gap:11px;align-items:center}
+.top-actions{display:flex;gap:11px;align-items:center;margin-left:auto}
 .signal{font:9.5px var(--font-mono);color:#667277;display:flex;align-items:center;gap:7px}
 .signal-lamp{width:6px;height:6px;border-radius:50%;background:#428d7c;box-shadow:0 0 0 4px #428d7c16}
 .avatar{
@@ -578,15 +583,14 @@ body.solo #collapseBtn{display:none}
   .brand{justify-content:center;padding:2px 0 18px;gap:0}
   .brand > div:nth-child(2){display:none}
   .brand-mark{width:32px;height:32px}
-  .side-toggle{position:absolute;right:-11px;top:20px;z-index:5;
-    width:22px;height:22px;border-radius:50%;background:#eef1f1}
-  .side-toggle svg{transform:rotate(180deg)}
   .section-title{font-size:0;padding:0;width:100%;height:1px;
     background:#b9c3c6;margin:10px 0 12px;opacity:.6}
   .menu{gap:6px;width:100%;align-items:center}
   .nav-link{width:42px;height:40px;padding:0;justify-content:center;border-radius:11px}
   .nav-link .name{gap:0;justify-content:center}
-  .nav-link .name > span{display:none}
+  .nav-link .name > span:not(.ico-initial){display:none}
+  .nav-link .ico-folder{display:none}
+  .nav-link .ico-initial{display:block}
   .nav-link .cnt{display:none}
   .nav-link svg{width:17px;height:17px}
   .nav-link::before{left:-6px}
@@ -631,9 +635,6 @@ body.solo #collapseBtn{display:none}
         <div class="brand-name">CABINET<span> / TASK</span></div>
         <div class="brand-sub">TASK INBOX / WORKSPACE</div>
       </div>
-      <button class="side-toggle" id="sideToggle" title="收起侧栏">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>
-      </button>
     </div>
 
     <div class="section-title">status</div>
@@ -695,6 +696,13 @@ body.solo #collapseBtn{display:none}
   <main class="main">
 
     <div class="topbar">
+      <button class="rail-toggle" id="sideToggle" title="收起侧栏" aria-label="收起侧栏">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+             stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="16" rx="3"/>
+          <path d="M9 4v16"/>
+        </svg>
+      </button>
       <div class="breadcrumb">
         ROOT <span>/</span> WORKSPACE <span>/</span> <b id="crumbView">OVERVIEW</b>
       </div>
@@ -1005,10 +1013,11 @@ function renderSidebar(){
   host.innerHTML = projects.map(p => {
     const n = (store.tasks || []).filter(t => t.project_id === p.id || t.project === p.name).length;
     const active = navProject === p.name ? ' active' : '';
-    return `<div class="nav-link${active}" data-proj="${esc(p.name)}">
+    const initial = (p.name || '?').trim().slice(0, 1).toUpperCase();
+    return `<div class="nav-link${active}" data-proj="${esc(p.name)}" title="${esc(p.name)}">
       <span class="name">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-        <span>${esc(p.name)}</span>
+        <svg class="ico-folder" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        <span class="ico-initial">${esc(initial)}</span>
       </span>
       <span class="cnt">${n}</span>
     </div>`;
