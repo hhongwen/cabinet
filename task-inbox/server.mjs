@@ -40,14 +40,20 @@ function json(res, code, obj) {
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
-    let buf = '';
+    // 必须先把 Buffer 收齐再解码：直接 `str += chunk` 会对每个分片单独调
+    // toString()，一个中文字符被切在两个 TCP 分片之间就会变成 U+FFFD，
+    // 实测能造出「Ĭ��」这种烂项目名，还写进了库。
+    const chunks = [];
+    let size = 0;
     req.on('data', (c) => {
-      buf += c;
-      if (buf.length > 16 * 1024 * 1024) { reject(new Error('body too large')); req.destroy(); }
+      chunks.push(c);
+      size += c.length;
+      if (size > 16 * 1024 * 1024) { reject(new Error('body too large')); req.destroy(); }
     });
     req.on('end', () => {
-      if (!buf) return resolve({});
-      try { resolve(JSON.parse(buf)); } catch { reject(new Error('invalid JSON')); }
+      if (!chunks.length) return resolve({});
+      const raw = Buffer.concat(chunks).toString('utf8');
+      try { resolve(JSON.parse(raw)); } catch { reject(new Error('invalid JSON')); }
     });
     req.on('error', reject);
   });

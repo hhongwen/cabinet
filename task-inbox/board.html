@@ -7,24 +7,80 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1024 1024'%3E%3Crect x='28' y='28' width='968' height='968' rx='150' fill='%23D9DEE5'/%3E%3Cg fill='%23111A24'%3E%3Crect x='270' y='154' width='580' height='86'/%3E%3Crect x='142' y='262' width='126' height='518'/%3E%3Crect x='206' y='218' width='64' height='44'/%3E%3Crect x='270' y='196' width='66' height='44'/%3E%3Crect x='268' y='240' width='64' height='72'/%3E%3Crect x='270' y='782' width='550' height='86'/%3E%3Crect x='206' y='738' width='64' height='44'/%3E%3Crect x='270' y='694' width='66' height='44'/%3E%3C/g%3E%3Cg fill='%238E99A8'%3E%3Crect x='460' y='350' width='390' height='72'/%3E%3Crect x='460' y='524' width='390' height='72'/%3E%3Crect x='458' y='702' width='254' height='72'/%3E%3C/g%3E%3Crect x='760' y='690' width='162' height='162' fill='%23FF5A14'/%3E%3C/svg%3E">
 <style>
 :root{
-  --silver-00:#F7F8F8; --silver-50:#F1F3F3; --silver-100:#DDE2E3; --silver-200:#CBD2D4;
-  --silver-300:#B7BFC2; --silver-500:#89959B; --slate-700:#566168; --slate-900:#252B30;
+  --silver-00:#F7F8F8; --silver-50:#F1F3F3; --silver-200:#CBD2D4;
+  --slate-700:#566168;
   --ink:#151A1E; --orange:#FA4616; --orange-soft:#FFE5DC;
-  --border:rgba(63,78,85,.20);
-  --radius-sm:9px; --radius-md:17px; --radius-lg:25px;
+  /* 白字按钮/徽章必须用深橙：#FA4616 配白字只有 3.53:1，不够 AA */
+  --orange-cta:#C93610; --orange-cta-hi:#D84414; --orange-cta-deep:#A83209;
+  --radius-sm:9px; --radius-lg:25px;
+
+  /* ---------- 材质层：玻璃 + 拟态 ---------- */
+  /* 玻璃只给浮动层（顶栏/底栏/筛选条/看板列/弹窗）；正文卡片保持不透明 */
+  --glass-fill:rgba(250,252,253,.62);
+  --glass-fill-strong:rgba(252,253,254,.82);
+  --glass-hair:rgba(120,136,142,.26);
+  --glass-blur:saturate(1.6) blur(18px);
+  --glass-blur-lite:saturate(1.3) blur(9px);
+  /* 拟态：左上高光 */
+  --raise-hi:inset 0 1px 0 rgba(255,255,255,.92);
+  --shadow-1:0 1px 2px rgba(40,58,66,.06), 0 4px 12px -6px rgba(40,58,66,.14);
+  --shadow-2:0 2px 4px rgba(40,58,66,.05), 0 12px 26px -12px rgba(40,58,66,.20);
+
+  /* ---------- 文字层级：只有四级，别再造新的灰 ---------- */
+  --text-1:var(--ink);      /* 正文、标题 */
+  --text-2:#465155;         /* 次要正文 */
+  --text-3:#7b878b;         /* 说明、标签 */
+  --text-4:#8f9b9f;         /* 最弱：占位符、时间戳、计数 */
+
+  /* ---------- 线与状态色 ---------- */
+  --hair:#e3e9ea;           /* 最细的分隔线 */
+  --line:#c3cccf;           /* 控件 / 缩略图描边 */
+  --line-strong:#b7c2c5;    /* 旧版描边，逐步收敛到 --line */
+  --accent-text:#b83c13;    /* 橙色文字（比 --orange 深，够 AA） */
+  --accent-text-hi:#a8340f; /* 选中态里更重一档的橙字 */
+  --ok:#358270;             /* 成功 / 在线 */
+  --ok-text:#2c7364;        /* 成功态文字 */
+  --warn-text:#b06a1f;      /* 待判断 / 进行中文字 */
+  --danger-text:#a32d2d;    /* 报错文字 */
+  --danger-edge:#e0b6aa;    /* 危险按钮描边 */
+  --danger-edge-hi:#d99e8b;
+  /* 深色面（抽屉里"我说的"气泡、toast）上的文字 */
+  --on-dark:#eef3f4;
+
+  /* ---------- 控件层：所有按钮/输入框共用这一套，别各自写 ---------- */
+  --ctl-edge:rgba(120,136,142,.30);
+  --ctl-edge-hi:rgba(120,136,142,.46);
+  /* 凸起控件（按钮）与凹陷控件（输入框）是两种不同材质。
+     凹陷用纯色而非渐变：下拉框还要往 background-image 里塞箭头，
+     渐变写在 background 简写里会被那条规则整个重置掉。 */
+  --ctl-raise:linear-gradient(180deg,rgba(255,255,255,.96),rgba(238,243,244,.84));
+  --ctl-inset:#fcfdfd;
+  --ctl-inset-shadow:inset 0 1px 3px rgba(120,136,142,.14), inset 0 -1px 0 rgba(255,255,255,.9);
+  --ctl-focus-ring:0 0 0 3px rgba(250,70,22,.12);
+
   --font-ui:Inter,"SF Pro Display","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
   --font-mono:"SFMono-Regular",Consolas,"Liberation Mono",monospace;
 
-  /* 兼容旧逻辑的别名 */
-  --bg:var(--silver-50); --panel:var(--silver-100); --card:#fff;
-  --card-hover:var(--silver-00); --text:var(--ink); --muted:var(--slate-700);
-  --line:var(--silver-300); --todo:var(--orange); --doing:#C77A2A; --done:#358270;
   --p0:var(--orange); --p1:#B06A1F; --p2:#4A6572; --p3:#89959B; --p4:#AAB3B6;
+  --todo:var(--orange); --doing:#C77A2A; --done:#358270;
+
+  /* 品牌图标三色 */
+  --lg-bg:#D9DEE5; --lg-c:#111A24; --lg-line:#8E99A8;
 }
-*{box-sizing:border-box}
-html,body{height:100%}
+/* 滚动条：默认那条 Windows 灰槽跟整页材质完全不搭，统一压细 */
+*{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:rgba(120,136,142,.42) transparent}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{
+  background:rgba(120,136,142,.36);
+  border:3px solid transparent;border-radius:999px;
+  background-clip:content-box;
+}
+::-webkit-scrollbar-thumb:hover{background:rgba(120,136,142,.58);background-clip:content-box}
+::-webkit-scrollbar-corner{background:transparent}
+html{height:100%}
 body{
-  margin:0; background:var(--silver-50); color:var(--ink);
+  height:100%; margin:0; background:var(--silver-50); color:var(--ink);
   font:13.5px/1.6 var(--font-ui); overflow:hidden;
   -webkit-font-smoothing:antialiased;
 }
@@ -39,21 +95,33 @@ input,select,textarea{font:inherit}
   transition:grid-template-columns .22s cubic-bezier(.2,0,0,1);
 }
 .app.side-collapsed{grid-template-columns:68px minmax(0,1fr)}
-.app.side-collapsed .main{grid-column:2}
-.app.resizing{transition:none}
 .app.collapsed .dock{display:none}
 
 .sidebar{
   min-height:0; position:relative; display:flex; flex-direction:column;
-  padding:22px 14px 16px; border-right:1px solid #b9c3c6; overflow:auto;
-  background:linear-gradient(145deg,#e9eded 0%,#d9dfe1 72%,#cbd2d4 100%);
+  padding:22px 14px 16px; overflow:auto;
+  border-right:1px solid rgba(120,136,142,.28);
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.85) 0%, rgba(238,242,243,.72) 40%, rgba(214,222,225,.82) 100%),
+    linear-gradient(180deg,#e9eded 0%,#d9dfe1 72%,#cbd2d4 100%);
+  box-shadow:
+    inset 1px 0 0 rgba(255,255,255,.9),
+    inset -1px 0 0 rgba(120,136,142,.12),
+    8px 0 26px -22px rgba(40,58,66,.55);
 }
+/* 侧栏横向拉丝：拟态金属的那层"纹理记忆" */
+.sidebar:before{
+  content:"";position:absolute;inset:0;pointer-events:none;opacity:.35;
+  background:repeating-linear-gradient(180deg,
+    rgba(255,255,255,.30) 0 1px, rgba(255,255,255,0) 1px 4px);
+  mix-blend-mode:overlay;
+}
+.sidebar > *{position:relative}
 .brand{display:flex; gap:9px; align-items:center; padding:2px 2px 20px}
 .brand-mark{width:34px;height:34px;flex:0 0 auto;display:block;line-height:0}
 .brand-mark svg{width:100%;height:100%;display:block;border-radius:7px}
 .brand-mark svg rect{shape-rendering:crispEdges}
-/* 浅底用浅款，深底用深款 */
-:root{--lg-bg:#D9DEE5;--lg-c:#111A24;--lg-line:#8E99A8}
+/* 品牌图标：浅底用浅款，深底用深款（--lg-* 就在上面 :root 里） */
 @media (prefers-color-scheme: dark){
   :root{--lg-bg:#111A24;--lg-c:#F2F4F7;--lg-line:#B7C0CC}
 }
@@ -62,17 +130,17 @@ input,select,textarea{font:inherit}
 .lg-line rect{fill:var(--lg-line)}
 .brand-name{font-size:14.5px;line-height:1;font-weight:800;letter-spacing:-.4px}
 .brand-name span{font-weight:350;color:var(--slate-700)}
-.brand-sub{font:8.5px var(--font-mono);color:#6c767a;margin-top:5px;letter-spacing:.8px}
+.brand-sub{font:8.5px var(--font-mono);color:var(--text-3);margin-top:5px;letter-spacing:.8px}
 
 .section-title{
-  font:9.5px var(--font-mono); color:#6d797c; letter-spacing:1.5px;
+  font:9.5px var(--font-mono); color:var(--text-3); letter-spacing:1.5px;
   padding:11px 11px 6px; text-transform:uppercase;
 }
 .menu{display:flex; flex-direction:column; gap:3px}
 .nav-link{
   display:flex; align-items:center; gap:9px; justify-content:space-between;
   border:1px solid transparent; padding:9px 10px; border-radius:10px;
-  font-size:12px; color:#465155; cursor:pointer;
+  font-size:12px; color:var(--text-2); cursor:pointer;
   transition:background .16s, border-color .16s, color .16s;
   position:relative;
 }
@@ -82,9 +150,14 @@ input,select,textarea{font:inherit}
   transition:height .18s cubic-bezier(.2,0,0,1);
 }
 .nav-link.active::before{height:16px}
+/* 选中项：从侧栏面板上"凸起来"的一块 */
 .nav-link.active{
-  background:rgba(255,255,255,.72); border-color:#b3bfc2; color:#13191d;
-  font-weight:700; box-shadow:0 1px 6px #b2babd26;
+  border-color:rgba(120,136,142,.34); color:var(--text-1); font-weight:700;
+  background:linear-gradient(180deg,#ffffff,rgba(244,248,249,.9));
+  box-shadow:
+    inset 0 1px 0 #fff,
+    inset 0 -1px 0 rgba(120,136,142,.10),
+    0 1px 2px rgba(40,58,66,.06), 0 8px 18px -12px rgba(40,58,66,.42);
 }
 .nav-link .name{display:flex;align-items:center;gap:9px;min-width:0}
 .nav-link svg{width:14px;height:14px;stroke-width:1.6;flex:0 0 auto;opacity:.85;
@@ -92,59 +165,58 @@ input,select,textarea{font:inherit}
 .ico-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ico-initial{
   display:none;width:18px;height:18px;line-height:18px;text-align:center;
-  font:600 10.5px var(--font-mono);color:#4b585d;
-  background:rgba(255,255,255,.62);border:1px solid #c3cccf;border-radius:6px;
+  font:600 10.5px var(--font-mono);color:var(--text-2);
+  background:rgba(255,255,255,.62);border:1px solid var(--line);border-radius:6px;
   flex:0 0 auto;
 }
-.nav-link.active .ico-initial{background:var(--orange);border-color:var(--orange);color:#fff}
+.nav-link.active .ico-initial{background:var(--orange-cta);border-color:var(--orange-cta-deep);color:#fff}
 .nav-link .cnt{
-  font:9.5px/15px var(--font-mono); color:#7b878b; min-width:19px; text-align:center;
+  font:9.5px/15px var(--font-mono); color:var(--text-3); min-width:19px; text-align:center;
   padding:0 5px; border-radius:999px; background:rgba(255,255,255,.52);
   border:1px solid transparent; transition:.16s;
 }
-.nav-link:hover{border-color:#aeb9bc;background:rgba(255,255,255,.32)}
-.nav-link.active{
-  background:rgba(255,255,255,.66); border-color:#acb8bc; color:#13191d;
-  font-weight:700; box-shadow:0 2px 10px #b2babd2e;
-}
-.nav-link.active .cnt{background:var(--orange);color:#fff;border-color:var(--orange)}
+.nav-link:hover{border-color:rgba(120,136,142,.30);background:rgba(255,255,255,.42)}
+.nav-link.active .cnt{background:var(--orange-cta);color:#fff;border-color:var(--orange-cta-deep)}
 
 .sidebar-bottom{margin-top:auto; padding:16px 6px 0}
+/* 系统块：深色玻璃，是整块浅银里唯一的"沉下去"的面 */
 .systembox{
-  background:#ccd5d7; border:1px solid #a9b5b8; border-radius:15px; padding:12px;
+  border-radius:15px; padding:12px; position:relative; overflow:hidden;
+  border:1px solid rgba(120,136,142,.34);
+  background:linear-gradient(160deg, rgba(226,233,235,.9), rgba(196,208,212,.85));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.75),
+    inset 0 -1px 0 rgba(90,108,114,.18),
+    0 6px 16px -12px rgba(40,58,66,.5);
 }
-.sys-top{display:flex;align-items:center;justify-content:space-between;font:9.5px var(--font-mono);color:#5c696d}
+.systembox:after{
+  content:"";position:absolute;right:-30px;top:-40px;width:120px;height:96px;
+  pointer-events:none;transform:rotate(22deg);opacity:.55;
+  background:linear-gradient(180deg, rgba(255,255,255,.8), rgba(255,255,255,0));
+  filter:blur(5px);
+}
+.systembox > *{position:relative;z-index:1}
+.sys-top{display:flex;align-items:center;justify-content:space-between;font:9.5px var(--font-mono);color:var(--text-2)}
 .sys-online{display:flex;align-items:center;gap:5px}
 .sys-online:before{
   content:"";width:6px;height:6px;border-radius:50%;
-  background:#358270;box-shadow:0 0 0 4px #35827019;
+  background:var(--ok);box-shadow:0 0 0 4px #35827019;
 }
 .sys-head{font-size:12.5px;font-weight:800;margin:10px 0 4px}
-.sys-info{font-size:10.5px;color:#647176;line-height:1.6}
+.sys-info{font-size:10.5px;color:var(--text-2);line-height:1.6}
 .sys-bar{display:flex;gap:3px;margin-top:10px}
 .sys-bar i{height:3px;flex:1;background:#8c999e;border-radius:6px;transition:background .2s}
 .sys-bar i.on{background:var(--orange)}
-.sidebar-foot{font:8.5px/1.7 var(--font-mono);letter-spacing:.9px;color:#829094;padding:12px 6px 0}
+.sidebar-foot{font:8.5px/1.7 var(--font-mono);letter-spacing:.9px;color:var(--text-3);padding:12px 6px 0}
 
-/* 侧栏开关 */
-.rail-toggle{
-  width:30px;height:30px;flex:0 0 auto;display:grid;place-items:center;padding:0;
-  border:1px solid #b0bcc0;background:rgba(255,255,255,.6);color:#5a666b;
-  border-radius:9px;transition:.16s cubic-bezier(.2,0,0,1);
-}
-.rail-toggle svg{width:16px;height:16px}
-.rail-toggle:hover{background:#fff;border-color:#8c9da2;color:var(--ink)}
-.rail-toggle:active{transform:scale(.95)}
+/* 侧栏开关的尺寸与配色见下方「方形图标按钮」；材质见「按钮」总则 */
 
-/* 系统块里的设置按钮 */
+/* 系统块里的设置按钮：只写差量 */
 .sys-btn{
-  margin-top:10px;width:100%;display:flex;align-items:center;justify-content:center;gap:6px;
-  padding:6px 8px;border:1px solid #a9b5b8;background:rgba(255,255,255,.55);
-  color:#455156;border-radius:9px;font-size:11px;letter-spacing:.2px;
-  transition:.16s cubic-bezier(.2,0,0,1);
+  margin-top:10px;width:100%;gap:6px;
+  padding:6px 8px;color:var(--text-2);font-size:11px;letter-spacing:.2px;
 }
 .sys-btn svg{width:13px;height:13px;stroke-width:1.6;stroke-linecap:round}
-.sys-btn:hover{background:#fff;border-color:#8fa0a5;color:var(--ink)}
 
 /* ---------- 主区 ---------- */
 /* ---------- 窄轨：只留图标，仍可点击 ---------- */
@@ -158,16 +230,30 @@ input,select,textarea{font:inherit}
 }
 .app.side-collapsed .menu{gap:6px;width:100%;align-items:center}
 .app.side-collapsed .nav-link{
-  width:42px;height:40px;padding:0;justify-content:center;border-radius:11px;
+  width:46px;height:44px;padding:0;justify-content:center;border-radius:12px;
+  white-space:nowrap;overflow:hidden;
 }
 .app.side-collapsed .nav-link .name{gap:0;justify-content:center}
 .app.side-collapsed .nav-link .ico-text{display:none}
 .app.side-collapsed .nav-link .name > span:not(.ico-initial){display:none}
-.app.side-collapsed .nav-link{white-space:nowrap; overflow:hidden}
 .app.side-collapsed .nav-link .ico-folder{display:none}
-.app.side-collapsed .nav-link .ico-initial{display:block}
+/* 窄轨里的首字胶囊：放大到 26px、13px 字号，一眼能认 */
+.app.side-collapsed .nav-link .ico-initial{
+  display:grid;place-items:center;
+  width:26px;height:26px;line-height:1;
+  font:700 13px/1 var(--font-ui);letter-spacing:0;
+  border-radius:8px;
+  background:rgba(255,255,255,.72);border:1px solid rgba(120,136,142,.28);
+  color:var(--text-1);
+  box-shadow:inset 0 1px 0 #fff, 0 1px 2px rgba(40,58,66,.06);
+}
+.app.side-collapsed .nav-link:hover .ico-initial{border-color:rgba(120,136,142,.44);color:var(--text-1)}
+.app.side-collapsed .nav-link.active .ico-initial{
+  background:linear-gradient(180deg,#fb5a28,#e2430f);border-color:#c93a0c;color:#fff;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.28), 0 2px 6px -2px rgba(201,58,12,.5);
+}
 .app.side-collapsed .nav-link .cnt{display:none}
-.app.side-collapsed .nav-link svg{width:17px;height:17px}
+.app.side-collapsed .nav-link svg{width:18px;height:18px}
 .app.side-collapsed .nav-link::before{left:-6px}
 .app.side-collapsed .nav-link.active::before{height:20px}
 .app.side-collapsed .sidebar-bottom{width:100%;padding:10px 0 0}
@@ -183,25 +269,45 @@ input,select,textarea{font:inherit}
 .main{
   min-width:0; min-height:0; width:100%;
   display:flex; flex-direction:column; overflow:hidden;
-  position:relative; background:linear-gradient(180deg,#f0f3f3 0%,#ebeff0 78%,#e5eaeb 100%);
+  position:relative;
+  background:
+    radial-gradient(1100px 520px at 12% -8%, #ffffff 0%, rgba(255,255,255,0) 62%),
+    radial-gradient(900px 460px at 96% 4%, #f6f9fa 0%, rgba(246,249,250,0) 58%),
+    linear-gradient(180deg,#f2f5f5 0%,#eaeff0 62%,#e2e8ea 100%);
 }
+/* 网格刻度：玻璃层要"有东西可折射"，但压到几乎看不见 */
 .main:before{
-  content:""; position:absolute; inset:0; pointer-events:none; opacity:.20;
-  background-image:linear-gradient(#8a969b30 1px,transparent 1px),
-                   linear-gradient(90deg,#8a969b30 1px,transparent 1px);
+  content:"";position:absolute;inset:0;pointer-events:none;opacity:.5;
+  background-image:linear-gradient(#8a969b1f 1px,transparent 1px),
+                   linear-gradient(90deg,#8a969b1f 1px,transparent 1px);
   background-size:40px 40px;
-  mask-image:linear-gradient(to bottom,#000,transparent 55%);
+  mask-image:linear-gradient(to bottom,#000,transparent 62%);
+}
+/* 极轻的扫描光斑，给浮层玻璃制造亮度差 */
+.main:after{
+  content:"";position:absolute;inset:0;pointer-events:none;opacity:.9;
+  background:
+    /* 左上冷白：侧栏与顶栏的折射源 */
+    radial-gradient(560px 320px at 6% -6%, rgba(255,255,255,.95), rgba(255,255,255,0) 66%),
+    /* 中段一点冷蓝，让玻璃有"色可折" */
+    radial-gradient(620px 360px at 46% 8%, rgba(196,214,224,.5), rgba(196,214,224,0) 70%),
+    /* 右下暖光：和橙色强调呼应，别让整屏发灰 */
+    radial-gradient(520px 300px at 88% 96%, rgba(255,226,208,.55), rgba(255,226,208,0) 70%),
+    radial-gradient(420px 240px at 22% 100%, rgba(208,222,226,.5), rgba(208,222,226,0) 72%);
 }
 
 .topbar{
   height:56px; flex:0 0 auto; display:flex; align-items:center; justify-content:flex-start; gap:12px;
-  padding:0 24px; border-bottom:1px solid #cbd2d5; position:relative; z-index:2;
-  background:rgba(246,248,248,.72); backdrop-filter:blur(10px);
+  padding:0 24px; position:relative; z-index:3;
+  border-bottom:1px solid var(--glass-hair);
+  background:var(--glass-fill);
+  -webkit-backdrop-filter:var(--glass-blur); backdrop-filter:var(--glass-blur);
+  box-shadow:var(--raise-hi), 0 1px 0 rgba(120,136,142,.06), 0 6px 18px -12px rgba(40,58,66,.3);
 }
-.breadcrumb{display:flex;gap:9px;align-items:center;font:9.5px var(--font-mono);letter-spacing:.6px;color:#829095}
-.breadcrumb b{color:#313b3f}
+.breadcrumb{display:flex;gap:9px;align-items:center;font:9.5px var(--font-mono);letter-spacing:.6px;color:var(--text-3)}
+.breadcrumb b{color:var(--text-1)}
 .top-actions{display:flex;gap:11px;align-items:center;margin-left:auto}
-.signal{font:9.5px var(--font-mono);color:#667277;display:flex;align-items:center;gap:7px}
+.signal{font:9.5px var(--font-mono);color:var(--text-2);display:flex;align-items:center;gap:7px}
 .signal-lamp{width:6px;height:6px;border-radius:50%;background:#428d7c;box-shadow:0 0 0 4px #428d7c16}
 .avatar{
   width:29px;height:29px;border:1px solid #bac3c6;border-radius:9px;
@@ -210,61 +316,296 @@ input,select,textarea{font:inherit}
 
 /* ---------- 看板头部 ---------- */
 header.top{
-  flex:0 0 auto; position:relative; z-index:1;
+  flex:0 0 auto; position:relative;
+  /* 必须高于 .board-area，否则筛选下拉弹出来会被看板整块盖住 */
+  z-index:5;
   padding:20px 24px 12px;
 }
 .top-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 h1{
   font-size:21px; margin:0; font-weight:800; letter-spacing:-.5px;
 }
-.count{font:10px var(--font-mono);color:#8c989c;letter-spacing:.4px}
+.count{font:10px var(--font-mono);color:var(--text-4);letter-spacing:.4px}
 .spacer{flex:1}
-.icon-btn{
-  width:32px;height:32px;display:grid;place-items:center;padding:0;
-  border:1px solid #b0bcc0;background:rgba(255,255,255,.58);color:#3d4a4f;
-  border-radius:9px;transition:.16s cubic-bezier(.2,0,0,1);
+/* ==========================================================================
+   按钮：整个页面只有这一套底
+   --------------------------------------------------------------------------
+   规则（改按钮只看这里）：
+     · 形状/材质/描边/过渡 —— 全部来自下面这条共享规则，组件里只写差量
+     · 主动作（一屏一个） → .primary     深橙实心 + 白字
+     · 普通动作           → 默认        凸起白瓷
+     · 增量动作           → .mini       虚线边框、无底
+     · 危险动作           → .btn--danger 橙字
+   历史类名（.icon-btn / .sys-btn / .dr-row button …）保留，但只写"差量"。
+   规范全文见 STYLE.md 第三节。
+   ========================================================================== */
+.icon-btn, .rail-toggle, .sys-btn,
+.mini, .mini-btn, .flt-reset, .dir-row .pick,
+.dlg button, .dr-row button, .pick-bar button, .dock .go {
+  display:inline-flex;align-items:center;justify-content:center;
+  font-family:var(--font-ui);
+  color:var(--text-2);
+  border:1px solid var(--ctl-edge);
+  border-radius:var(--radius-sm);
+  background:var(--ctl-raise);
+  box-shadow:inset 0 1px 0 #fff, var(--shadow-1);
+  transition:border-color .16s, background .16s, box-shadow .16s,
+             transform .12s cubic-bezier(.2,0,0,1), color .16s;
 }
-.icon-btn svg{width:15px;height:15px;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
-.icon-btn:hover{background:#fff;border-color:#8c9da2;color:var(--ink)}
-.icon-btn:active{transform:scale(.96)}
-.icon-btn:disabled{opacity:.4;cursor:default;transform:none}
+.icon-btn:hover, .rail-toggle:hover, .sys-btn:hover,
+.mini-btn:hover, .dir-row .pick:hover,
+.dlg button:hover, .dr-row button:hover, .pick-bar button:hover {
+  border-color:var(--ctl-edge-hi); color:var(--ink);
+  box-shadow:inset 0 1px 0 #fff, var(--shadow-2);
+}
+.icon-btn:active, .rail-toggle:active, .sys-btn:active,
+.dlg button:active, .dr-row button:active, .pick-bar button:active {
+  transform:translateY(.5px); box-shadow:inset 0 2px 4px rgba(120,136,142,.22);
+}
+.icon-btn:focus-visible, .rail-toggle:focus-visible, .sys-btn:focus-visible,
+.mini:focus-visible, .mini-btn:focus-visible,
+.dlg button:focus-visible, .dr-row button:focus-visible,
+.pick-bar button:focus-visible, .dock .go:focus-visible {
+  outline:none; border-color:var(--orange); box-shadow:var(--ctl-focus-ring);
+}
+.icon-btn:disabled, .dlg button:disabled, .dr-row button:disabled {
+  opacity:.45; cursor:default; transform:none; box-shadow:none;
+}
 
-/* 筛选条：一个整体工具条，三个下拉只是它的分段 */
+/* 主按钮：深橙底 + 白字。不要换回 --orange（3.53:1，不过 AA） */
+.dlg button.primary, .dr-row button.primary, .dock .go:not(:disabled) {
+  color:#fff; font-weight:750;
+  border-color:var(--orange-cta-deep);
+  background:linear-gradient(180deg,var(--orange-cta-hi),var(--orange-cta));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22), 0 2px 8px -2px rgba(191,58,15,.42);
+}
+.dlg button.primary:hover, .dr-row button.primary:hover, .dock .go:hover:not(:disabled) {
+  color:#fff;
+  background:linear-gradient(180deg,#e04a17,#c93c10);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.26), 0 4px 12px -3px rgba(191,58,15,.5);
+}
+
+/* 方形图标按钮：尺寸各写各的，不共用 width，否则后一条会盖掉前一条 */
+.icon-btn{width:32px;height:32px;padding:0}
+.icon-btn svg{width:15px;height:15px;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.rail-toggle{flex:0 0 auto;padding:0;width:30px;height:30px;color:var(--text-2)}
+.rail-toggle svg{width:16px;height:16px}
+
+/* ==========================================================================
+   输入框：内凹材质，和按钮的"凸起"成对
+   --------------------------------------------------------------------------
+   规则：所有 textarea / input / select 的材质只在这里定义一次，
+   组件里只写宽高、内边距和字号。新增输入框时直接沿用选择器列表。
+   ========================================================================== */
+.dock textarea, .dr-foot textarea,
+.dlg select, .dlg input[type=text], .dlg input:not([type]), .dlg textarea,
+.pick-bar input, .dir-row input {
+  color:var(--ink);
+  background:var(--ctl-inset);
+  border:1px solid rgba(120,136,142,.26);
+  border-radius:10px;
+  outline:none;
+  box-shadow:var(--ctl-inset-shadow);
+  transition:border-color .16s, background .16s, box-shadow .16s;
+}
+.dock textarea:focus, .dr-foot textarea:focus,
+.dlg select:focus, .dlg input:focus, .dlg textarea:focus,
+.pick-bar input:focus, .dir-row input:focus {
+  background:#fff;
+  border-color:var(--orange);
+  box-shadow:var(--ctl-inset-shadow), var(--ctl-focus-ring);
+}
+.dock textarea::placeholder, .dr-foot textarea::placeholder,
+.dlg input::placeholder {color:var(--text-4)}
+
+/* ---------- 筛选条：一个整体工具条，每段都是自定义下拉 ---------- */
 .filters{
   display:inline-flex;align-items:center;gap:2px;flex-wrap:wrap;
   margin-top:13px;padding:3px 3px 3px 10px;
-  border:1px solid #b7c2c5;border-radius:11px;
-  background:rgba(255,255,255,.55);
-  box-shadow:0 1px 2px #36495008;
-  transition:border-color .16s, background .16s;
+  border:1px solid var(--glass-hair);border-radius:11px;
+  background:var(--glass-fill-strong);
+  -webkit-backdrop-filter:var(--glass-blur-lite); backdrop-filter:var(--glass-blur-lite);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.95),
+    inset 0 -1px 0 rgba(120,136,142,.08),
+    var(--shadow-1);
+  transition:border-color .16s, background .16s, box-shadow .16s;
 }
-.filters:hover{border-color:#a6b4b8;background:rgba(255,255,255,.72)}
-.filters-ico{display:grid;place-items:center;width:13px;height:13px;color:#7c898d;margin-right:5px;flex:0 0 auto}
+.filters:hover{border-color:rgba(120,136,142,.38);background:rgba(255,255,255,.9)}
+.filters-ico{display:grid;place-items:center;width:13px;height:13px;color:var(--text-3);margin-right:5px;flex:0 0 auto}
 .filters-ico svg{width:13px;height:13px;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
-.filters select{
-  -webkit-appearance:none;appearance:none;
-  font:500 11.5px/1 var(--font-ui);color:#394549;
-  height:26px;padding:0 21px 0 9px;cursor:pointer;
-  background-color:transparent;background-repeat:no-repeat;
-  background-position:right 7px center;background-size:11px 11px;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.6 4.6L6 8l3.4-3.4' fill='none' stroke='%23667277' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  border:1px solid transparent;border-radius:8px;
-  transition:background-color .16s, border-color .16s, color .16s;
+
+/* 原生 select 只留作状态源，视觉交给 .sel（筛选条和弹窗共用）。
+   前面加 body 是为了压过后面 .dlg select 之类按标签写的尺寸规则。 */
+body select.sel-native{
+  position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;
+  left:-9999px;top:auto;padding:0;border:0;
 }
-.filters select:hover{background-color:rgba(255,255,255,.9);border-color:#c2cccf}
-.filters select:focus{outline:none;border-color:var(--orange);box-shadow:0 0 0 3px #fa461614}
-.filters select.on{
-  color:#b83c13;font-weight:600;background-color:var(--orange-soft);
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.6 4.6L6 8l3.4-3.4' fill='none' stroke='%23b83c13' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+
+/* ---------- 自定义下拉：两档尺寸 ----------
+   .sel            紧凑档，给筛选条（26px 高，无边框融进工具条）
+   .sel--field     表单档，给弹窗（36px 高，独立描边，跟输入框同材质）
+   两档共用 .sel-menu / .sel-opt，所以菜单只写一份。 */
+.sel{position:relative;display:inline-flex}
+.sel-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  height:26px;padding:0 9px;border-radius:8px;cursor:pointer;
+  font:500 11.5px/1 var(--font-ui);color:var(--text-2);white-space:nowrap;
+  border:1px solid transparent;background:transparent;
+  transition:background-color .16s, border-color .16s, color .16s, box-shadow .16s;
 }
-.filters select.on:hover{border-color:#e9b6a4;background-color:#ffe0d5}
+.sel-btn .lbl{max-width:132px;overflow:hidden;text-overflow:ellipsis}
+.sel-btn .carw{width:11px;height:11px;flex:0 0 auto;opacity:.72;transition:transform .18s cubic-bezier(.2,0,0,1)}
+.sel.open .sel-btn .carw{transform:rotate(180deg)}
+.sel-btn:hover{background:rgba(255,255,255,.95);border-color:#c2cccf}
+.sel-btn:focus-visible{outline:2px solid var(--orange);outline-offset:1px}
+.sel.on .sel-btn{
+  color:var(--accent-text);font-weight:600;background:var(--orange-soft);border-color:#f1cab9;
+}
+.sel.on .sel-btn .carw{opacity:.95}
+.sel.on .sel-btn:hover{background:#ffdccf;border-color:#e9b6a4}
+
+/* 行内小号：目录行里那个「主要 / 副」 */
+.sel--inline{flex:0 0 auto}
+.sel--inline .sel-btn{
+  height:32px;padding:0 8px;border-radius:9px;
+  font-size:11.5px;font-weight:400;color:var(--text-1);
+  border-color:rgba(120,136,142,.26);
+  background:var(--ctl-inset);
+  box-shadow:var(--ctl-inset-shadow);
+}
+.sel--inline .sel-btn .lbl{max-width:56px}
+.sel--inline .sel-btn:hover{border-color:rgba(120,136,142,.46)}
+.sel--inline.open .sel-btn{border-color:var(--orange);background:#fff}
+.sel--inline .sel-menu{min-width:104px;width:max-content}
+
+/* 表单档：材质对齐「输入框」总则，只差在右侧要放箭头 */
+.sel--field{display:flex;width:100%}
+.sel--field .sel-btn{
+  width:100%;height:36px;padding:0 11px;justify-content:space-between;
+  font-size:12.5px;font-weight:400;color:var(--text-1);
+  border-radius:10px;border-color:rgba(120,136,142,.26);
+  background:var(--ctl-inset);
+  box-shadow:var(--ctl-inset-shadow);
+}
+.sel--field .sel-btn .lbl{max-width:none}
+.sel--field .sel-btn .carw{width:12px;height:12px;opacity:.6}
+.sel--field .sel-btn:hover{
+  border-color:rgba(120,136,142,.46);
+  box-shadow:var(--ctl-inset-shadow);
+}
+.sel--field.open .sel-btn,
+.sel--field .sel-btn:focus-visible{
+  outline:none;border-color:var(--orange);background:#fff;
+  box-shadow:var(--ctl-inset-shadow), var(--ctl-focus-ring);
+}
+
+.sel-menu{
+  position:absolute;left:0;top:calc(100% + 7px);z-index:60;
+  /* 按内容撑开，至少跟触发按钮一样宽；项目名长的不会被挤成两行 */
+  min-width:max(100%,172px);width:max-content;max-width:340px;
+  max-height:288px;overflow:auto;
+  padding:4px;border-radius:13px;
+  border:1px solid rgba(255,255,255,.75);
+  /* 选项文字必须压得住背景：菜单是"可读层"，不做低透明度玻璃 */
+  background:linear-gradient(168deg,#fcfdfe,#e9eff1);
+  -webkit-backdrop-filter:saturate(1.4) blur(28px); backdrop-filter:saturate(1.4) blur(28px);
+  box-shadow:
+    inset 0 1px 0 #fff,
+    inset 0 0 0 1px rgba(120,136,142,.16),
+    0 8px 18px -10px rgba(40,58,66,.30), 0 26px 46px -22px rgba(27,39,43,.40);
+  opacity:0;transform:translateY(-5px) scale(.985);pointer-events:none;
+  transform-origin:top left;
+  transition:opacity .15s, transform .15s cubic-bezier(.2,0,0,1);
+}
+/* 表单档的菜单跟按钮同宽，长模型名靠 option 自身省略 */
+.sel--field .sel-menu{min-width:100%;width:100%;max-width:none;max-height:320px}
+.sel.open .sel-menu,.sel--field.open .sel-menu,
+.sel--inline.open .sel-menu,.combo.open .sel-menu{
+  opacity:1;transform:none;pointer-events:auto;
+}
+.sel-opt{
+  display:flex;align-items:center;gap:7px;
+  padding:7px 9px;border-radius:8px;cursor:pointer;
+  font-size:12px;color:var(--text-2);line-height:1.35;
+  white-space:nowrap;
+  transition:background-color .12s, color .12s;
+}
+.sel--field .sel-opt{padding:8px 10px;font-size:12.5px;color:var(--text-1)}
+.sel-opt > span{overflow:hidden;text-overflow:ellipsis}
+.sel-opt .sub{
+  flex:0 0 auto;margin-left:auto;padding-left:10px;
+  font:10px var(--font-mono);color:var(--text-3);
+}
+.sel-opt:hover,.sel-opt.hot{background:rgba(120,136,142,.13)}
+.sel-opt[aria-selected="true"]{color:var(--accent-text-hi);font-weight:700;background:rgba(250,70,22,.10)}
+.sel-opt[aria-selected="true"] .sub{color:var(--accent-text);opacity:.8}
+.sel-opt[aria-selected="true"]::after{
+  content:"";margin-left:8px;width:10px;height:10px;flex:0 0 auto;
+  background:no-repeat center/10px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 6.4l2.6 2.6L10 3.4' fill='none' stroke='%23FA4616' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+.sel-empty{padding:9px;font:11px var(--font-mono);color:var(--text-3);text-align:center}
+
+/* ---------- 可搜索组合框（模型选择用） ---------- */
+.combo{position:relative;width:100%}
+.combo input{
+  width:100%;height:36px;font-size:12.5px;padding:0 34px 0 11px;
+  color:var(--text-1);
+  background:var(--ctl-inset);
+  border:1px solid rgba(120,136,142,.26);
+  border-radius:10px;
+  outline:none;
+  box-shadow:var(--ctl-inset-shadow);
+  transition:border-color .16s, background .16s, box-shadow .16s;
+}
+.combo input:focus{
+  background:#fff;border-color:var(--orange);
+  box-shadow:var(--ctl-inset-shadow), var(--ctl-focus-ring);
+}
+.combo .combo-toggle{
+  position:absolute;right:3px;top:3px;bottom:3px;width:28px;padding:0;
+  display:grid;place-items:center;cursor:pointer;
+  border:0;background:transparent;color:var(--text-3);
+  border-radius:7px;box-shadow:none;
+}
+.combo .combo-toggle:hover{background:rgba(120,136,142,.11);color:var(--text-2);box-shadow:none}
+.combo .combo-toggle svg{width:12px;height:12px;transition:transform .18s cubic-bezier(.2,0,0,1)}
+.combo.open .combo-toggle svg{transform:rotate(180deg)}
+.combo .sel-menu{min-width:100%;width:100%;max-width:none;max-height:300px}
+
+/* ---------- 复选框：跟整个页面的青灰调一致 ---------- */
+.chk{display:inline-flex;align-items:flex-start;gap:9px;cursor:pointer;font-size:12.5px;color:var(--text-1)}
+.chk input{position:absolute;opacity:0;width:0;height:0}
+.chk .box{
+  width:16px;height:16px;flex:0 0 auto;margin-top:1px;
+  border-radius:5px;
+  border:1px solid rgba(120,136,142,.42);
+  background:var(--ctl-inset);
+  box-shadow:var(--ctl-inset-shadow);
+  display:grid;place-items:center;
+  transition:background .14s, border-color .14s, box-shadow .14s;
+}
+.chk .box::after{
+  content:"";width:9px;height:9px;opacity:0;transform:scale(.6);
+  transition:opacity .14s, transform .14s cubic-bezier(.2,0,0,1);
+  background:no-repeat center/9px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 6.4l2.6 2.6L10 3.4' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+.chk input:checked + .box{
+  background:linear-gradient(180deg,var(--orange-cta-hi),var(--orange-cta));
+  border-color:var(--orange-cta-deep);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.25);
+}
+.chk input:checked + .box::after{opacity:1;transform:none}
+.chk input:focus-visible + .box{outline:none;border-color:var(--orange);box-shadow:var(--ctl-focus-ring)}
+.chk:hover .box{border-color:rgba(120,136,142,.6)}
+.chk .chk-text{line-height:1.5}
 .flt-reset{
   height:22px;padding:0 8px;margin-left:3px;
-  font:11px/1 var(--font-ui);color:#8a5a49;
+  font:11px/1 var(--font-ui);color:var(--text-3);
   background:transparent;border:1px solid transparent;border-radius:7px;
   transition:.16s;
 }
-.flt-reset:hover{color:#b83c13;background:rgba(250,70,22,.09)}
+.flt-reset:hover{color:var(--accent-text);background:rgba(250,70,22,.09)}
 .flt-reset[hidden]{display:none}
 
 /* ---------- 看板 ---------- */
@@ -277,111 +618,142 @@ h1{
 @media (max-width:900px){ .board{grid-template-columns:1fr} }
 
 .col{
-  background:linear-gradient(140deg,rgba(255,255,255,.7),rgba(215,224,227,.72));
-  border:1px solid #b7c2c5; border-radius:19px; position:relative; overflow:hidden;
-  box-shadow:0 8px 22px #3649500b; display:flex; flex-direction:column; min-height:96px;
+  position:relative; overflow:hidden; display:flex; flex-direction:column; min-height:96px;
+  border:1px solid rgba(120,136,142,.30); border-radius:19px;
+  /* 玻璃：整列是一块悬浮玻璃板，卡片浮在它上面。
+     底色带一点点冷调，白瓷卡片才"浮"得出来。 */
+  background:linear-gradient(152deg, rgba(253,255,255,.78) 0%, rgba(216,228,233,.66) 55%, rgba(196,211,218,.74) 100%);
+  -webkit-backdrop-filter:var(--glass-blur-lite); backdrop-filter:var(--glass-blur-lite);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255,255,255,.98),
+    inset 0 -1.5px 0 rgba(120,136,142,.14),
+    inset 1px 0 0 rgba(255,255,255,.6),
+    inset -1px 0 0 rgba(120,136,142,.08),
+    0 1px 2px rgba(40,58,66,.05),
+    0 16px 34px -18px rgba(40,58,66,.34);
+}
+/* 顶部高光带：模拟玻璃边缘的折射亮线 */
+.col:before{
+  content:"";position:absolute;left:0;right:0;top:0;height:1px;pointer-events:none;
+  background:linear-gradient(90deg,
+    rgba(255,255,255,0) 0%, rgba(255,255,255,.95) 22%,
+    rgba(255,255,255,.95) 78%, rgba(255,255,255,0) 100%);
+}
+/* 右上角的斜向反光，玻璃感主要来自这一笔 */
+.col:after{
+  content:"";position:absolute;right:-40px;top:-58px;width:210px;height:150px;
+  pointer-events:none;transform:rotate(24deg);opacity:.75;
+  background:linear-gradient(180deg, rgba(255,255,255,.98), rgba(255,255,255,0));
+  filter:blur(7px);
 }
 .col-head{
+  position:relative;z-index:1;
   display:flex;align-items:center;gap:8px;padding:12px 13px 10px;
-  border-bottom:1px dashed #bcc7ca;
+  border-bottom:1px solid rgba(120,136,142,.20);
 }
 .col .dot{width:6px;height:6px;border-radius:50%}
 .col-title{font-size:11.5px;font-weight:750;letter-spacing:.2px}
 .col-num{
   margin-left:auto;
-  font:500 10px/16px var(--font-mono);color:#6d7a7f;
+  font:500 10px/16px var(--font-mono);color:var(--text-3);
   background:rgba(255,255,255,.7);border:1px solid #c6d0d3;
   border-radius:999px;padding:0 7px;min-width:20px;text-align:center;
   font-variant-numeric:tabular-nums;
 }
-.col.c-todo .col-num{color:#c2540f;border-color:#f0c9b5;background:#fdf0e9}
-.col.c-doing .col-num{color:#95601f;border-color:#e8d2b4;background:#fdf4e8}
-.col.c-done .col-num{color:#2c7364;border-color:#c2ddd6;background:#eef7f4}
-.col-body{padding:9px;display:flex;flex-direction:column;gap:7px;min-height:48px}
+.col.c-todo .col-num{color:var(--accent-text);border-color:#f0c9b5;background:#fdf0e9}
+.col.c-doing .col-num{color:var(--warn-text);border-color:#e8d2b4;background:#fdf4e8}
+.col.c-done .col-num{color:var(--ok-text);border-color:#c2ddd6;background:#eef7f4}
+.col-body{position:relative;z-index:1;padding:9px;display:flex;flex-direction:column;gap:7px;min-height:48px}
 .col.drag-over .col-body{background:rgba(250,70,22,.05);border-radius:0 0 18px 18px}
 
-/* 卡片：更像模块而不是浮卡 */
+/* 卡片：统一的白瓷模块。所有卡片同一套尺寸节奏，不再各自"浮"成不同高度 */
 .card{
-  background:#fff; border:1px solid #bcc7ca; border-radius:13px;
-  padding:9px 10px 8px 13px; cursor:grab; position:relative; overflow:hidden;
-  transition:border-color .16s, background .16s, transform .08s;
-  box-shadow:0 1px 3px #36495009;
+  border:1px solid rgba(120,136,142,.26); border-radius:12px;
+  padding:9px 11px 8px 14px; cursor:grab; position:relative; overflow:hidden;
+  transition:border-color .16s, background .16s, transform .12s cubic-bezier(.2,0,0,1), box-shadow .16s;
+  background:#fff;
+  box-shadow:0 1px 2px rgba(40,58,66,.05);
 }
-.card:hover{background:var(--silver-00); border-color:#9fb0b4}
-.card:active{cursor:grabbing;transform:scale(.996)}
+.card:hover{
+  border-color:rgba(120,136,142,.44); transform:translateY(-1px);
+  background:#fdfefe;
+  box-shadow:0 2px 5px rgba(40,58,66,.07), 0 12px 22px -14px rgba(40,58,66,.32);
+}
+.card:active{cursor:grabbing;transform:none;box-shadow:inset 0 1px 3px rgba(120,136,142,.14)}
 .card:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--bar,var(--p3))}
-.card .t{font-size:12.5px;line-height:1.5;word-break:break-word;color:#1c2429}
-.card.done .t{color:#8b9599;text-decoration:line-through;text-decoration-color:rgba(139,149,153,.6)}
-.meta{display:flex;align-items:center;gap:4px;margin-top:6px;flex-wrap:wrap}
+.card .t{font-size:12.5px;line-height:1.5;word-break:break-word;color:var(--text-1)}
+.card.done .t{color:var(--text-3);text-decoration:line-through;text-decoration-color:rgba(139,149,153,.6)}
+/* meta 行固定高度：有没有标签、标签几个，卡片高度都只由标题行数决定 */
+.meta{display:flex;align-items:center;gap:4px;margin-top:7px;flex-wrap:nowrap;overflow:hidden;height:18px}
+.meta > *{flex:0 0 auto;min-width:0}
+.meta .tag:last-of-type{flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tag{
-  font:10px var(--font-mono); padding:1px 6px; border-radius:999px;
-  background:rgba(139,149,155,.14); color:#667277; letter-spacing:.2px;
+  font:10px/16px var(--font-mono); padding:0 6px; border-radius:999px; height:16px;
+  background:rgba(139,149,155,.14); color:var(--text-2); letter-spacing:.2px;
+  display:inline-flex;align-items:center;white-space:nowrap;
 }
-.tag.cat{color:#33424a;background:rgba(74,101,114,.13)}
-.kind{font:10px var(--font-mono);color:#8b9599}
-.time{font:10px var(--font-mono);color:#9aa5a9;opacity:0;transition:opacity .12s;margin-left:auto}
+.tag.cat{color:var(--text-2);background:rgba(74,101,114,.13)}
+.kind{font:10px/16px var(--font-mono);color:var(--text-3)}
+.time{font:10px/16px var(--font-mono);color:var(--text-4);opacity:0;transition:opacity .12s;margin-left:auto}
 .card:hover .time{opacity:.85}
-.tag.pending{color:#B06A1F;background:rgba(176,106,31,.14)}
+.tag.pending{color:var(--warn-text);background:rgba(176,106,31,.14)}
 .tag.failed{color:var(--orange);background:rgba(250,70,22,.12)}
 .badge-need{
-  font:10px var(--font-mono);padding:1px 6px;border-radius:999px;
-  background:var(--orange);color:#fff;cursor:pointer;border:0;
+  font:10px/16px var(--font-mono);padding:0 6px;border-radius:999px;height:16px;
+  background:var(--orange-cta);color:#fff;cursor:pointer;border:0;
+  display:inline-flex;align-items:center;white-space:nowrap;
 }
-.empty{color:#94a0a4;font:10.5px var(--font-mono);text-align:center;padding:12px 0}
+.empty{color:var(--text-3);font:10.5px var(--font-mono);text-align:center;padding:12px 0}
 
 .shots{display:flex;gap:5px;margin-top:7px;flex-wrap:wrap}
 .shots img{
   width:48px;height:48px;object-fit:cover;border-radius:6px;
-  border:1px solid #c3cccf;cursor:zoom-in;display:block;
+  border:1px solid var(--line);cursor:zoom-in;display:block;
 }
 .shots img:hover{outline:1px solid var(--orange)}
-.files{font:10px var(--font-mono);color:#8b9599;margin-top:6px}
+.files{font:10px var(--font-mono);color:var(--text-3);margin-top:6px}
 
 /* ---------- 底栏 ---------- */
 .dock{
   flex:0 0 auto; margin-top:auto; display:flex; align-items:flex-end; gap:8px;
-  padding:10px 24px 13px; border-top:1px solid #c5ced0; position:relative; z-index:2;
-  background:rgba(246,248,248,.78); backdrop-filter:blur(10px);
+  padding:10px 24px 13px; position:relative; z-index:3;
+  border-top:1px solid var(--glass-hair);
+  background:var(--glass-fill);
+  -webkit-backdrop-filter:var(--glass-blur); backdrop-filter:var(--glass-blur);
+  box-shadow:var(--raise-hi), 0 -1px 0 rgba(120,136,142,.06), 0 -8px 22px -16px rgba(40,58,66,.35);
 }
 .dock .grow{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+/* 输入框：材质见「凹陷控件」总则，这里只写尺寸 */
 .dock textarea{
   width:100%;resize:none;overflow:hidden;min-height:38px;max-height:140px;line-height:1.55;
-  font-size:13px;color:var(--ink);background:rgba(255,255,255,.72);
-  border:1px solid #b7c2c5;border-radius:11px;padding:9px 12px;outline:none;
-  transition:border-color .16s, background .16s;
+  font-size:13px;color:var(--ink);
 }
-.dock textarea:focus{border-color:var(--orange);background:#fff}
-.dock textarea::placeholder{color:#96a1a5}
 .dock .side{display:flex;align-items:center;gap:7px;padding-bottom:0}
+/* 主按钮的底与配色见「按钮」总则，这里只写尺寸与禁用态 */
 .dock .go{
-  height:32px;font-size:12px;font-weight:750;color:#fff;background:var(--orange);
-  border:1px solid var(--orange);border-radius:9px;padding:0 16px;white-space:nowrap;
-  box-shadow:0 3px 12px #fa461622;transition:.16s cubic-bezier(.2,0,0,1);
-  letter-spacing:.4px;
+  height:32px;font-size:12px;padding:0 16px;white-space:nowrap;letter-spacing:.4px;
 }
-.dock .go:hover:not(:disabled){background:#e84010;box-shadow:0 5px 16px #fa461633}
-.dock .go:active:not(:disabled){transform:scale(.98)}
 .dock .go:disabled{
-  background:var(--silver-200);border-color:#bcc7ca;color:#96a1a5;
-  box-shadow:none;cursor:default;font-weight:600;
+  background:var(--silver-200);border-color:#bcc7ca;color:var(--text-4);font-weight:600;
+  opacity:1;
 }
 .dock .thumbs:empty{display:none}
-.dock .cap-msg{font:10.5px var(--font-mono);color:#7c898d}
+.dock .cap-msg{font:10.5px var(--font-mono);color:var(--text-3)}
 .dock .cap-msg:empty{display:none}
-.dock .cap-msg.ok{color:#358270}
+.dock .cap-msg.ok{color:var(--ok)}
 .dock .cap-msg.err{color:var(--orange)}
 
 .dock-stub{
   flex:0 0 auto; display:none; align-items:center; gap:8px;
   padding:7px 24px; border-top:1px solid #c5ced0; position:relative; z-index:2;
-  background:rgba(246,248,248,.78); color:#829095;
+  background:rgba(246,248,248,.78); color:var(--text-3);
   font:10.5px var(--font-mono); letter-spacing:.4px; cursor:pointer;
 }
 .dock-stub:hover{color:var(--ink)}
 .app.collapsed .dock-stub{display:flex}
 
 .thumbs{display:flex;gap:6px;flex-wrap:wrap}
-.thumb{position:relative;width:48px;height:48px;border-radius:7px;overflow:hidden;border:1px solid #c3cccf}
+.thumb{position:relative;width:48px;height:48px;border-radius:7px;overflow:hidden;border:1px solid var(--line)}
 .thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .thumb button{
   position:absolute;top:2px;right:2px;width:14px;height:14px;border-radius:50%;
@@ -392,146 +764,166 @@ h1{
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   background:var(--silver-00);gap:0;position:relative;
 }
-.thumb.file .fext{font:9px var(--font-mono);font-weight:700;color:#7b878b;letter-spacing:.3px}
-.thumb.file small{font:8.5px var(--font-mono);color:#96a1a5}
+.thumb.file .fext{font:9px var(--font-mono);font-weight:700;color:var(--text-3);letter-spacing:.3px}
+.thumb.file small{font:8.5px var(--font-mono);color:var(--text-4)}
 
 /* ---------- 弹层通用 ---------- */
 dialog{
-  border:1px solid #b7c2c5; background:var(--silver-50); color:var(--ink);
-  border-radius:var(--radius-lg); padding:0; width:min(440px,92vw);
-  box-shadow:0 24px 60px rgba(27,39,43,.18);
+  color:var(--ink);padding:0;width:min(440px,92vw);
+  border:1px solid rgba(255,255,255,.7); border-radius:var(--radius-lg);
+  background:linear-gradient(165deg,rgba(252,253,254,.93),rgba(232,238,240,.88));
+  -webkit-backdrop-filter:saturate(1.7) blur(26px); backdrop-filter:saturate(1.7) blur(26px);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.95),
+    inset 0 0 0 1px rgba(120,136,142,.16),
+    0 10px 24px -12px rgba(40,58,66,.3), 0 40px 80px -30px rgba(27,39,43,.45);
 }
-dialog::backdrop{background:rgba(30,40,45,.42); backdrop-filter:blur(2px)}
+dialog::backdrop{background:rgba(30,40,45,.34); backdrop-filter:blur(3px)}
 .dlg{padding:20px 22px}
 .dlg h2{font-size:15px;font-weight:800;margin:0 0 15px;letter-spacing:-.2px}
 .dlg .field{margin-bottom:12px}
-.dlg .field>label{
+/* 字段标题。复选框用的 <label class="chk"> 也是 .field 的直接子元素，
+   但它自己是一行正文，不能被这条小号大写字母的规则带走。 */
+.dlg .field>label:not(.chk){
   display:block;font:9.5px var(--font-mono);letter-spacing:.9px;
-  color:#7b878b;margin-bottom:5px;text-transform:uppercase;
+  color:var(--text-3);margin-bottom:5px;text-transform:uppercase;
 }
-.dlg select,.dlg input[type=text],.dlg input:not([type]),.dlg textarea{
-  width:100%;font-size:12.5px;color:var(--ink);background:#fff;
-  border:1px solid #b7c2c5;border-radius:9px;padding:8px 10px;outline:none;
+/* 尺寸只有这一处；材质见「输入框」总则。
+   只针对 .field 的直接子元素——嵌套在 .combo / .chk / .dir-row 里的控件
+   有自己的尺寸，不能被这条一刀切。 */
+.dlg .field > select:not(.sel-native),
+.dlg .field > input[type=text],
+.dlg .field > input:not([type]),
+.dlg .field > textarea{
+  width:100%;font-size:12.5px;padding:8px 10px;
 }
-.dlg select:focus,.dlg input:focus,.dlg textarea:focus{border-color:var(--orange)}
-.dlg .hint{font:10px var(--font-mono);color:#8a969a;margin-top:5px;line-height:1.6}
+.dlg .hint{font:10px var(--font-mono);color:var(--text-3);margin-top:5px;line-height:1.6}
 .dlg .dlg-foot{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
-.dlg button{
-  font-size:12px;color:#33424a;background:rgba(255,255,255,.7);
-  border:1px solid #aeb9bc;border-radius:9px;padding:8px 14px;transition:.16s;
-}
-.dlg button:hover{background:#fff;border-color:#95a5a9}
-.dlg button.primary{background:var(--orange);color:#fff;border-color:var(--orange);font-weight:750}
-.dlg button.primary:hover{background:#e84010}
-.dlg button.destructive{color:var(--orange);border-color:#e0b6aa}
+/* 弹窗按钮只写尺寸，材质与配色见「按钮」总则 */
+.dlg button{font-size:12px;padding:8px 14px}
+/* 危险动作：语义类名统一叫 .btn--danger（见总则注释） */
+.dlg button.btn--danger{color:var(--orange-cta);border-color:var(--danger-edge)}
+.dlg button.btn--danger:hover{color:var(--orange-cta-deep);border-color:var(--danger-edge-hi)}
 
 /* 项目列表 */
-.proj-list{max-height:210px;overflow:auto;border:1px solid #b7c2c5;border-radius:11px;margin-bottom:9px;background:#fff}
+.proj-list{max-height:210px;overflow:auto;border:1px solid var(--line-strong);border-radius:11px;margin-bottom:9px;background:#fff}
 .proj-row{display:flex;align-items:center;gap:8px;padding:9px 11px;border-bottom:1px solid #dbe2e4;cursor:pointer}
 .proj-row:last-child{border-bottom:none}
 .proj-row:hover{background:var(--silver-00)}
 .proj-row .pn{font-size:12.5px;font-weight:600}
-.proj-row .pc{margin-left:auto;font:10px var(--font-mono);color:#8a969a}
-.proj-row .dirs{font:9.5px var(--font-mono);color:#8a969a;margin-top:2px}
+.proj-row .pc{margin-left:auto;font:10px var(--font-mono);color:var(--text-3)}
+.proj-row .dirs{font:9.5px var(--font-mono);color:var(--text-3);margin-top:2px}
+/* 「+ 新建」这类虚线次要按钮：.mini 挂在总则里，这里只写虚线差量 */
 .mini{
-  font-size:11px;border:1px dashed #b7c2c5;background:transparent;color:#7b878b;
-  border-radius:8px;padding:6px 10px;width:100%;transition:.16s;
+  font-size:11px;color:var(--text-3);width:100%;padding:6px 10px;
+  border-style:dashed;background:transparent;box-shadow:none;
 }
-.mini:hover{color:var(--ink);border-color:var(--orange);background:rgba(255,255,255,.6)}
+.mini:hover{color:var(--ink);border-color:var(--orange);background:rgba(255,255,255,.6);box-shadow:none}
 
 /* 目录行 */
 .dir-list{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
 .dir-row{display:flex;gap:5px;align-items:center}
 .dir-row input{flex:1;min-width:0}
 .dir-row input.dn{max-width:96px}
-.dir-row select.dm{max-width:66px;flex:0 0 auto}
+.dir-row .sel--inline{flex:0 0 auto}
 .dir-row .pick{
-  width:30px;height:30px;flex:0 0 auto;display:grid;place-items:center;padding:0;
-  border:1px solid #b7c2c5;background:#fff;border-radius:8px;font-size:12px;
+  width:30px;height:30px;flex:0 0 auto;padding:0;font-size:12px;
 }
-.dir-row .pick:hover{border-color:var(--orange)}
+/* 纯图标删除：无底无边，只留字形 */
 .dir-row .rm{
-  width:26px;height:26px;flex:0 0 auto;border:0;background:transparent;
-  color:#8a969a;font-size:12px;padding:0;
+  width:26px;height:26px;flex:0 0 auto;padding:0;
+  font-size:12px;color:var(--text-3);
+  border:0;background:transparent;box-shadow:none;
 }
-.dir-row .rm:hover{color:var(--orange)}
+.dir-row .rm:hover{color:var(--orange);background:transparent;box-shadow:none}
 
 /* 目录浏览 */
 #pickDlg{width:min(520px,94vw)}
 .pick-bar{display:flex;gap:6px;margin-bottom:9px}
-.pick-bar button{
-  font-size:12px;border:1px solid #b7c2c5;background:#fff;border-radius:8px;
-  padding:5px 11px;
-}
-.pick-bar input{
-  flex:1;font:10.5px var(--font-mono);color:#7b878b;background:#fff;
-  border:1px solid #b7c2c5;border-radius:8px;padding:6px 9px;
-}
-.pick-list{height:290px;overflow:auto;border:1px solid #b7c2c5;border-radius:11px;background:#fff}
+.pick-bar button{font-size:12px;padding:5px 11px}
+.pick-bar input{flex:1;font:10.5px var(--font-mono);padding:6px 9px}
+.pick-list{height:290px;overflow:auto;border:1px solid var(--line-strong);border-radius:11px;background:#fff}
 .pick-item{
   display:flex;align-items:center;gap:8px;padding:8px 11px;
-  border-bottom:1px solid #e3e9ea;cursor:pointer;font-size:12.5px;
+  border-bottom:1px solid var(--hair);cursor:pointer;font-size:12.5px;
 }
 .pick-item:last-child{border-bottom:none}
 .pick-item:hover{background:var(--silver-00)}
 .pick-item .ico{opacity:.55;font-size:11px;font-family:var(--font-mono)}
 .pick-item .tag2{
-  margin-left:auto;font:9px var(--font-mono);color:#8a969a;
+  margin-left:auto;font:9px var(--font-mono);color:var(--text-3);
   background:rgba(139,149,155,.14);border-radius:999px;padding:1px 6px;
 }
-.pick-empty{padding:16px;text-align:center;color:#94a0a4;font:11px var(--font-mono)}
+.pick-empty{padding:16px;text-align:center;color:var(--text-3);font:11px var(--font-mono)}
 
 /* ---------- 抽屉 ---------- */
 .drawer-mask{
-  position:fixed;inset:0;background:rgba(30,40,45,.32);opacity:0;
-  pointer-events:none;transition:opacity .2s;z-index:70;
+  position:fixed;inset:0;background:rgba(28,38,43,.30);
+  -webkit-backdrop-filter:blur(3px); backdrop-filter:blur(3px);
+  opacity:0;pointer-events:none;transition:opacity .2s;z-index:70;
 }
 .drawer-mask.on{opacity:1;pointer-events:auto}
 .drawer{
-  position:fixed;top:0;right:0;bottom:0;width:min(460px,94vw);
-  background:var(--silver-50);border-left:1px solid #b7c2c5;
-  transform:translateX(100%);transition:transform .24s cubic-bezier(.2,0,0,1);
+  position:fixed;top:0;right:0;bottom:0;width:min(480px,94vw);
+  transform:translateX(100%);
+  transition:transform .26s cubic-bezier(.2,0,0,1);
   z-index:71;display:flex;flex-direction:column;overflow:hidden;
-  box-shadow:-18px 0 48px rgba(27,39,43,.12);
+  border-left:1px solid rgba(255,255,255,.7);
+  background:linear-gradient(168deg,rgba(250,252,253,.92) 0%,rgba(232,238,241,.90) 100%);
+  -webkit-backdrop-filter:saturate(1.7) blur(26px); backdrop-filter:saturate(1.7) blur(26px);
+  box-shadow:
+    inset 1px 0 0 rgba(255,255,255,.9),
+    inset 0 0 0 1px rgba(120,136,142,.12),
+    -24px 0 60px -20px rgba(27,39,43,.35);
 }
 .drawer.on{transform:none}
 .dr-head{
-  flex:0 0 auto;padding:14px 16px 11px;border-bottom:1px solid #cbd2d5;
-  display:flex;align-items:flex-start;gap:8px;background:rgba(246,248,248,.8);
+  flex:0 0 auto;padding:15px 16px 12px;
+  display:flex;align-items:flex-start;gap:9px;
+  border-bottom:1px solid rgba(120,136,142,.20);
+  background:linear-gradient(180deg,rgba(255,255,255,.72),rgba(255,255,255,.22));
+  box-shadow:inset 0 -1px 0 rgba(255,255,255,.6);
 }
 .dr-head .ttl{flex:1;min-width:0}
 .dr-head .ttl b{font-size:13.5px;font-weight:750;display:block;line-height:1.45;letter-spacing:-.2px}
 .dr-meta{display:flex;gap:4px;flex-wrap:wrap;margin-top:7px}
-.dr-fields{display:flex;gap:6px;flex-wrap:wrap;padding:10px 16px 10px;border-bottom:1px solid #d5dcde}
-.dr-fields select{
-  font-size:11px;color:#33424a;background:#fff;border:1px solid #b7c2c5;
-  border-radius:8px;padding:5px 8px;cursor:pointer;
+.dr-fields{
+  display:flex;gap:6px;flex-wrap:wrap;padding:10px 16px;
+  border-bottom:1px solid rgba(120,136,142,.18);
 }
-.dr-fields select:focus{border-color:var(--orange)}
+/* 抽屉里的快捷下拉：走行内档，比弹窗里的更紧凑一点 */
+.dr-fields .sel--inline .sel-btn{height:27px;font-size:11px;border-radius:8px}
+.dr-fields .sel--inline .sel-btn .lbl{max-width:120px}
 .dr-detail{
-  flex:0 0 auto;max-height:46vh;overflow:auto;border-bottom:1px solid #cbd2d5;
-  padding:10px 16px 12px;display:flex;flex-direction:column;gap:7px;
+  flex:0 0 auto;max-height:44vh;overflow:auto;
+  border-bottom:1px solid rgba(120,136,142,.18);
+  padding:11px 16px 13px;display:flex;flex-direction:column;gap:8px;
 }
 .dr-detail:empty{display:none}
-.sect{border:1px solid #bcc7ca;border-radius:11px;overflow:hidden;background:#fff}
-.sect-h{
-  display:flex;align-items:center;gap:7px;padding:8px 11px;background:var(--silver-00);
-  cursor:pointer;font:10px var(--font-mono);letter-spacing:.5px;color:#6a777b;
-  user-select:none;text-transform:uppercase;
+.sect{
+  border:1px solid rgba(120,136,142,.24);border-radius:12px;overflow:hidden;
+  background:#fff;box-shadow:0 1px 2px rgba(40,58,66,.04);
 }
-.sect-h:hover{color:var(--ink)}
+.sect-h{
+  display:flex;align-items:center;gap:7px;padding:8px 11px;
+  background:linear-gradient(180deg,#fbfcfc,#f3f6f7);
+  cursor:pointer;font:10px var(--font-mono);letter-spacing:.5px;color:var(--text-2);
+  user-select:none;text-transform:uppercase;
+  box-shadow:inset 0 1px 0 #fff;
+}
+.sect-h:hover{color:var(--ink);background:linear-gradient(180deg,#fff,#f7fafb)}
 .sect-h .arw{font-size:8px;transition:transform .16s;display:inline-block}
 .sect.open .sect-h .arw{transform:rotate(90deg)}
 .sect-h .spacer{flex:1}
+/* 只写差量：材质见「按钮」总则 */
 .sect-h .mini-btn{
-  font:10px var(--font-mono);color:#7b878b;background:#fff;
-  border:1px solid #c3cccf;border-radius:7px;padding:2px 8px;cursor:pointer;
+  font:10px var(--font-mono);padding:2px 8px;border-radius:7px;
   text-transform:none;
 }
-.sect-h .mini-btn:hover{color:var(--orange);border-color:#e0b6aa}
+.sect-h .mini-btn:hover{color:var(--accent-text);border-color:var(--danger-edge)}
 .sect-b{
   display:none;padding:10px 12px;font-size:12px;line-height:1.72;
-  white-space:pre-wrap;word-break:break-word;color:#283238;
+  white-space:pre-wrap;word-break:break-word;color:var(--text-2);
 }
 .sect.open .sect-b{display:block}
 .sect-b img{max-width:100%;border-radius:7px;margin-top:6px;display:block;border:1px solid #d5dcde}
@@ -539,48 +931,54 @@ dialog::backdrop{background:rgba(30,40,45,.42); backdrop-filter:blur(2px)}
 .sect-b .md h2:first-child{margin-top:0}
 .sect-b .md ul,.sect-b .md ol{margin:4px 0;padding-left:17px}
 .sect-b .md li{margin:2px 0}
-.sect-b .md code{background:var(--silver-00);border:1px solid #e3e9ea;padding:0 4px;border-radius:4px;font:11px var(--font-mono)}
+.sect-b .md code{background:var(--silver-00);border:1px solid var(--hair);padding:0 4px;border-radius:4px;font:11px var(--font-mono)}
 .sect-b .md p{margin:5px 0}
 .sect-b .md b{font-weight:750}
 .sect-b .files{display:flex;flex-direction:column;gap:4px}
 .sect-b .files a{color:var(--orange);text-decoration:none;font:11px var(--font-mono)}
 .sect-b .files a:hover{text-decoration:underline}
 
-.dr-body{flex:1;min-height:0;overflow:auto;padding:12px 16px;display:flex;flex-direction:column;gap:9px}
-.dr-empty{color:#94a0a4;font:11px/1.9 var(--font-mono);text-align:center;padding:22px 8px}
-.dm{display:flex;flex-direction:column;gap:3px;max-width:92%}
+.dr-body{flex:1;min-height:0;overflow:auto;padding:13px 16px;display:flex;flex-direction:column;gap:10px}
+.dr-empty{
+  color:var(--text-3);font:11px/1.9 var(--font-mono);text-align:center;padding:24px 10px;
+  border:1px dashed rgba(120,136,142,.30);border-radius:12px;
+  background:rgba(255,255,255,.42);
+}
+.dm{display:flex;flex-direction:column;gap:4px;max-width:92%}
 .dm.me{align-self:flex-end;align-items:flex-end}
 .dm .bub{
-  font-size:12.5px;line-height:1.6;padding:8px 11px;border-radius:11px;
-  background:#fff;border:1px solid #c3cccf;word-break:break-word;white-space:pre-wrap;
+  font-size:12.5px;line-height:1.62;padding:8px 12px;border-radius:12px;
+  background:#fff;border:1px solid rgba(120,136,142,.24);
+  word-break:break-word;white-space:pre-wrap;
+  box-shadow:0 1px 2px rgba(40,58,66,.05);
 }
-.dm.me .bub{background:var(--slate-900);color:#eef3f4;border-color:var(--slate-900)}
+/* 我说的：深色实心，不透明——正文永远不做玻璃 */
+.dm.me .bub{
+  background:linear-gradient(180deg,#2b333a,#1e262b);color:var(--on-dark);
+  border-color:#161d21;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.14), 0 2px 6px rgba(20,28,32,.20);
+}
 .dm .applied{
-  font:9.5px var(--font-mono);color:#358270;background:rgba(53,130,112,.11);
-  border-radius:999px;padding:1px 7px;
+  font:9.5px var(--font-mono);color:var(--ok-text);background:rgba(44,115,100,.12);
+  border:1px solid rgba(44,115,100,.18);
+  border-radius:999px;padding:1px 8px;
 }
-.dm .bad{color:#a32d2d;background:rgba(163,45,45,.07);border-color:#e2c6c6}
+.dm .bad{color:var(--danger-text);background:rgba(163,45,45,.07);border-color:#e2c6c6}
 
 .dr-foot{
-  flex:0 0 auto;border-top:1px solid #cbd2d5;padding:10px 16px 13px;
-  display:flex;flex-direction:column;gap:6px;background:rgba(246,248,248,.8);
+  flex:0 0 auto;padding:10px 16px 13px;
+  display:flex;flex-direction:column;gap:7px;
+  border-top:1px solid rgba(120,136,142,.20);
+  background:linear-gradient(180deg,rgba(255,255,255,.42),rgba(255,255,255,.72));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.7);
 }
 .dr-foot textarea{
   width:100%;min-height:38px;max-height:120px;resize:none;font-size:12.5px;
-  line-height:1.55;color:var(--ink);background:#fff;border:1px solid #b7c2c5;
-  border-radius:10px;padding:8px 11px;outline:none;
+  line-height:1.55;padding:9px 12px;
 }
-.dr-foot textarea:focus{border-color:var(--orange)}
-.dr-row{display:flex;align-items:center;gap:7px}
-.dr-row .hint{flex:1;font:9.5px var(--font-mono);color:#96a1a5}
-.dr-row button{
-  font-size:11.5px;color:#33424a;background:#fff;border:1px solid #aeb9bc;
-  border-radius:8px;padding:7px 13px;transition:.16s;
-}
-.dr-row button:hover{background:var(--silver-00)}
-.dr-row button.primary{background:var(--orange);color:#fff;border-color:var(--orange);font-weight:750}
-.dr-row button.primary:hover{background:#e84010}
-.dr-row button:disabled{opacity:.5;cursor:default}
+.dr-row{display:flex;align-items:center;gap:8px}
+.dr-row .hint{flex:1;font:9.5px var(--font-mono);color:var(--text-4)}
+.dr-row button{font-size:11.5px;padding:7px 14px}
 
 /* ---------- 其他 ---------- */
 #lightbox{
@@ -591,7 +989,7 @@ dialog::backdrop{background:rgba(30,40,45,.42); backdrop-filter:blur(2px)}
 #lightbox img{max-width:92vw;max-height:92vh;border-radius:10px;border:1px solid #5a6a70}
 .toast{
   position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(10px);
-  background:#232b30;color:#eef3f4;border:1px solid #6f8389;border-radius:11px;
+  background:#232b30;color:var(--on-dark);border:1px solid #6f8389;border-radius:11px;
   padding:9px 16px;font:11px var(--font-mono);opacity:0;pointer-events:none;
   transition:.22s;z-index:80;
 }
@@ -618,21 +1016,51 @@ body.solo #collapseBtn{display:none}
   .section-title{font-size:0;padding:0;width:100%;height:1px;
     background:#b9c3c6;margin:10px 0 12px;opacity:.6}
   .menu{gap:6px;width:100%;align-items:center}
-  .nav-link{width:42px;height:40px;padding:0;justify-content:center;border-radius:11px}
+  .nav-link{width:46px;height:44px;padding:0;justify-content:center;border-radius:12px}
   .nav-link .name{gap:0;justify-content:center}
   .nav-link .ico-text{display:none}
   .nav-link .ico-folder{display:none}
-  .nav-link .ico-initial{display:block}
+  .nav-link .ico-initial{
+    display:grid;place-items:center;width:26px;height:26px;line-height:1;
+    font:700 13px/1 var(--font-ui);border-radius:8px;
+  }
   .nav-link .cnt{display:none}
-  .nav-link svg{width:17px;height:17px}
+  .nav-link svg{width:18px;height:18px}
   .nav-link::before{left:-6px}
   .nav-link.active::before{height:20px}
   .sidebar-bottom{width:100%;padding:10px 0 0}
-  .systembox{padding:8px 6px;text-align:center;background:transparent;border:none}
+  .systembox{padding:8px 6px;text-align:center;background:transparent;border:none;box-shadow:none}
+  .systembox:after{display:none}
   .sys-top,.sys-head,.sys-info,.sys-bar{display:none}
   .sys-btn{margin-top:0;width:40px;height:38px;padding:0}
   .sys-btn span{display:none}
   .sidebar-foot{display:none}
+}
+
+/* ---------- 材质降级 & 无障碍 ---------- */
+/* 不支持 backdrop-filter：退回高对比实色，别让玻璃变成一片糊 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .topbar,.dock{background:#f4f7f8}
+  .filters{background:#fbfcfc}
+  .col{background:#eef2f3}
+  dialog,.drawer{background:#f7fafb}
+  .sel-menu{background:#fbfdfd}
+  .drawer-mask{backdrop-filter:none;-webkit-backdrop-filter:none}
+}
+/* 系统要求降低透明度：玻璃层全部变实色 */
+@media (prefers-reduced-transparency: reduce) {
+  .topbar,.dock{background:#f4f7f8;-webkit-backdrop-filter:none;backdrop-filter:none}
+  .filters,.col{background:#f2f5f6;-webkit-backdrop-filter:none;backdrop-filter:none}
+  dialog,.drawer,.sel-menu{background:#f8fafb;-webkit-backdrop-filter:none;backdrop-filter:none}
+  .drawer-mask{-webkit-backdrop-filter:none;backdrop-filter:none}
+  .col:after,.systembox:after,.sidebar:before{display:none}
+}
+/* 降低动效：玻璃别漂 */
+@media (prefers-reduced-motion: reduce) {
+  .card,.card:hover,.card:active,.rail-toggle,.icon-btn,.sys-btn,.filters select,
+  .app,.dock textarea,.sel-menu,.sel-btn .carw,.drawer,.drawer-mask{transition:none!important}
+  .card:hover{transform:none}
+  .sel.open .sel-menu{transform:none}
 }
 </style>
 </head>
@@ -755,8 +1183,8 @@ body.solo #collapseBtn{display:none}
           <span class="filters-ico" aria-hidden="true">
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
           </span>
-          <select id="project"><option value="">全部项目</option></select>
-          <select id="priority">
+          <select id="project" class="sel-native"><option value="">全部项目</option></select>
+          <select id="priority" class="sel-native">
             <option value="">全部优先级</option>
             <option value="p0">P0 阻塞</option>
             <option value="p1">P1 紧急</option>
@@ -764,7 +1192,7 @@ body.solo #collapseBtn{display:none}
             <option value="p3">P3 低</option>
             <option value="p4">P4 待定</option>
           </select>
-          <select id="category"><option value="">全部类别</option></select>
+          <select id="category" class="sel-native"><option value="">全部类别</option></select>
           <button class="flt-reset" id="fltReset" type="button" hidden>清空</button>
         </div>
       </header>
@@ -805,7 +1233,7 @@ body.solo #collapseBtn{display:none}
 
     <div class="field">
       <label>模型通道</label>
-      <select id="c-backend">
+      <select id="c-backend" class="sel-native" data-sel="field">
         <option value="auto">自动（magpie → alma → cli）</option>
         <option value="magpie">magpie 网关</option>
         <option value="alma">Alma</option>
@@ -817,15 +1245,22 @@ body.solo #collapseBtn{display:none}
 
     <div class="field">
       <label>模型</label>
-      <input id="c-model" list="modelList" placeholder="auto/deepseek-v4.1-flash" autocomplete="off">
-      <datalist id="modelList"></datalist>
+      <div class="combo" id="modelCombo">
+        <input id="c-model" placeholder="auto/deepseek-v4.1-flash" autocomplete="off" spellcheck="false"
+               role="combobox" aria-expanded="false" aria-controls="modelMenu">
+        <button type="button" class="combo-toggle" id="modelToggle" aria-label="展开模型清单">
+          <svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.6 4.6L6 8l3.4-3.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="sel-menu" role="listbox" id="modelMenu"></div>
+      </div>
       <div class="hint" id="modelHint"></div>
     </div>
 
     <div class="field">
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-        <input type="checkbox" id="c-classify" style="width:auto">
-        收下时自动判断类型和优先级
+      <label class="chk">
+        <input type="checkbox" id="c-classify">
+        <span class="box" aria-hidden="true"></span>
+        <span class="chk-text">收下时自动判断类型和优先级</span>
       </label>
     </div>
 
@@ -863,7 +1298,7 @@ body.solo #collapseBtn{display:none}
     </div>
 
     <div class="dlg-foot">
-      <button type="button" id="projDelete" style="margin-right:auto;color:var(--p0)">删除</button>
+      <button type="button" id="projDelete" class="btn--danger" style="margin-right:auto">删除</button>
       <button type="button" id="projCancel">取消</button>
       <button type="submit" class="primary">保存</button>
     </div>
@@ -920,6 +1355,7 @@ const COLS = [
 const PRI_LABEL = { p0:'P0 阻塞', p1:'P1 紧急', p2:'P2 常规', p3:'P3 低', p4:'P4 待定' };
 const PRI_COLOR = { p0:'var(--p0)', p1:'var(--p1)', p2:'var(--p2)', p3:'var(--p3)', p4:'var(--p4)' };
 const KIND_LABEL = { text:'文字', image:'图片', image_text:'图文', link:'链接', file:'附件', mixed:'混合' };
+const STATUS_LABEL = { todo:'未开始', doing:'进行中', done:'已完成' };
 
 
 const SOLO = new URLSearchParams(location.search).has('solo');
@@ -1072,12 +1508,267 @@ function renderSidebar(){
   });
 }
 
+/* ---------------- 自定义下拉 ----------------
+   原生 select 保留为状态源（.sel-native，视觉隐藏），
+   上面盖一层 .sel：自定义按钮 + 玻璃菜单，样式可控、键盘可用。 */
+
+const selList = [];
+
+// root 默认是 document；动态生成还没插进文档的片段要传自己的容器，
+// 否则 querySelectorAll 找不到里面的 select（目录行就踩过这个坑）。
+function buildSels(root = document){
+  // 筛选条用紧凑档；data-sel="field" 表单档；data-sel="inline" 行内小号。
+  // 幂等：已经包过的跳过，这样动态新增的 select 可以再调一次。
+  root.querySelectorAll('select.sel-native').forEach(native => {
+    if (native.previousElementSibling?.classList?.contains('sel')) return;
+    const wrap = document.createElement('div');
+    const mode = native.dataset.sel || '';
+    wrap.className = 'sel' + (mode === 'field' ? ' sel--field' : mode === 'inline' ? ' sel--inline' : '');
+    wrap.innerHTML =
+      '<button type="button" class="sel-btn" aria-haspopup="listbox" aria-expanded="false">'
+        + '<span class="lbl"></span>'
+        + '<svg class="carw" viewBox="0 0 12 12" fill="none" aria-hidden="true">'
+        + '<path d="M2.6 4.6L6 8l3.4-3.4" stroke="currentColor" stroke-width="1.5" '
+        + 'stroke-linecap="round" stroke-linejoin="round"/></svg>'
+      + '</button>'
+      + '<div class="sel-menu" role="listbox" tabindex="-1"></div>';
+    native.parentNode.insertBefore(wrap, native);
+    native.setAttribute('tabindex', '-1');
+    native.setAttribute('aria-hidden', 'true');
+
+    const btn = wrap.querySelector('.sel-btn');
+    const menu = wrap.querySelector('.sel-menu');
+    const rec = { native, wrap, btn, menu, hot: -1 };
+    selList.push(rec);
+
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = wrap.classList.contains('open');
+      closeAllSels();
+      if (!open) openSel(rec);
+    });
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault(); openSel(rec); focusHot(rec, 0);
+      }
+    });
+    menu.addEventListener('click', (e) => {
+      const opt = e.target.closest('.sel-opt');
+      if (opt) pickSel(rec, opt.dataset.value);
+    });
+    wrap.addEventListener('keydown', (e) => {
+      if (!wrap.classList.contains('open')) return;
+      if (e.key === 'Escape') { e.preventDefault(); closeAllSels(); btn.focus(); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); focusHot(rec, rec.hot + 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); focusHot(rec, rec.hot - 1); }
+      else if (e.key === 'Enter') {
+        e.preventDefault();
+        const opt = menu.querySelectorAll('.sel-opt')[rec.hot];
+        if (opt) pickSel(rec, opt.dataset.value);
+      }
+    });
+    native.addEventListener('change', () => selSync());
+  });
+
+  // 全局收起只挂一次：buildSels 会被目录行重复调用，
+  // 每次都加一对 document 监听就是内存泄漏（还会让 Escape 逻辑跑 N 遍）。
+  if (!buildSels.bound) {
+    buildSels.bound = true;
+    document.addEventListener('click', closeAllSels);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeAllSels();
+    });
+  }
+}
+
+function selSync(){
+  selList.forEach(rec => {
+    const { native, wrap, btn, menu } = rec;
+    const val = native.value;
+    const opts = [...native.options];
+    const hit = opts.find(o => o.value === val);
+    btn.querySelector('.lbl').textContent = hit ? hit.textContent : (opts[0]?.textContent || '');
+    // 只有筛选条那档才有"已筛选"高亮；表单/行内档永远有值，高亮反而像报错
+    const isCompact = !wrap.classList.contains('sel--field') && !wrap.classList.contains('sel--inline');
+    wrap.classList.toggle('on', isCompact && !!val && !!hit && hit.value !== '');
+    menu.innerHTML = opts.length
+      ? opts.map(o => {
+          const sel = o.value === val ? 'true' : 'false';
+          return '<div class="sel-opt" role="option" aria-selected="' + sel
+            + '" data-value="' + esc(o.value) + '"><span>' + esc(o.textContent) + '</span></div>';
+        }).join('')
+      : '<div class="sel-empty">没有可选项</div>';
+    if (rec.hot >= opts.length) rec.hot = opts.length - 1;
+  });
+}
+
+function openSel(rec){
+  closeAllSels();
+  rec.wrap.classList.add('open');
+  rec.btn.setAttribute('aria-expanded', 'true');
+  const sel = [...rec.menu.querySelectorAll('.sel-opt')]
+    .findIndex(o => o.getAttribute('aria-selected') === 'true');
+  rec.hot = sel;
+  // 菜单超出视口右边就翻到右侧对齐
+  rec.menu.style.left = '0';
+  rec.menu.style.right = 'auto';
+  requestAnimationFrame(() => {
+    const r = rec.menu.getBoundingClientRect();
+    if (r.right > window.innerWidth - 8) {
+      rec.menu.style.left = 'auto';
+      rec.menu.style.right = '0';
+      rec.menu.style.transformOrigin = 'top right';
+    }
+  });
+}
+
+function closeAllSels(){
+  selList.forEach(rec => {
+    rec.wrap.classList.remove('open');
+    rec.btn.setAttribute('aria-expanded', 'false');
+    rec.menu.querySelectorAll('.hot').forEach(el => el.classList.remove('hot'));
+  });
+}
+
+function focusHot(rec, i){
+  const opts = [...rec.menu.querySelectorAll('.sel-opt')];
+  if (!opts.length) return;
+  rec.hot = Math.max(0, Math.min(i, opts.length - 1));
+  opts.forEach((el, k) => el.classList.toggle('hot', k === rec.hot));
+  const el = opts[rec.hot];
+  if (el) el.scrollIntoView({ block: 'nearest' });
+}
+
+function pickSel(rec, value){
+  rec.native.value = value;
+  rec.native.dispatchEvent(new Event('change', { bubbles: true }));
+  closeAllSels();
+  rec.btn.focus();
+}
+
+/* ---------------- 模型选择：可搜索组合框 ----------------
+   原来是一个 input + <datalist>，弹出层是浏览器原生的，
+   跟页面材质完全不搭（灰底、无圆角、条目挤成一行）。
+   现在自己渲染菜单：输入即过滤，上下键选，Enter 确认，也允许自由输入。 */
+
+let modelItems = [];        // [{ id, name, vision }]
+let modelHot = -1;
+let modelOpen = false;
+
+function modelFilter(q){
+  const s = String(q || '').trim().toLowerCase();
+  if (!s) return modelItems;
+  return modelItems.filter(m =>
+    String(m.id).toLowerCase().includes(s) || String(m.name || '').toLowerCase().includes(s));
+}
+
+function renderModelMenu(q){
+  const menu = $('#modelMenu');
+  if (!menu) return;
+  const list = modelFilter(q);
+  if (!modelItems.length) {
+    menu.innerHTML = '<div class="sel-empty">没有拉到模型清单</div>';
+    return;
+  }
+  if (!list.length) {
+    menu.innerHTML = '<div class="sel-empty">没有匹配的模型，回车就用你输入的这句</div>';
+    return;
+  }
+  const cur = $('#c-model').value.trim();
+  menu.innerHTML = list.map((m, i) => {
+    const sel = m.id === cur ? 'true' : 'false';
+    const sub = m.vision ? '<span class="sub">图片</span>' : '';
+    return '<div class="sel-opt" role="option" aria-selected="' + sel
+      + '" data-idx="' + i + '"><span>' + esc(m.id) + '</span>' + sub + '</div>';
+  }).join('');
+  modelHot = Math.min(Math.max(modelHot, 0), list.length - 1);
+  markModelHot();
+}
+
+function markModelHot(){
+  const opts = [...document.querySelectorAll('#modelMenu .sel-opt')];
+  opts.forEach((el, k) => el.classList.toggle('hot', k === modelHot));
+  const el = opts[modelHot];
+  if (el) el.scrollIntoView({ block: 'nearest' });
+}
+
+function openModelMenu(q){
+  const wrap = $('#modelCombo');
+  if (!wrap) return;
+  modelOpen = true; modelHot = 0;
+  wrap.classList.add('open');
+  $('#c-model').setAttribute('aria-expanded', 'true');
+  renderModelMenu(q);
+}
+
+function closeModelMenu(){
+  const wrap = $('#modelCombo');
+  if (!wrap) return;
+  modelOpen = false;
+  wrap.classList.remove('open');
+  $('#c-model').setAttribute('aria-expanded', 'false');
+}
+
+function pickModel(id){
+  $('#c-model').value = id;
+  closeModelMenu();
+  $('#c-model').focus();
+}
+
+function wireModelCombo(){
+  const wrap = $('#modelCombo');
+  const input = $('#c-model');
+  const menu = $('#modelMenu');
+  if (!wrap || !input || !menu) return;
+
+  input.addEventListener('focus', () => openModelMenu(input.value));
+  input.addEventListener('input', () => { modelHot = 0; openModelMenu(input.value); });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!modelOpen) return openModelMenu(input.value);
+      modelHot = Math.min(modelHot + 1, modelFilter(input.value).length - 1);
+      markModelHot();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      modelHot = Math.max(modelHot - 1, 0);
+      markModelHot();
+    } else if (e.key === 'Enter') {
+      const list = modelFilter(input.value);
+      if (modelOpen && list[modelHot]) { e.preventDefault(); pickModel(list[modelHot].id); }
+      else closeModelMenu();
+    } else if (e.key === 'Escape') {
+      closeModelMenu();
+    }
+  });
+
+  $('#modelToggle')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (modelOpen) closeModelMenu();
+    else { input.focus(); openModelMenu(''); }
+  });
+
+  menu.addEventListener('click', (e) => {
+    const opt = e.target.closest('.sel-opt');
+    if (!opt) return;
+    const m = modelFilter(input.value)[Number(opt.dataset.idx)];
+    if (m) pickModel(m.id);
+  });
+
+  // 点别处收起
+  document.addEventListener('click', (e) => {
+    if (!modelOpen) return;
+    if (!wrap.contains(e.target)) closeModelMenu();
+  });
+}
+
 function syncFilterUI(){
   const proj = $('#project');
   if (proj) proj.value = navProject;
   // 选中的筛选项高亮，未选中的低调
   [['#project', filters.project], ['#priority', filters.priority], ['#category', filters.category]]
     .forEach(([sel, val]) => { const el = $(sel); if (el) el.classList.toggle('on', !!val); });
+  selSync();
   const reset = $('#fltReset');
   if (reset) reset.hidden = !(filters.project || filters.priority || filters.category);
   const crumb = $('#crumbView');
@@ -1144,7 +1835,7 @@ function matches(t){
 
 function cardHTML(t){
   const meta = [];
-  meta.push(`<span class="tag" style="color:${PRI_COLOR[t.priority] || 'var(--muted)'};background:${(PRI_COLOR[t.priority]||'#666')}22">${PRI_LABEL[t.priority] || '普通'}</span>`);
+  meta.push(`<span class="tag" style="color:${PRI_COLOR[t.priority] || 'var(--text-3)'};background:${(PRI_COLOR[t.priority]||'#666')}22">${PRI_LABEL[t.priority] || '普通'}</span>`);
   if (t.category) meta.push(`<span class="tag cat">${esc(t.category)}</span>`);
   if (t.project && t.project !== '默认') meta.push(`<span class="tag">${esc(t.project)}</span>`);
   if (t.kind && t.kind !== 'text') meta.push(`<span class="kind">${KIND_LABEL[t.kind] || ''}</span>`);
@@ -1382,6 +2073,9 @@ async function watchClassify(id){
 /* ---------------- 事件绑定 ---------------- */
 
 initLayout();
+buildSels();
+selSync();
+wireModelCombo();
 
 $('#collapseBtn')?.addEventListener('click', () => setCollapsed(true));
 $('#dockStub')?.addEventListener('click', () => setCollapsed(false));
@@ -1412,6 +2106,7 @@ async function openSettings(){
   try {
     const cfg = await api('GET', '/api/settings');
     $('#c-backend').value = cfg.backend || 'auto';
+    selSync();                       // 直接改 value 不会触发 change，得手动同步自定义下拉的显示
     $('#c-model').value = cfg.model || '';
     $('#c-classify').checked = cfg.classify !== false;
   } catch (e) {
@@ -1432,17 +2127,17 @@ async function openSettings(){
   // 模型清单
   try {
     const m = await api('GET', '/api/models');
-    const list = (m.data || []).slice();
-    list.sort((a, b) => String(a.id).localeCompare(String(b.id)));
-    $('#modelList').innerHTML = list
-      .map((x) => `<option value="${esc(x.id)}">${esc(x.name || '')}${x.vision ? ' · 支持图片' : ''}</option>`)
-      .join('');
-    $('#modelHint').textContent = m.data?.length
-      ? `来自 ${m.from}，共 ${m.data.length} 个模型`
-      : '没有拉到模型清单';
+    modelItems = (m.data || []).slice()
+      .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+      .map(x => ({ id: String(x.id), name: x.name || '', vision: !!x.vision }));
+    $('#modelHint').textContent = modelItems.length
+      ? `来自 ${m.from}，共 ${modelItems.length} 个 · 输入可搜索`
+      : '没有拉到模型清单，可以直接手填';
   } catch {
-    $('#modelHint').textContent = '没有拉到模型清单';
+    modelItems = [];
+    $('#modelHint').textContent = '没有拉到模型清单，可以直接手填';
   }
+  closeModelMenu();
 
   renderProjList();
   $('#cfg').showModal();
@@ -1557,7 +2252,7 @@ function buildSections(t){
       (t.brief ? '重新生成' : '生成需求') + '</button>',
     body: t.brief
       ? '<div class="md">' + mdToHtml(t.brief) + '</div>'
-      : '<span style="color:var(--muted)">还没有整理。点右上角生成一份能直接派给 agent 的需求说明。</span>'
+      : '<span style="color:var(--text-3)">还没有整理。点右上角生成一份能直接派给 agent 的需求说明。</span>'
   });
 
   return secs;
@@ -1619,12 +2314,13 @@ function drRenderHead(t){
   $('#drTitle').textContent = t.title || '（无标题）';
 
   const tags = [];
-  tags.push('<span class="tag" style="color:' + (PRI_COLOR[t.priority] || 'var(--muted)')
+  tags.push('<span class="tag" style="color:' + (PRI_COLOR[t.priority] || 'var(--text-3)')
     + ';background:' + ((PRI_COLOR[t.priority] || '#666') + '22') + '">'
     + (PRI_LABEL[t.priority] || '普通') + '</span>');
   if (t.project) tags.push('<span class="tag">' + esc(t.project) + '</span>');
   if (t.category) tags.push('<span class="tag cat">' + esc(t.category) + '</span>');
-  tags.push('<span class="tag">' + esc(t.status) + '</span>');
+  // 状态用中文，别把 todo / doing 原样丢给用户看
+  tags.push('<span class="tag">' + esc(STATUS_LABEL[t.status] || t.status) + '</span>');
   $('#drMeta').innerHTML = tags.join('');
 
   // 快速改字段
@@ -1632,16 +2328,19 @@ function drRenderHead(t){
     '<option value="' + esc(p.name) + '"' + (p.name === t.project ? ' selected' : '') + '>'
     + esc(p.name) + '</option>').join('');
   $('#drFields').innerHTML =
-    '<select id="drPri">'
+    '<select id="drPri" class="sel-native" data-sel="inline">'
       + ['p0','p1','p2','p3','p4'].map(k =>
           '<option value="' + k + '"' + (k === t.priority ? ' selected' : '') + '>'
           + PRI_LABEL[k] + '</option>').join('')
     + '</select>'
-    + '<select id="drProj">' + opts + '</select>'
-    + '<select id="drStatus">'
+    + '<select id="drProj" class="sel-native" data-sel="inline">' + opts + '</select>'
+    + '<select id="drStatus" class="sel-native" data-sel="inline">'
       + [['todo','未开始'],['doing','进行中'],['done','已完成']].map(([k,l]) =>
           '<option value="' + k + '"' + (k === t.status ? ' selected' : '') + '>' + l + '</option>').join('')
     + '</select>';
+
+  // 这三个是动态插进来的，得再包一次自定义下拉（buildSels 幂等，不会重复包）
+  buildSels();
 
   $('#drPri').onchange = () => drQuick({ priority: $('#drPri').value });
   $('#drProj').onchange = () => drQuick({ project: $('#drProj').value });
@@ -1694,7 +2393,7 @@ async function drSend(){
 
   const thinking = document.createElement('div');
   thinking.className = 'dm';
-  thinking.innerHTML = '<div class="bub" style="color:var(--muted)">…</div>';
+  thinking.innerHTML = '<div class="bub" style="color:var(--text-3)">…</div>';
   body.appendChild(thinking);
   body.scrollTop = body.scrollHeight;
 
@@ -1783,7 +2482,7 @@ async function loadDir(target) {
       const parts = [];
       if (r.isProject) parts.push(`<span class="tag2">${r.isGitRepo ? 'git 仓库' : '像项目目录'}</span>`);
       const head = `<div class="pick-item" data-go="${esc(r.path)}" style="cursor:default">
-        <span class="ico">📂</span><span style="color:var(--muted)">当前：${esc(r.path)}</span>${parts.join('')}
+        <span class="ico">📂</span><span style="color:var(--text-3)">当前：${esc(r.path)}</span>${parts.join('')}
       </div>`;
       const rows = (r.dirs || []).map(d => `
         <div class="pick-item" data-go="${esc(d.path)}">
@@ -1829,7 +2528,7 @@ function renderProjList(){
       </div>
       <span class="pc">${p.taskCount || 0}</span>
     </div>`;
-  }).join('') || '<div class="proj-row"><div class="pn" style="color:var(--muted)">还没有项目</div></div>';
+  }).join('') || '<div class="proj-row"><div class="pn" style="color:var(--text-3)">还没有项目</div></div>';
 
   host.querySelectorAll('.proj-row[data-pid]').forEach(row => {
     row.addEventListener('click', () => openProjectEditor(row.dataset.pid));
@@ -1843,12 +2542,14 @@ function dirRow(d = {}){
     <input class="dp" placeholder="点右边选，或直接粘贴路径" value="${esc(d.path || '')}">
     <button type="button" class="pick" title="浏览目录">📁</button>
     <input class="dn" placeholder="说明（可选）" value="${esc(d.note || '')}" style="max-width:110px">
-    <select class="dm" style="max-width:72px">
+    <select class="dm sel-native" data-sel="inline">
       <option value="">副</option>
       <option value="1" ${d.primary ? 'selected' : ''}>主要</option>
     </select>
     <button type="button" class="rm" title="移除">✕</button>
   `;
+  // 目录行还没插进文档，只能在自己的容器里找（传 document 会找不到）
+  buildSels(wrap);
   wrap.querySelector('.rm').addEventListener('click', () => wrap.remove());
   wrap.querySelector('.pick').addEventListener('click', async () => {
     const input = wrap.querySelector('.dp');
@@ -1908,7 +2609,7 @@ $('#projForm')?.addEventListener('submit', async e => {
   const dirs = [...$('#dirList').querySelectorAll('.dir-row')].map(row => ({
     path: row.querySelector('.dp').value.trim(),
     note: row.querySelector('.dn').value.trim(),
-    primary: row.querySelector('.dm').value === '1'
+    primary: row.querySelector('select.dm').value === '1'
   })).filter(d => d.path);
 
   try {
