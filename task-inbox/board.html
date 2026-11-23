@@ -10,7 +10,6 @@
     --text:#e6e8ee; --muted:#8b93a7; --line:#262b36;
     --p0:#ef4444; --p1:#f59e0b; --p2:#3b82f6; --p3:#64748b;
     --todo:#60a5fa; --doing:#fbbf24; --done:#4ade80; --p4:#4b5563;
-    --cap-w: 340px;
   }
   @media (prefers-color-scheme: light){
     :root{ --bg:#f6f7f9; --panel:#fff; --card:#fff; --card-hover:#f9fafb;
@@ -23,40 +22,52 @@
     font:14px/1.55 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
   }
 
-  /* ---------- 整体：左看板 + 分隔条 + 右随手记 ---------- */
-  .app{display:flex; height:100vh; overflow:hidden}
+  /* ---------- 整体：上下布局，看板在上，随手记沉到底栏 ---------- */
+  .app{display:flex; flex-direction:column; height:100vh; overflow:hidden}
 
-  .board-area{flex:1; min-width:0; display:flex; flex-direction:column; overflow:hidden}
+  .board-area{flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden}
 
-  .splitter{
-    flex:0 0 6px; cursor:col-resize; position:relative; background:transparent;
-    transition:background .12s;
+  /* ---------- 底部随手记：一条横的输入区 ---------- */
+  .dock{
+    flex:0 0 auto; display:flex; align-items:flex-end; gap:8px;
+    padding:9px 14px 11px; background:var(--panel);
+    border-top:1px solid var(--line);
   }
-  .splitter::after{
-    content:''; position:absolute; left:2px; top:0; bottom:0; width:2px;
-    background:var(--line); transition:background .12s;
+  .dock .grow{flex:1; min-width:0; display:flex; flex-direction:column; gap:7px}
+  .dock textarea{
+    width:100%; resize:none; overflow:hidden;
+    min-height:38px; max-height:140px; line-height:1.5;
+    font:inherit; font-size:13.5px; color:var(--text);
+    background:var(--bg); border:1px solid var(--line); border-radius:9px;
+    padding:9px 11px; outline:none;
   }
-  .splitter:hover::after, .splitter.dragging::after{background:var(--todo)}
-  .splitter.dragging{background:rgba(96,165,250,.08)}
-
-  .capture{
-    flex:0 0 var(--cap-w); width:var(--cap-w); min-width:0;
-    display:flex; flex-direction:column; overflow:hidden;
-    background:var(--panel); border-left:1px solid var(--line);
-    transition:flex-basis .16s ease, width .16s ease;
+  .dock textarea:focus{border-color:var(--todo)}
+  .dock textarea::placeholder{color:var(--muted); opacity:.7}
+  .dock .side{display:flex; align-items:center; gap:6px; padding-bottom:1px}
+  .dock .go{
+    font:inherit; font-size:12.5px; font-weight:600; color:#0b1020; background:var(--todo);
+    border:0; border-radius:8px; padding:9px 15px; cursor:pointer; white-space:nowrap;
   }
-  .app.resizing .capture{transition:none}
-  .app.collapsed .capture{flex-basis:0; width:0; border-left:none}
-  .app.collapsed .splitter{flex-basis:0; cursor:default; pointer-events:none}
-  .app.collapsed .splitter::after{display:none}
+  .dock .go:disabled{opacity:.4; cursor:default}
+  .dock .thumbs:empty{display:none}
+  .dock .cap-msg{font-size:11.5px; min-height:0; color:var(--muted)}
+  .dock .cap-msg:empty{display:none}
+  .dock .cap-msg.ok{color:var(--done)}
+  .dock .cap-msg.err{color:var(--p0)}
 
-  .cap-head{
+  /* 收起后只留一条细线，点它展开 */
+  .app.collapsed .dock{display:none}
+  .dock-stub{
+    flex:0 0 auto; display:none; align-items:center; gap:8px;
+    padding:7px 14px; background:var(--panel); border-top:1px solid var(--line);
+    color:var(--muted); font-size:12.5px; cursor:pointer;
+  }
+  .dock-stub:hover{color:var(--text)}
+  .app.collapsed .dock-stub{display:flex}
+
     flex:0 0 auto; display:flex; align-items:center; gap:8px;
     padding:12px 14px 10px; border-bottom:1px solid var(--line);
   }
-  .cap-head b{font-size:13px; font-weight:600}
-  .cap-head .dot{width:7px;height:7px;border-radius:50%;background:var(--todo)}
-  .cap-head .spacer{flex:1}
   .icon-btn{
     border:1px solid var(--line); background:transparent; color:var(--muted);
     border-radius:7px; width:26px; height:26px; display:grid; place-items:center;
@@ -64,15 +75,11 @@
   }
   .icon-btn:hover{color:var(--text); background:var(--card-hover)}
 
-  .cap-body{flex:1; display:flex; flex-direction:column; gap:9px; padding:12px 14px; min-height:0}
-  .cap-body textarea{
     flex:1; width:100%; min-height:80px; resize:none;
     font:inherit; font-size:14px; line-height:1.55; color:var(--text);
     background:var(--bg); border:1px solid var(--line); border-radius:10px;
     padding:11px 12px; outline:none;
   }
-  .cap-body textarea:focus{border-color:var(--todo)}
-  .cap-body textarea::placeholder{color:var(--muted); opacity:.7}
 
   .thumbs{display:flex; gap:7px; flex-wrap:wrap; flex:0 0 auto}
   .thumb{position:relative; width:52px; height:52px; border-radius:7px; overflow:hidden; border:1px solid var(--line)}
@@ -83,33 +90,18 @@
     cursor:pointer; padding:0; display:grid; place-items:center;
   }
 
-  .cap-row{display:flex; gap:6px; align-items:center; flex:0 0 auto; flex-wrap:wrap}
-  .cap-row select, .cap-row input[type=text]{
     font:inherit; font-size:12px; color:var(--text); background:var(--bg);
     border:1px solid var(--line); border-radius:7px; padding:5px 7px; cursor:pointer;
     min-width:0;
   }
-  .cap-row input[type=text]{cursor:text; width:78px}
-  .cap-row select{flex:1}
-  .cap-row .go{
     font:inherit; font-size:12.5px; font-weight:600; color:#0b1020; background:var(--todo);
     border:0; border-radius:7px; padding:7px 14px; cursor:pointer; white-space:nowrap;
   }
-  .cap-row .go:disabled{opacity:.4; cursor:default}
   .cap-msg{font-size:11.5px; min-height:15px; color:var(--muted); flex:0 0 auto}
   .cap-msg.ok{color:var(--done)}
   .cap-msg.err{color:var(--p0)}
 
   /* 收起后的悬浮按钮 */
-  .reopen{
-    position:fixed; right:10px; bottom:14px; z-index:60;
-    display:none; align-items:center; gap:5px;
-    font:inherit; font-size:12.5px; color:var(--text); background:var(--card);
-    border:1px solid var(--line); border-radius:999px; padding:7px 13px;
-    cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.22);
-  }
-  .reopen:hover{background:var(--card-hover)}
-  .app.collapsed ~ .reopen{display:inline-flex}
 
   /* ---------- 看板 ---------- */
   header.top{
@@ -237,10 +229,10 @@
 
   /* 单独打开随手记时（?solo=1）：隐藏看板 */
   body.solo .board-area{display:none}
-  body.solo .splitter{display:none}
+  body.solo .dock{border-top:none; justify-content:center}
+  body.solo .dock .grow{max-width:720px}
   body.solo .capture{flex:1; width:auto; border-left:none}
-  body.solo .cap-head .collapse{display:none}
-  body.solo .reopen{display:none !important}
+  body.solo #collapseBtn{display:none}
 </style>
 </head>
 <body>
@@ -274,30 +266,25 @@
     </div>
   </main>
 
-  <div class="splitter" id="splitter" title="拖动调整宽度 · 双击复位"></div>
+  <div class="dock-stub" id="dockStub">
+    <span>随手记已收起，点这里展开</span>
+  </div>
 
-  <aside class="capture" id="capture">
-    <div class="cap-head">
-      <span class="dot"></span>
-      <b>随手记</b>
-      <span class="spacer"></span>
-      <button class="icon-btn collapse" id="collapseBtn" title="收起">»</button>
-    </div>
-    <div class="cap-body">
-      <textarea id="text" placeholder="想到什么丢进来，截图、文件、链接都行&#10;Enter 存下 · Shift+Enter 换行"></textarea>
+  <footer class="dock" id="dock">
+    <div class="grow">
+      <textarea id="text" rows="1"
+        placeholder="想到什么丢进来，截图、文件、链接都行 · Enter 存下"></textarea>
       <div class="thumbs" id="thumbs"></div>
-      <div class="cap-row">
-        <span class="spacer"></span>
-        <button class="icon-btn" id="attachBtn" title="添加附件">📎</button>
-        <button class="go" id="go" disabled>存下</button>
-      </div>
       <div class="cap-msg" id="msg"></div>
-      <input type="file" id="fileInput" multiple hidden>
     </div>
-  </aside>
+    <div class="side">
+      <button class="icon-btn" id="attachBtn" title="添加附件">📎</button>
+      <button class="go" id="go" disabled>存下</button>
+      <button class="icon-btn" id="collapseBtn" title="收起底栏">⌄</button>
+    </div>
+    <input type="file" id="fileInput" multiple hidden>
+  </footer>
 </div>
-
-<button class="reopen" id="reopen">📝 随手记</button>
 
 <dialog id="cfg">
   <form class="dlg" id="cfgForm" method="dialog">
@@ -402,11 +389,9 @@ const KIND_ICON = { text:'', image:'🖼', image_text:'🖼', link:'🔗', file:
 
 const SOLO = new URLSearchParams(location.search).has('solo');
 const LS_W = 'ti.captureWidth';
-const LS_C = 'ti.captureCollapsed';
 
 let store = { projects:['默认'], tasks:[], counts:{}, total:0 };
 let filters = { project:'', priority:'', category:'' };
-let collapsed = false;
 
 const $ = s => document.querySelector(s);
 
@@ -441,72 +426,34 @@ function imgUrl(p){
   return '/images/' + encodeURIComponent(name);
 }
 
-/* ---------------- 布局：宽度 / 收起 ---------------- */
+/* ---------------- 布局：底栏收起 / 自动撑高 ---------------- */
 
-function applyWidth(px){
-  const max = Math.max(260, Math.round(window.innerWidth * 0.6));
-  const w = Math.min(Math.max(240, px), max);
-  document.documentElement.style.setProperty('--cap-w', w + 'px');
-  return w;
+const LS_C = 'ti.dockCollapsed';
+let collapsed = false;
+
+function autoGrow(){
+  const ta = $('#text');
+  if (!ta) return;
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, 140) + 'px';
 }
 
 function initLayout(){
   if (SOLO) { document.body.classList.add('solo'); return; }
 
-  const savedW = Number(localStorage.getItem(LS_W));
-  if (savedW > 0) applyWidth(savedW);
-
   collapsed = localStorage.getItem(LS_C) === '1';
   $('#app').classList.toggle('collapsed', collapsed);
 
-  const splitter = $('#splitter');
-  let dragging = false;
-
-  const onMove = (e) => {
-    if (!dragging) return;
-    const x = e.clientX ?? e.touches?.[0]?.clientX;
-    if (x == null) return;
-    const w = applyWidth(window.innerWidth - x);
-    localStorage.setItem(LS_W, String(w));
-  };
-  const stop = () => {
-    if (!dragging) return;
-    dragging = false;
-    splitter.classList.remove('dragging');
-    $('#app').classList.remove('resizing');
-    document.body.style.cursor = '';
-    window.removeEventListener('mousemove', onMove);
-    window.removeEventListener('mouseup', stop);
-  };
-
-  splitter.addEventListener('mousedown', (e) => {
-    if (collapsed) return;
-    e.preventDefault();
-    dragging = true;
-    splitter.classList.add('dragging');
-    $('#app').classList.add('resizing');
-    document.body.style.cursor = 'col-resize';
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', stop);
-  });
-
-  splitter.addEventListener('dblclick', () => {
-    applyWidth(340);
-    localStorage.setItem(LS_W, '340');
-    toast('宽度已复位');
-  });
-
-  window.addEventListener('resize', () => {
-    const cur = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--cap-w'), 10);
-    if (cur > 0) applyWidth(cur);
-  });
+  autoGrow();
+  $('#text').addEventListener('input', autoGrow);
+  window.addEventListener('resize', autoGrow);
 }
 
 function setCollapsed(v){
   collapsed = v;
   $('#app').classList.toggle('collapsed', v);
   localStorage.setItem(LS_C, v ? '1' : '0');
-  if (!v) setTimeout(() => $('#text')?.focus(), 180);
+  if (!v) setTimeout(() => { autoGrow(); $('#text')?.focus(); }, 60);
 }
 
 /* ---------------- 看板 ---------------- */
@@ -720,6 +667,7 @@ async function submit(){
     images = [];
     files = [];
     renderThumbs();
+    autoGrow();
     refreshGo();
     say('已收下，正在判断…', 'ok');
     $('#text').focus();
@@ -751,7 +699,7 @@ async function watchClassify(id){
 initLayout();
 
 $('#collapseBtn')?.addEventListener('click', () => setCollapsed(true));
-$('#reopen')?.addEventListener('click', () => setCollapsed(false));
+$('#dockStub')?.addEventListener('click', () => setCollapsed(false));
 $('#focusCapture')?.addEventListener('click', () => {
   if (collapsed) setCollapsed(false);
   setTimeout(() => $('#text')?.focus(), 200);
