@@ -173,6 +173,24 @@ CSS 里**除 `:root` 之外不允许写死颜色**。需要新色就先在 `:roo
 - 滚动条在 `*` 上统一压细（10px、半透明灰、圆角、无轨道底色）。
   Windows 默认那条灰槽跟这套银白材质完全不搭，别让某个容器单独用原生样式
 
+### 抽屉的两栏：宽度只有一个来源
+
+```
+.drawer.doc-on  width = min(var(--dr-wide-w), 96vw)
+  ├─ .dr-pane   width = var(--dr-pane-w)     ← 左栏（详情 + 对话）
+  ├─ .dr-split  width 11px                   ← 可拖
+  └─ .dr-doc    flex 1                       ← 预览栏，吃剩下的全部
+```
+
+- **不要给预览栏单独设宽度**。它 = 抽屉宽 − 左栏 − 分隔条，写死第二处
+  就会出现"改了左栏、右栏没跟上"的错位。
+- `--dr-pane-w` 由 JS 写（拖动时实时写、松手存 `localStorage`）；
+  `--dr-wide-w` 由 `drDocFit()` 按视口重算。
+- 视口 < 1080px 不并排：切成 `.doc-full`，`.dr-pane` 隐藏、`.dr-doc` 铺满。
+  理由不是省事 —— 两栏各剩 400 时，正文和对话都难读，比"看不到对话"更糟。
+- 预览栏是**内容层**（读字的地方），底色用不透明的 `--ctl-inset`，
+  不能跟着抽屉一起做玻璃。
+
 ---
 
 ## 五、z-index 分层
@@ -240,6 +258,28 @@ CSS 里**除 `:root` 之外不允许写死颜色**。需要新色就先在 `:roo
 4. **`transition: all` 别用在会被 JS 改尺寸的元素上**
    卡片 hover 位移用 `transform`，不要用 `top/left`，否则拖动时掉帧。
 
+5. **flex 容器里的子项会被压扁，`overflow:auto` 不报错但滚不动**
+   `.dr-detail` 是 `display:flex; flex-direction:column`，`.sect` 作为
+   flex 子项默认 `flex-shrink:1`，被压进容器高度以内，再被自己的
+   `overflow:hidden` 裁掉 —— `scrollHeight` 永远等于 `clientHeight`，
+   滚动条不出现、滚轮也转不动，内容**静默消失**。
+   实测：946px 的需求只露出 281px，用户只能看到三分之一。
+
+   修法不是加 `overflow:visible`（那会把卡片撑出抽屉），而是
+   **让子项不参与收缩**：
+
+   ```css
+   .dr-detail > .sect{flex:0 0 auto}   /* 内容有多高就多高，容器自己滚 */
+   ```
+
+   自检方法：`el.scrollHeight > el.clientHeight` 必须是 true。
+   如果两者相等而你确信内容超了，先查父级是不是 flex。
+
+6. **动态生成的自定义控件，`buildSels()` 之后必须 `selSync()`**
+   前者只负责"套壳"，不回填显示值。只调 `buildSels` 的话三个下拉全是
+   空白，要等用户随便点开一个（`pickSel → selSync`）才一起亮起来。
+   `drRenderHead()` 就是漏了这一行。
+
 ---
 
 ## 九、提交前自检
@@ -255,6 +295,9 @@ node style-audit.mjs        # 必须绿
 - 有没有重复定义的同名顶层选择器
 - 有没有定义了却从没被用到的类
 - 降级查询是否覆盖了所有玻璃层
+- 有一个 `:root` 变量声明了却没人 `var()`
+- 用了 `var(--x)` 但 `:root` 里没声明（颜色会整个失效）
+- `z-index` 用了分层表以外的值
 
 清单式自检（脚本管不到的部分，靠人）：
 

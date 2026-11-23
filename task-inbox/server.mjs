@@ -251,21 +251,39 @@ export function createClassifyQueue(core, opts = {}) {
     }
   }
 
-  // 收下就先返回，分类在后台跑 —— 入口不能等 3 秒
-  function enqueue(id) {
-    if (running >= MAX) {
-      return new Promise((resolve) => {
-        const tick = setInterval(() => {
-          if (running < MAX) { clearInterval(tick); resolve(runOne(id)); }
-        }, 200);
-      });
+  // 收下就先返回，分类在后台跑 —— 入口不能等 3 秒。
+  //
+  // 排队用显式的等待队列，不用 setInterval 轮询空位：
+  // 旧写法每个排队请求都留一个 200ms 的定时器，一次贴 50 条就是 50 个定时器
+  // 每 200ms 空转一次；而且 clearInterval 只在「抢到位」那条路径上，
+  // 万一 runOne 抛错前就没人清。队列版本是零定时器，跑满就 wake 下一个。
+  const waiting = [];
+
+  function pump() {
+    while (running < MAX && waiting.length) {
+      const job = waiting.shift();
+      running++;
+      runOne(job.id)
+        .then(job.resolve, job.reject)
+        .finally(() => { running--; pump(); });
     }
-    running++;
-    return runOne(id).finally(() => { running--; });
+  }
+
+  function enqueue(id) {
+    return new Promise((resolve, reject) => {
+      waiting.push({ id, resolve, reject });
+      pump();
+    });
+  }
+
+  /** 排队里还有多少条。给 /api/backend 和排查用。 */
+  function pendingCount() {
+    return waiting.length;
   }
 
   return {
-    enqueue, runOne, resetClassifier,
+    enqueue, runOne, resetClassifier, pendingCount,
+    get runningCount() { return running; },
     get classifier() { return buildClassifier(); }
   };
 }
@@ -463,7 +481,11 @@ export function createHandler(core, opts = {}) {
         if (!queue) return json(res, 200, { error: '分类未启用' });
         const b = queue.classifier && queue.classifier.backend;
         if (!b) return json(res, 200, { error: '后端未初始化' });
-        return json(res, 200, await b.status());
+        // 顺带把队列水位带上：粘一批任务进来之后想确认排到哪了，看这里就够
+        return json(res, 200, {
+          ...(await b.status()),
+          queue: { running: queue.runningCount, waiting: queue.pendingCount() }
+        });
       }
       if (p === '/api/settings' && req.method === 'GET') {
         return json(res, 200, core.loadSettings());
@@ -666,17 +688,41 @@ export function createHandler(core, opts = {}) {
         return json(res, 200, { task: core.clearMessages(b.taskId) });
       }
 
-      const m = p.match(/^\/api\/tasks\/([^/]+)(\/move)?$/);
+      const m = p.match(/^\/api\/tasks\/([^/]+)(\/(?:move|reclassify))?$/);
       if (m) {
         const id = decodeURIComponent(m[1]);
-        if (m[2] && req.method === 'POST') {
+        const action = m[2] || '';
+
+        if (action === '/move') {
+          if (req.method !== 'POST') return json(res, 405, { error: '用 POST' });
           const b = await readBody(req);
           return json(res, 200, core.move(id, b.status));
         }
+
+        if (action === '/reclassify') {
+          if (req.method !== 'POST') return json(res, 405, { error: '用 POST' });
+          if (!queue) return json(res, 400, { error: '分类未启用' });
+          const t = core.getTask(id);
+          if (!t) return json(res, 404, { error: '任务不存在' });
+          // 已经在跑就别重复排队，否则同一条会被连续判好几次
+          if (t.classify_state === 'pending') {
+            return json(res, 200, { queued: false, reason: 'already running', task: t });
+          }
+          queue.enqueue(id).catch(() => { /* runOne 内部已经落了 failed，这里不重复报 */ });
+          return json(res, 200, { queued: true });
+        }
+
+        // 以下三个只对「任务本体」生效，带子路径的一律不进来
         if (req.method === 'PATCH' || req.method === 'PUT') {
           const b = await readBody(req);
-          return json(res, 200, core.patch(id, b));
+          // classify_* 是分类引擎自己的状态位，不接受外部写。
+          // 尤其是 classify_state='pending'：以前能写进去，但写进去不会触发分类，
+          // 只会把卡片永远钉在「判断中…」（实测过）。要重判走 /reclassify。
+          const body = { ...b };
+          for (const k of ['classify_state', 'classify_reason', 'classify_model']) delete body[k];
+          return json(res, 200, core.patch(id, body));
         }
+
         if (req.method === 'DELETE') {
           const t = core.remove(id);
           // 顺手清掉的附件个数返回给前端，好显示「已删除，同时清掉 2 个附件」

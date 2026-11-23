@@ -13,6 +13,8 @@
   /* 白字按钮/徽章必须用深橙：#FA4616 配白字只有 3.53:1，不够 AA */
   --orange-cta:#C93610; --orange-cta-hi:#D84414; --orange-cta-deep:#A83209;
   --radius-sm:9px; --radius-lg:25px;
+  /* 抽屉双栏：左栏宽度 / 展开后整条抽屉的期望宽度（JS 会按视口重算后者） */
+  --dr-pane-w:460px; --dr-wide-w:1180px;
 
   /* ---------- 材质层：玻璃 + 拟态 ---------- */
   /* 玻璃只给浮动层（顶栏/底栏/筛选条/看板列/弹窗）；正文卡片保持不透明 */
@@ -344,7 +346,7 @@ h1{
    ========================================================================== */
 .icon-btn, .rail-toggle, .sys-btn,
 .mini, .mini-btn, .flt-reset, .dir-row .pick,
-.dlg button, .dr-row button, .pick-bar button, .dock .go {
+.dlg button, .dr-row button, .pick-bar button, .dock .go, .doc-tab {
   display:inline-flex;align-items:center;justify-content:center;
   font-family:var(--font-ui);
   color:var(--text-2);
@@ -357,18 +359,21 @@ h1{
 }
 .icon-btn:hover, .rail-toggle:hover, .sys-btn:hover,
 .mini-btn:hover, .dir-row .pick:hover,
-.dlg button:hover, .dr-row button:hover, .pick-bar button:hover {
+.dlg button:hover, .dr-row button:hover, .pick-bar button:hover,
+.doc-tab:hover {
   border-color:var(--ctl-edge-hi); color:var(--ink);
   box-shadow:inset 0 1px 0 #fff, var(--shadow-2);
 }
 .icon-btn:active, .rail-toggle:active, .sys-btn:active,
-.dlg button:active, .dr-row button:active, .pick-bar button:active {
+.dlg button:active, .dr-row button:active, .pick-bar button:active,
+.doc-tab:active {
   transform:translateY(.5px); box-shadow:inset 0 2px 4px rgba(120,136,142,.22);
 }
 .icon-btn:focus-visible, .rail-toggle:focus-visible, .sys-btn:focus-visible,
 .mini:focus-visible, .mini-btn:focus-visible,
 .dlg button:focus-visible, .dr-row button:focus-visible,
-.pick-bar button:focus-visible, .dock .go:focus-visible {
+.pick-bar button:focus-visible, .dock .go:focus-visible,
+.doc-tab:focus-visible {
   outline:none; border-color:var(--orange); box-shadow:var(--ctl-focus-ring);
 }
 .icon-btn:disabled, .dlg button:disabled, .dr-row button:disabled {
@@ -701,6 +706,19 @@ body select.sel-native{
 .card:hover .time{opacity:.85}
 .tag.pending{color:var(--warn-text);background:rgba(176,106,31,.14)}
 .tag.failed{color:var(--orange);background:rgba(250,70,22,.12)}
+/* 抽屉头部的「未判断 · 重试」：长得像 tag，但能点。
+   没做成显著按钮是有意的 —— 它是补救入口，不该抢正常卡片的注意力。
+   尺寸沿用 .tag 的（10px/16px/圆角胶囊），材质走按钮总则的 --ctl-raise。 */
+.tag-retry{
+  font:10px/16px var(--font-ui);padding:0 7px;border-radius:999px;height:16px;
+  border:1px solid rgba(250,70,22,.35);cursor:pointer;
+  color:var(--accent-text);background:rgba(250,70,22,.10);
+  display:inline-flex;align-items:center;white-space:nowrap;
+  transition:background .16s, border-color .16s;
+}
+.tag-retry:hover{background:rgba(250,70,22,.18);border-color:rgba(250,70,22,.55)}
+.tag-retry:disabled{cursor:default;opacity:.6}
+.tag-retry:focus-visible{outline:none;box-shadow:var(--ctl-focus-ring)}
 .badge-need{
   font:10px/16px var(--font-mono);padding:0 6px;border-radius:999px;height:16px;
   background:var(--orange-cta);color:#fff;cursor:pointer;border:0;
@@ -869,8 +887,8 @@ dialog::backdrop{background:rgba(30,40,45,.34); backdrop-filter:blur(3px)}
 .drawer{
   position:fixed;top:0;right:0;bottom:0;width:min(480px,94vw);
   transform:translateX(100%);
-  transition:transform .26s cubic-bezier(.2,0,0,1);
-  z-index:71;display:flex;flex-direction:column;overflow:hidden;
+  transition:transform .26s cubic-bezier(.2,0,0,1), width .22s cubic-bezier(.2,0,0,1);
+  z-index:71;display:flex;overflow:hidden;
   border-left:1px solid rgba(255,255,255,.7);
   background:linear-gradient(168deg,rgba(250,252,253,.92) 0%,rgba(232,238,241,.90) 100%);
   -webkit-backdrop-filter:saturate(1.7) blur(26px); backdrop-filter:saturate(1.7) blur(26px);
@@ -880,6 +898,95 @@ dialog::backdrop{background:rgba(30,40,45,.34); backdrop-filter:blur(3px)}
     -24px 0 60px -20px rgba(27,39,43,.35);
 }
 .drawer.on{transform:none}
+/* 左栏（详情 + 对话）：窄抽屉时独占整个宽度 */
+.dr-pane{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+
+/* ---------- 文档预览：右侧展开栏 ----------
+   .doc-on 时期望宽度 `--dr-wide-w`（JS 按视口算，见 drDocOpen）。
+   宽度来源只有一处：.drawer.doc-on{width:...}，左栏固定 var(--dr-pane-w)。
+   视口窄于 1080 时不并排，改由 .dr-doc 铺满整条抽屉（JS 切 .doc-full）。 */
+.drawer.doc-on{width:min(var(--dr-wide-w,1180px),96vw)}
+.drawer.doc-on .dr-pane{flex:0 0 auto;width:var(--dr-pane-w,460px)}
+.drawer.doc-on .dr-split{display:block}
+.drawer.doc-on .dr-doc{display:flex}
+.drawer.doc-full .dr-pane{display:none}
+.drawer.doc-full .dr-split{display:none}
+
+.dr-split{
+  display:none;flex:0 0 auto;width:11px;cursor:col-resize;
+  background:transparent;position:relative;z-index:1;
+}
+.dr-split::before{
+  content:"";position:absolute;top:0;bottom:0;left:5px;width:1px;
+  background:rgba(120,136,142,.24);
+}
+.dr-split:hover::before,.dr-split.hot::before{background:var(--orange);width:2px;left:4px}
+
+/* 文档预览是内容层：必须不透明，字压在上面不能随滚动抖 */
+.dr-doc{
+  display:none;flex:1 1 auto;min-width:0;flex-direction:column;overflow:hidden;
+  background:var(--ctl-inset);
+}
+.dr-doc-h{
+  flex:0 0 auto;display:flex;align-items:center;gap:7px;
+  padding:9px 12px 9px 14px;border-bottom:1px solid rgba(120,136,142,.20);
+  background:linear-gradient(180deg,rgba(255,255,255,.72),rgba(255,255,255,.22));
+  box-shadow:inset 0 -1px 0 rgba(255,255,255,.6);
+}
+.dr-doc-tabs{flex:1;min-width:0;display:flex;gap:4px}
+/* 只写差量：材质见「按钮」总则 */
+.doc-tab{font-size:11px;padding:4px 10px;border-radius:8px}
+.doc-tab.on{
+  color:var(--accent-text);font-weight:650;
+  border-color:var(--danger-edge);background:var(--orange-soft);
+}
+.dr-doc-b{
+  flex:1;min-height:0;overflow:auto;padding:18px 24px 40px;
+  font-size:13px;line-height:1.85;color:var(--text-1);
+}
+.dr-doc-b:empty:before{
+  content:"还没有需求说明。左边点「生成需求」。";
+  color:var(--text-4);font:11px var(--font-mono);
+}
+
+/* 宽版 markdown：给预览栏用，字号比抽屉里的小卡片大一档 */
+.doc-md h2{font-size:14px;font-weight:800;margin:22px 0 8px;letter-spacing:-.1px}
+.doc-md h2:first-child{margin-top:0}
+.doc-md h3{font-size:13px;font-weight:750;margin:16px 0 6px}
+.doc-md h4{font-size:12.5px;font-weight:750;margin:13px 0 5px}
+.doc-md p{margin:8px 0}
+.doc-md ul,.doc-md ol{margin:8px 0;padding-left:22px}
+.doc-md li{margin:4px 0}
+.doc-md li::marker{color:var(--text-3)}
+.doc-md b{font-weight:750}
+.doc-md code{
+  background:var(--silver-00);border:1px solid var(--hair);padding:1px 5px;
+  border-radius:5px;font:12px var(--font-mono);color:var(--text-2);
+}
+.doc-md pre{
+  margin:10px 0;padding:10px 12px;overflow:auto;
+  background:var(--silver-00);border:1px solid var(--hair);border-radius:var(--radius-sm);
+}
+.doc-md pre code{background:none;border:0;padding:0;font-size:11.5px;line-height:1.65}
+.doc-md hr{border:0;border-top:1px solid var(--hair);margin:18px 0}
+.doc-md blockquote{
+  margin:10px 0;padding:2px 0 2px 12px;border-left:3px solid var(--line);
+  color:var(--text-2);
+}
+.doc-md a{color:var(--orange);text-decoration:none;border-bottom:1px solid rgba(250,70,22,.32)}
+.doc-md a:hover{color:var(--accent-text);border-bottom-color:var(--danger-edge)}
+/* 表格：验收标准这类对照内容就是要能对齐看 */
+.doc-md table{
+  width:100%;margin:12px 0;border-collapse:collapse;font-size:12.5px;
+  border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;
+}
+/* 用 tr > * 写单元格公共底，th 只写表头差量 —— 同一个选择器写两遍会被 audit 拦 */
+.doc-md tr > *{
+  padding:7px 10px;text-align:left;vertical-align:top;
+  border-bottom:1px solid var(--hair);
+}
+.doc-md th{background:var(--silver-00);font-weight:750;color:var(--text-1);font-size:11.5px;letter-spacing:.2px}
+.doc-md tr:last-child td{border-bottom:none}
 .dr-head{
   flex:0 0 auto;padding:15px 16px 12px;
   display:flex;align-items:flex-start;gap:9px;
@@ -906,6 +1013,12 @@ dialog::backdrop{background:rgba(30,40,45,.34); backdrop-filter:blur(3px)}
   padding:11px 16px 13px;display:flex;flex-direction:column;gap:8px;
 }
 .dr-detail:empty{display:none}
+/* 这条是「内容看不全」的真凶，不是多余的保险：
+   .dr-detail 是 column flex 容器，.sect 作为子项默认 flex-shrink:1，
+   会被压进容器高度以内，再被自己的 overflow:hidden 裁掉 ——
+   scrollHeight 永远等于 clientHeight，滚动条不出现、滚轮也转不动。
+   实测：946px 的需求只剩 281px 可见，剩下的静默消失。 */
+.dr-detail > .sect{flex:0 0 auto}
 .sect{
   border:1px solid rgba(120,136,142,.24);border-radius:12px;overflow:hidden;
   background:#fff;box-shadow:0 1px 2px rgba(40,58,66,.04);
@@ -1345,25 +1458,40 @@ body.solo #collapseBtn{display:none}
 
 <div class="drawer-mask" id="drMask"></div>
 <aside class="drawer" id="drawer">
-  <div class="dr-head">
-    <div class="ttl">
-      <b id="drTitle"></b>
-      <div class="dr-meta" id="drMeta"></div>
+  <div class="dr-pane">
+    <div class="dr-head">
+      <div class="ttl">
+        <b id="drTitle"></b>
+        <div class="dr-meta" id="drMeta"></div>
+      </div>
+      <button class="icon-btn" id="drDelete" title="删除这条任务">删</button>
+      <button class="icon-btn" id="drClose" title="关闭">✕</button>
     </div>
-    <button class="icon-btn" id="drDelete" title="删除这条任务">删</button>
-    <button class="icon-btn" id="drClose" title="关闭">✕</button>
-  </div>
-  <div class="dr-fields" id="drFields"></div>
-  <div class="dr-detail" id="drDetail"></div>
-  <div class="dr-body" id="drBody"></div>
-  <div class="dr-foot">
-    <textarea id="drInput" rows="1" placeholder="说点什么：改优先级、换项目、讨论方案…"></textarea>
-    <div class="dr-row">
-      <span class="hint">Enter 发送 · Shift+Enter 换行</span>
-      <button id="drClear" title="清空对话">清空</button>
-      <button class="primary" id="drSend">发送</button>
+    <div class="dr-fields" id="drFields"></div>
+    <div class="dr-detail" id="drDetail"></div>
+    <div class="dr-body" id="drBody"></div>
+    <div class="dr-foot">
+      <textarea id="drInput" rows="1" placeholder="说点什么：改优先级、换项目、讨论方案…"></textarea>
+      <div class="dr-row">
+        <span class="hint">Enter 发送 · Shift+Enter 换行</span>
+        <button id="drClear" title="清空对话">清空</button>
+        <button class="primary" id="drSend">发送</button>
+      </div>
     </div>
   </div>
+  <div class="dr-split" id="drSplit" role="separator" aria-orientation="vertical"
+       aria-label="拖动调整文档宽度"></div>
+  <section class="dr-doc" id="drDoc" aria-label="文档预览">
+    <div class="dr-doc-h">
+      <div class="dr-doc-tabs" id="drDocTabs">
+        <button type="button" class="doc-tab on" data-doc="brief">需求说明</button>
+        <button type="button" class="doc-tab" data-doc="raw">原始描述</button>
+      </div>
+      <button class="mini-btn" id="drDocCopy">复制</button>
+      <button class="icon-btn" id="drDocClose" title="收起预览">✕</button>
+    </div>
+    <div class="dr-doc-b" id="drDocBody"></div>
+  </section>
 </aside>
 
 <div id="lightbox"><img alt=""></div>
@@ -2192,6 +2320,7 @@ function drOpen(id){
 
 function drClose(){
   drTaskId = null;
+  drDocClose();               // 预览栏的宽度状态不能跟着留下来，下次打开会莫名其妙变宽
   $('#drMask').classList.remove('on');
   $('#drawer').classList.remove('on');
 }
@@ -2205,28 +2334,204 @@ async function drLoad(){
     drRenderHead(t);
     drRenderDetail(t);
     drRenderThread(r.messages || []);
+    drDocRender();          // 预览栏开着就跟着换文档；关着时这里是空操作
   } catch (e) {
     body.innerHTML = '<div class="dr-empty">读不到任务：' + esc(e.message) + '</div>';
   }
 }
 
-// 极简 markdown：只处理标题、列表、粗体、行内代码。够用了。
+/* ---------------- 文档预览栏 ----------------
+   为什么要有：抽屉里那块 44vh 的详情区，一条需求只能露出三分之一。
+   这里给一份占满高度的阅读窗，左栏留着改字段和对话。
+
+   宽度只有一个来源：--dr-pane-w（左栏）。整条抽屉 = 左栏 + 分隔条 + 预览，
+   所以改左栏宽度就等于改预览宽度，不需要第二个变量跟着同步。 */
+
+const LS_DRW = 'ti.drPaneW';
+let drDocMode = 'brief';        // brief | raw
+let docDrag = null;
+
+function drDocPaneW(){
+  const v = Number(localStorage.getItem(LS_DRW));
+  return Number.isFinite(v) && v >= 360 ? v : 460;
+}
+
+/* 视口太窄就不并排了：两栏各剩不到 400，左右都难受。
+   这时让预览铺满整条抽屉（.doc-full），左栏暂时收起。 */
+function drDocFit(){
+  const el = $('#drawer');
+  if (!el?.classList.contains('doc-on')) return;
+  const vw = window.innerWidth;
+  const full = vw < 1080;
+  el.classList.toggle('doc-full', full);
+  if (full) return;
+  const total = Math.min(1180, vw - 24);
+  const pane = Math.min(drDocPaneW(), Math.max(360, total - 380));
+  el.style.setProperty('--dr-wide-w', total + 'px');
+  el.style.setProperty('--dr-pane-w', pane + 'px');
+}
+
+function drDocOpen(mode){
+  drDocMode = mode || 'brief';
+  const el = $('#drawer');
+  if (!el) return;
+  el.classList.add('doc-on');
+  drDocFit();
+  drDocSyncTabs();
+  drDocRender();
+}
+
+function drDocClose(){
+  const el = $('#drawer');
+  if (!el) return;
+  el.classList.remove('doc-on', 'doc-full');
+  el.style.removeProperty('--dr-wide-w');
+  el.style.removeProperty('--dr-pane-w');
+}
+
+function drDocSyncTabs(){
+  $('#drDocTabs')?.querySelectorAll('.doc-tab').forEach(b => {
+    b.classList.toggle('on', b.dataset.doc === drDocMode);
+  });
+}
+
+function drDocSource(t){
+  const task = t || drTask;
+  if (!task) return '';
+  if (drDocMode === 'raw') {
+    const parts = [];
+    if (task.payload?.text) parts.push(String(task.payload.text));
+    if (task.payload?.urls?.length) parts.push('链接：\n' + task.payload.urls.join('\n'));
+    return parts.join('\n\n');
+  }
+  return String(task.brief || '');
+}
+
+function drDocRender(){
+  const host = $('#drDocBody');
+  if (!host || !$('#drawer')?.classList.contains('doc-on')) return;
+  const src = drDocSource();
+  host.innerHTML = src ? '<div class="doc-md">' + mdToHtml(src) + '</div>' : '';
+  host.scrollTop = 0;
+}
+
+$('#drDocClose')?.addEventListener('click', drDocClose);
+$('#drDocTabs')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.doc-tab');
+  if (!btn) return;
+  drDocMode = btn.dataset.doc;
+  drDocSyncTabs();
+  drDocRender();
+});
+$('#drDocCopy')?.addEventListener('click', async () => {
+  const src = drDocSource();
+  if (!src) { toast('没有内容可复制'); return; }
+  try {
+    await navigator.clipboard.writeText(src);
+    toast('已复制 markdown 原文');
+  } catch {
+    toast('复制失败：浏览器不给剪贴板权限');
+  }
+});
+
+/* 拖动分隔条。宽度在 pointermove 里就写进 --dr-pane-w：
+   等到 pointerup 才算的话，整个拖动过程没有反馈，像卡住了。 */
+$('#drSplit')?.addEventListener('pointerdown', (e) => {
+  const el = $('#drawer');
+  if (!el?.classList.contains('doc-on') || el.classList.contains('doc-full')) return;
+  docDrag = { left: el.getBoundingClientRect().left, max: el.getBoundingClientRect().width - 340 };
+  e.target.setPointerCapture?.(e.pointerId);
+  e.target.classList.add('hot');
+  e.preventDefault();
+});
+
+$('#drSplit')?.addEventListener('pointermove', (e) => {
+  if (!docDrag) return;
+  const w = Math.max(360, Math.min(docDrag.max, e.clientX - docDrag.left));
+  $('#drawer').style.setProperty('--dr-pane-w', Math.round(w) + 'px');
+});
+
+$('#drSplit')?.addEventListener('pointerup', (e) => {
+  if (!docDrag) return;
+  docDrag = null;
+  e.target.classList.remove('hot');
+  const w = parseInt(getComputedStyle($('#drawer')).getPropertyValue('--dr-pane-w'), 10);
+  if (Number.isFinite(w)) localStorage.setItem(LS_DRW, String(w));
+  drDocFit();
+});
+
+$('#drSplit')?.addEventListener('pointercancel', () => {
+  docDrag = null;
+  $('#drSplit').classList.remove('hot');
+});
+
+window.addEventListener('resize', drDocFit);
+
+// markdown：标题 / 列表 / 粗体 / 行内代码 / 链接 / 引用 / 分隔线 / 围栏代码 / 表格。
+// 不引第三方库 —— 这个页面要能单文件双击打开，加一条 npm 依赖就多一条故障线。
+// 安全前提：所有文本先 esc() 再过行内替换，标签是这里拼出来的，不是透传的。
 function mdToHtml(src){
-  const esc2 = (x) => esc(x);
   const lines = String(src || '').split('\n');
   const out = [];
-  let inList = null;
+  let inList = null;     // 'ul' | 'ol'
+  let fence = null;      // 围栏代码正在收集的行
+  let quote = null;      // 引用块正在收集的行
 
   const closeList = () => { if (inList) { out.push('</' + inList + '>'); inList = null; } };
+  // 逐行 inline 再用裸 <br> 拼：先 join 再 inline 的话，<br> 自己会被 esc 成 &lt;br&gt;
+  const closeQuote = () => {
+    if (quote) { out.push('<blockquote>' + quote.map(l => inline(l)).join('<br>') + '</blockquote>'); quote = null; }
+  };
+  const closeAll = () => { closeList(); closeQuote(); };
 
-  for (const raw of lines) {
-    const line = raw.replace(/\s+$/, '');
-    if (!line.trim()) { closeList(); continue; }
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].replace(/\s+$/, '');
+
+    // 围栏代码：里面的东西一律原样，不解析
+    const f = line.match(/^\s*```\s*([\w+-]*)\s*$/);
+    if (f) {
+      if (fence === null) { closeAll(); fence = []; }
+      else {
+        out.push('<pre><code>' + esc(fence.join('\n')) + '</code></pre>');
+        fence = null;
+      }
+      continue;
+    }
+    if (fence !== null) { fence.push(lines[i]); continue; }
+
+    if (!line.trim()) { closeAll(); continue; }
+
+    // 分隔线
+    if (/^\s*([-*_])\s*\1\s*\1[\s\-*_]*$/.test(line)) { closeAll(); out.push('<hr>'); continue; }
+
+    // 表格：当前行是 |...| 且下一行是分隔行，就把连续的 | 行一起吃掉
+    if (/^\s*\|/.test(line) && /^\s*\|?[\s:-]*-[\s:|-]*\|/.test(lines[i + 1] || '')) {
+      closeAll();
+      const cells = (r) => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+      const head = cells(line);
+      i++;                                    // 跳过分隔行
+      const body = [];
+      while (i + 1 < lines.length && /^\s*\|/.test(lines[i + 1])) { i++; body.push(cells(lines[i])); }
+      out.push('<table><thead><tr>' + head.map(c => '<th>' + inline(c) + '</th>').join('') + '</tr></thead>'
+        + (body.length ? '<tbody>' + body.map(r =>
+            '<tr>' + head.map((_, k) => '<td>' + inline(r[k] || '') + '</td>').join('') + '</tr>').join('') + '</tbody>' : '')
+        + '</table>');
+      continue;
+    }
 
     const h = line.match(/^(#{1,4})\s+(.*)$/);
-    if (h) { closeList(); const lv = Math.min(h[1].length + 1, 4); out.push('<h' + lv + '>' + esc2(h[2]) + '</h' + lv + '>'); continue; }
+    if (h) { closeAll(); const lv = Math.min(h[1].length + 1, 4); out.push('<h' + lv + '>' + inline(h[2]) + '</h' + lv + '>'); continue; }
 
-    const ul = line.match(/^\s*[-*]\s+(.*)$/);
+    const q = line.match(/^\s*>\s?(.*)$/);
+    if (q) {
+      closeList();
+      if (!quote) quote = [];
+      quote.push(q[1]);
+      continue;
+    }
+    closeQuote();
+
+    const ul = line.match(/^\s*[-*+]\s+(.*)$/);
     if (ul) {
       if (inList !== 'ul') { closeList(); out.push('<ul>'); inList = 'ul'; }
       out.push('<li>' + inline(ul[1]) + '</li>'); continue;
@@ -2238,16 +2543,26 @@ function mdToHtml(src){
       out.push('<li>' + inline(ol[1]) + '</li>'); continue;
     }
 
-    closeList();
+    closeAll();
     out.push('<p>' + inline(line) + '</p>');
   }
-  closeList();
+  if (fence !== null) out.push('<pre><code>' + esc(fence.join('\n')) + '</code></pre>');
+  closeAll();
   return out.join('');
 
   function inline(x){
-    return esc2(x)
+    // 链接先抽出 href，避免 esc 之后 & 变成 &amp; 拼进地址。
+    // 只放行 http/https 和站内相对路径：javascript: 之类一律当普通文字。
+    const parts = [];
+    let s = esc(x).replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, href) => {
+      if (!/^(https?:\/\/|\/)/i.test(href)) return m;
+      parts.push('<a href="' + href + '" target="_blank" rel="noopener">' + label + '</a>');
+      return '\u0000' + (parts.length - 1) + '\u0000';
+    });
+    s = s
       .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
-      .replace(/`(.+?)`/g, '<code>$1</code>');
+      .replace(/`([^`]+?)`/g, '<code>$1</code>');
+    return s.replace(/\u0000(\d+)\u0000/g, (m, n) => parts[Number(n)] || '');
   }
 }
 
@@ -2283,8 +2598,9 @@ function buildSections(t){
   secs.push({
     key: 'brief',
     title: '整理后的需求',
-    action: '<button class="mini-btn" data-brief="1">' +
-      (t.brief ? '重新生成' : '生成需求') + '</button>',
+    action: (t.brief ? '<button class="mini-btn" data-doc-open="1">展开</button>' : '')
+      + '<button class="mini-btn" data-brief="1">'
+      + (t.brief ? '重新生成' : '生成需求') + '</button>',
     body: t.brief
       ? '<div class="md">' + mdToHtml(t.brief) + '</div>'
       : '<span style="color:var(--text-3)">还没有整理。点右上角生成一份能直接派给 agent 的需求说明。</span>'
@@ -2315,10 +2631,14 @@ function drRenderDetail(t){
   // 折叠
   host.querySelectorAll('.sect-h').forEach(h => {
     h.addEventListener('click', (e) => {
-      if (e.target.closest('[data-brief]')) return;
+      if (e.target.closest('[data-brief]') || e.target.closest('[data-doc-open]')) return;
       h.parentElement.classList.toggle('open');
     });
   });
+
+  // 展开到右侧预览栏
+  const openBtn = host.querySelector('[data-doc-open]');
+  if (openBtn) openBtn.addEventListener('click', (e) => { e.stopPropagation(); drDocOpen('brief'); });
 
   // 生成 / 重新生成
   const btn = host.querySelector('[data-brief]');
@@ -2334,6 +2654,7 @@ function drRenderDetail(t){
         drTask.brief = r.brief;
         drTask.brief_at = r.brief_at;
         drRenderDetail(drTask);
+        drDocRender();      // 预览栏开着的时候跟着刷新，别让两边说的不是一份
         host.querySelector('.sect[data-k="brief"]').classList.add('open');
         toast('需求已整理');
       } catch (err) {
@@ -2356,6 +2677,16 @@ function drRenderHead(t){
   if (t.category) tags.push('<span class="tag cat">' + esc(t.category) + '</span>');
   // 状态用中文，别把 todo / doing 原样丢给用户看
   tags.push('<span class="tag">' + esc(STATUS_LABEL[t.status] || t.status) + '</span>');
+
+  // 分类失败 / 卡住时给一个重判入口。以前这里什么都没有，
+  // 判失败就只能删了重记 —— 而卡片上的「未判断」徽章又不可点。
+  if (t.classify_state === 'failed' || t.classify_state === 'pending') {
+    // 只挂 tag-retry，不挂 .tag —— .tag 是纯展示用的，混进按钮会让
+    // 「按钮材质总则」那个检查把 .tag 也当成按钮
+    tags.push('<button type="button" class="tag-retry" data-reclassify="1"'
+      + ' title="' + esc(t.classify_reason || '') + '">'
+      + (t.classify_state === 'pending' ? '判断中…' : '未判断 · 重试') + '</button>');
+  }
   $('#drMeta').innerHTML = tags.join('');
 
   // 快速改字段
@@ -2376,10 +2707,39 @@ function drRenderHead(t){
 
   // 这三个是动态插进来的，得再包一次自定义下拉（buildSels 幂等，不会重复包）
   buildSels();
+  // buildSels 只负责"套壳"，不回填显示值 —— 不调 selSync 三个下拉就都是空白，
+  // 得等用户随便碰一个下拉（pickSel → selSync）才一起亮起来。
+  selSync();
 
   $('#drPri').onchange = () => drQuick({ priority: $('#drPri').value });
   $('#drProj').onchange = () => drQuick({ project: $('#drProj').value });
   $('#drStatus').onchange = () => drQuick({ status: $('#drStatus').value });
+
+  // 「未判断 · 重试」按钮
+  const retry = $('#drMeta [data-reclassify]');
+  if (retry) {
+    retry.addEventListener('click', async () => {
+      retry.disabled = true;
+      retry.textContent = '提交中…';
+      try {
+        const r = await api('POST', '/api/tasks/' + encodeURIComponent(t.id) + '/reclassify');
+        if (r.queued === false) {
+          toast('已经在判断了，稍等');
+          await drLoad();
+          return;
+        }
+        // 后端改成 pending 是异步的，轮询会把它带回来；这里主动刷一下先显示「判断中…」
+        await drLoad();
+        toast('已重新提交判断');
+        // 等着看结果，完成或失败都会自己刷新
+        watchClassify(t.id).then(() => { if (drTaskId === t.id) drLoad(); });
+      } catch (e) {
+        toast('提交失败：' + e.message);
+        retry.disabled = false;
+        retry.textContent = '未判断 · 重试';
+      }
+    });
+  }
 }
 
 async function drQuick(patch){
@@ -2789,6 +3149,9 @@ document.addEventListener('keydown', e => {
 
   if (e.key === 'Escape') {
     $('#lightbox').classList.remove('on');
+    if (docDrag) { docDrag = null; $('#drSplit')?.classList.remove('hot'); return; }
+    // 一层一层退：先收预览栏，再关抽屉
+    if ($('#drawer')?.classList.contains('doc-on')) { drDocClose(); return; }
     if ($('#drawer')?.classList.contains('on')) drClose();
     return;
   }

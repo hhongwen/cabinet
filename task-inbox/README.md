@@ -81,7 +81,7 @@ Linux 没专门适配，但选文件夹会**自动降级**到页面里逐层点�
 | 按 `n` | 聚焦底栏 |
 | 按 `,` | 打开设置 |
 | 按 `[` | 收起 / 展开底栏 |
-| 按 `Esc` | 关抽屉 / 关放大图 |
+| 按 `Esc` | 先收右侧文档预览 → 再关抽屉 → 关放大图（一层一层退） |
 
 ---
 
@@ -198,6 +198,19 @@ node cli.mjs backup [文件]            热备份成 .db（服务在跑也能备
 
 原文没提的关键信息（指标、截止时间、具体模块）会写进「待确认」提问，
 **不会自己拍板**。生成过一次就缓存，点「重新生成」才覆盖。
+
+### 文档预览（右侧展开）
+
+抽屉里那块详情区最高只有 44vh，一条需求常常只露出三分之一。
+需求卡片上的「展开」会把抽屉拉宽成左右两栏：左边照旧改字段、对话，
+右边一整条高度都是文档。
+
+- 两栏之间那条线可以拖，宽度记在 `localStorage`（`ti.drPaneW`）
+- 「需求说明 / 原始描述」两个页签，外加一个「复制」拿 markdown 原文
+- 窗口窄于 1080px 时不分栏，预览直接铺满抽屉 —— 各剩 400 宽谁都读不下去
+- markdown 支持标题 / 列表 / 粗体 / 行内代码 / 链接 / 引用 / 分隔线 /
+  围栏代码 / 表格。**没有引第三方库**，全部在 `board.html` 的 `mdToHtml()` 里，
+  约 90 行；文本一律先 `esc()` 再拼标签，链接只放行 `http(s)://` 和 `/`
 
 ---
 
@@ -381,16 +394,18 @@ node style-audit.mjs
 | 每 3 秒全量轮询，后台也拉 | 隐藏时不轮询；轮询带 `?since=`，库没变只回 150 字节且不重绘（401 条时省 99.9%） |
 | 首屏失败只插一行红字 | 有「重试」按钮 |
 | 没有备份 / 导出 | `node cli.mjs export` 导出 tasks.json 形状 / `backup` 用 VACUUM INTO 热备 |
-| classify / chat 没有测试 | `node test-parsers.mjs`，57 项，假 backend 覆盖畸形输出和 patch 白名单 |
+| classify / chat 没有测试 | `node test-parsers.mjs`，65 项，假 backend 覆盖畸形输出、patch 白名单、队列与路由 |
+| 分类失败后完全没救（点都没得点） | 抽屉里有「未判断 · 重试」；PATCH 也不再能写 `classify_*` 造出卡死态 |
+| 分类排队用 `setInterval` 空转 | 显式等待队列；`/api/backend` 带 `queue:{running,waiting}` 水位 |
 
-**还留着的（P2）**：没有搜索、分页、分类失败不重试、桌面快捷方式没装。
+**还留着的只有两条，且都要等规模上来**：搜索、分页（任务过 100 条再做）。
 详见 [ISSUES.md](ISSUES.md)。
 
 ### 测试
 
 ```bash
 node test-sqlite.mjs    # 存储层，100 项
-node test-parsers.mjs   # classify / chat 的解析层，57 项，不碰真模型
+node test-parsers.mjs   # classify / chat 解析层 + 队列路由，65 项，不碰真模型
 node style-audit.mjs    # 界面样式规范
 ```
 
