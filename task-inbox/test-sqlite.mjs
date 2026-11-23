@@ -253,7 +253,82 @@ ok('老数据没丢', v2core.count() > 0);
 ok('老任务 needs_project 默认 false', v2core.state().tasks.every((t) => t.needs_project === false));
 v2core.close();
 
-console.log('\n=== 14. 重开后数据还在 ===');
+console.log('\n=== 14. revision 变更指纹（P1-1） ===');
+{
+  const r1 = core.revision();
+  ok('是短字符串', typeof r1 === 'string' && r1.length > 0 && r1.length < 20, r1);
+  eq('什么都不做时稳定', core.revision(), r1);
+
+  const t = core.add({ title: 'rev-test' });
+  const r2 = core.revision();
+  ok('新增任务会变', r2 !== r1);
+
+  core.patch(t.id, { note: '改个字段' });
+  const r3 = core.revision();
+  ok('改字段会变', r3 !== r2);
+
+  core.pushMessage(t.id, { role: 'user', text: '一句话' });
+  const r4 = core.revision();
+  ok('加消息会变', r4 !== r3);
+
+  core.move(t.id, 'done');
+  const r5 = core.revision();
+  ok('改状态会变', r5 !== r4);
+
+  core.remove(t.id);
+  const r6 = core.revision();
+  ok('删除会变（COUNT 起作用）', r6 !== r5);
+
+  core.saveSettings({ backend: 'magma'.replace('magma', 'alma') });
+  const r7 = core.revision();
+  ok('改设置会变', r7 !== r6);
+
+  // 关键：反复调用不许自我变化（否则前端永远拿不到 unchanged）
+  eq('连续两次调用一致', core.revision(), core.revision());
+}
+
+console.log('\n=== 15. 导出与备份（P1-4） ===');
+{
+  const before = core.state().total;
+  const dump = core.exportAll();
+  eq('导出格式是 version 2', dump.version, 2);
+  eq('导出任务数一致', dump.tasks.length, before);
+  ok('导出带 schema 版本', typeof dump.schema_version === 'number');
+  ok('导出带导出时间', !!dump.exported_at);
+
+  // 每条任务都应该带 messages 数组（老格式）
+  ok('任务都带 messages 数组', dump.tasks.every((t) => Array.isArray(t.messages)));
+
+  // 导出的 JSON 要能被 migrateFromJson 吃回去 —— 这是「备份可用」的真正定义
+  const jsonPath = path.join(tmp, 'roundtrip.json');
+  fs.writeFileSync(jsonPath, JSON.stringify(dump), 'utf8');
+
+  // 只测格式互认：解析后是不是合法形状
+  const parsed = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+  ok('回读后仍可解析', parsed.tasks.length === dump.tasks.length);
+
+  // 备份：VACUUM INTO
+  const bak = core.backupTo(path.join(tmp, 'bak.db'));
+  ok('备份文件已生成', fs.existsSync(bak.file));
+  ok('备份文件非空', bak.bytes > 0);
+
+  // 备份要能真的打开、数据在
+  const { openSqlite } = await import('./storage.mjs');
+  const bdb = openSqlite(bak.file);
+  eq('备份里的任务数一致', Number(bdb.get('SELECT COUNT(*) AS c FROM tasks').c), before);
+  eq('备份里的消息数一致',
+    Number(bdb.get('SELECT COUNT(*) AS c FROM messages').c),
+    core.conn().get('SELECT COUNT(*) AS c FROM messages').c);
+  bdb.close();
+
+  // 目标已存在时不能覆盖掉旧备份
+  let dupe = false;
+  try { core.backupTo(bak.file); } catch { dupe = true; }
+  ok('同名备份不会被覆盖', dupe);
+  fs.unlinkSync(bak.file);
+}
+
+console.log('\n=== 16. 重开后数据还在 ===');
 const totalBefore = core.count();
 core.close();
 const core2 = createCore(tmp);

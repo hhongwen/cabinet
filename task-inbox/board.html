@@ -1950,11 +1950,22 @@ async function api(method, url, body){
   return data;
 }
 
-async function refresh(){
-  store = await api('GET', '/api/state');
+// 轮询带 since=上次的 revision。库里没变时后端只回几十字节，
+// 前端直接跳过 —— 不做 syncFilters/render，滚动位置也就不会被重置。
+async function refresh(opts){
+  const since = opts && opts.poll ? store.revision : null;
+  const url = '/api/state' + (since ? '?since=' + encodeURIComponent(since) : '');
+  const next = await api('GET', url);
+  if (next.unchanged) {
+    // 库没变，但 build 信息可能变了（比如磁盘代码被改了）——顺手更新一下
+    if (next.build) store.build = next.build;
+    return false;
+  }
+  store = next;
   syncFilters();
   syncFilterUI();
   render();
+  return true;
 }
 
 function syncFilters(){
@@ -2850,12 +2861,14 @@ function startPolling(){
   if (pollTimer) return;
   pollTimer = setInterval(() => {
     if (document.hidden) return;
-    refresh().then(() => {
+    refresh({ poll: true }).then(() => {
       if (store.build?.stale) showStaleBar(store.build);
     }).catch(() => {});
   }, POLL_MS);
 }
 
+// 切回前台不能拿 since：后台这段时间库里可能变过，但轮询没跑，
+// 手上的 revision 是旧的。用 since 会走到 unchanged 分支，看板停在上次的样子。
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   refresh().then(() => {

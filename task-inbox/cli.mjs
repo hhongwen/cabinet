@@ -9,9 +9,15 @@
 //   node cli.mjs done <id>          标完成
 //   node cli.mjs ls --json          给程序看的输出
 
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createCore, PRIORITY_LABEL, KIND_LABEL } from './core.mjs';
+
+// 文件名用的时间戳：2026-11-23T10-59-00
+function stamp() {
+  return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+}
 
 const DATA_DIR = process.env.TASK_INBOX_DATA || path.join(os.homedir(), '.config', 'alma', 'task-inbox');
 const core = createCore(DATA_DIR);
@@ -121,6 +127,28 @@ try {
     process.exit(0);
   }
 
+  if (cmd === 'export') {
+    // 整库导成 tasks.json 形状，给迁移/审阅/自己 diff 用
+    const target = args()[0] || path.join(DATA_DIR, 'export-' + stamp() + '.json');
+    const data = core.exportAll();
+    fs.writeFileSync(target, JSON.stringify(data, null, 2), 'utf8');
+    const bytes = fs.statSync(target).size;
+    console.log('已导出: ' + target);
+    console.log('  ' + data.tasks.length + ' 个任务 / ' + data.projects.length + ' 个项目 / '
+      + data.tasks.reduce((n, t) => n + (t.messages || []).length, 0) + ' 条消息'
+      + '（' + (bytes / 1024).toFixed(1) + 'KB）');
+    process.exit(0);
+  }
+
+  if (cmd === 'backup' || cmd === 'bak') {
+    // VACUUM INTO：SQLite 原生热备，服务在跑也能备份，不用停
+    const target = args()[0] || path.join(DATA_DIR, 'backup-' + stamp() + '.db');
+    const r = core.backupTo(target);
+    console.log('已备份: ' + r.file);
+    console.log('  大小: ' + (r.bytes / 1024).toFixed(1) + 'KB');
+    process.exit(0);
+  }
+
   if (cmd === 'init') {
     // 建库建表；目录里如果有老的 tasks.json，顺手迁进来
     const r = core.init();
@@ -144,6 +172,8 @@ try {
   done <id>                                      标完成
   rm <id>                                        删除
   init                                           初始化数据目录
+  export [文件]                                  导成 tasks.json（给迁移/审阅用）
+  backup [文件]                                  热备份成 .db（服务在跑也能备）
   open                                           打印看板地址
 
 数据: ${core.dbFile}`);

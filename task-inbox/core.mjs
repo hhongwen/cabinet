@@ -655,6 +655,35 @@ export function createCore(dataDir) {
     return Number(conn().get('SELECT COUNT(*) AS c FROM tasks')?.c || 0);
   }
 
+  // ---------- 变更指纹 ----------
+  //
+  // 轮询不该每次都把整个看板重传一遍。这里算一个「库里有没有变」的摘要。
+  //
+  // 试过两个方案，第一个是错的，记下来：
+  //   方案 A（错）：各表 COUNT + MAX(updated_at)。
+  //     漏掉两种情况 —— 改状态只动 status 列，updated_at 同毫秒内不变；
+  //     改 settings 那张表根本没有 updated_at 列。两个都实测漏判。
+  //   方案 B（现在这个）：
+  //     · total_changes() —— 本连接累计改了多少行，单调递增
+  //     · PRAGMA data_version —— 别的连接提交时会变（实测 2→3）
+  //     两者相加，本进程改的和别的进程改的都能看到，O(1) 不扫表。
+  //
+  // 代价是值本身不可读（不是「8 条任务」而是个哈希），但它只用来比是否相等，
+  // 不需要看懂。重启后 total_changes 归零 → 值变了 → 前端拉一次全量，正确。
+  function revision() {
+    const d = conn();
+    const chg = Number(d.get('SELECT total_changes() AS v')?.v || 0);
+    const dv = Number(d.get('PRAGMA data_version')?.data_version || 0);
+    const s = chg + ':' + dv;
+    // FNV-1a：短、稳定、不依赖 crypto
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h.toString(36);
+  }
+
   // ---------- 设置（放库里的 key/value 小表） ----------
 
   function loadSettings() {
@@ -691,6 +720,47 @@ export function createCore(dataDir) {
       }
     });
     return next;
+  }
+
+  // ---------- 导出 / 备份 ----------
+
+  /**
+   * 把整库导成老的 tasks.json 形状（version 2）。
+   * 这个格式正是 migrateFromJson 认识的，所以导出文件既是备份，
+   * 也是一个能原样倒回去的迁移包。
+   */
+  function exportAll() {
+    const d = conn();
+    const projects = d.all('SELECT * FROM projects ORDER BY created_at').map(rowToProject);
+    const tasks = d.all(TASK_SELECT + ' ORDER BY t.created_at').map((r) => {
+      const t = rowToTask(r);
+      // 老格式里没有 message_count 这个派生字段，messages 是实数组 —— 去干净点，
+      // 导出的文件才好跟历史 tasks.json 直接 diff
+      delete t.message_count;
+      t.messages = listMessages(t.id);
+      return t;
+    });
+    return {
+      version: 2,
+      exported_at: nowIso(),
+      schema_version: Number(d.get("SELECT value FROM meta WHERE key = 'schema_version'")?.value || 0),
+      projects,
+      tasks
+    };
+  }
+
+  /** 备份：优先用 SQLite 自带的 VACUUM INTO（WAL 下也安全，不用先停服务）。 */
+  function backupTo(target) {
+    const d = conn();
+    const file = target || path.join(
+      dataDir,
+      'backup-' + nowIso().replace(/[:.]/g, '-').slice(0, 19) + '.db'
+    );
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    // VACUUM INTO 要求目标不存在
+    if (fs.existsSync(file)) throw new Error('目标已存在：' + file);
+    d.run('VACUUM INTO ?', [file]);
+    return { file, bytes: fs.statSync(file).size };
   }
 
   // ---------- 附件（继续放文件系统，不进库） ----------
@@ -748,10 +818,11 @@ export function createCore(dataDir) {
     dataFile: dbFile,   // 兼容旧调用方的命名，指向的已经是 .db
     imagesDir, filesDir, settingsFile,
     conn, init, close,
-    add, getTask, patch, move, remove, list, state, count,
+    add, getTask, patch, move, remove, list, state, count, revision,
     pushMessage, listMessages, recentMessages, clearMessages, setBrief,
     listProjects, getProject, addProject, updateProject, deleteProject, findProject, ensureProject,
     loadSettings, saveSettings,
+    exportAll, backupTo,
     saveImage, imagePath, saveFile, filePath
   };
 }

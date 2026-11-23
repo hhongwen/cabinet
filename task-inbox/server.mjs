@@ -439,11 +439,24 @@ export function createHandler(core, opts = {}) {
         return json(res, 200, { ok: true, tasks: n, ...buildInfo() });
       }
       if (p === '/api/state' && req.method === 'GET') {
+        const rev = core.revision();
+        const since = url.searchParams.get('since');
+        const build = buildInfo();
+
+        // 轮询时带上上次拿到的 revision：库里什么都没变就只回几十字节，
+        // 不重传整个看板（2000 条任务时那是 0.9MB）。
+        // 用 200 + unchanged 而不是 304：fetch 的 res.ok 对 304 是 false，
+        // 前端还得多写一个分支，省下的字节远不值得。
+        if (since && since === rev) {
+          return json(res, 200, { unchanged: true, revision: rev, build });
+        }
+
         const st = core.state();
         const cfg = core.loadSettings();
         st.settings = { backend: cfg.backend, model: cfg.model, classify: cfg.classify };
         if (queue && queue.classifier?.backend) st.backend = { name: queue.classifier.backend.name };
-        st.build = buildInfo();   // 前端靠这个判断「跑的是不是最新代码」
+        st.build = build;         // 前端靠这个判断「跑的是不是最新代码」
+        st.revision = rev;
         return json(res, 200, st);
       }
       if (p === '/api/backend' && req.method === 'GET') {
