@@ -27,12 +27,25 @@
 
 ## 快速开始
 
+**Windows**
+
 ```cmd
 cd task-inbox
 install.cmd
 ```
 
+**macOS**
+
+```bash
+cd task-inbox
+./install.command
+```
+
 装完点桌面快捷方式，或者直接开 http://127.0.0.1:46001/
+
+> 需要 Node 22.5+（用到内置 `node:sqlite`）。平台差异只在启动脚本和
+> 系统对话框上，核心代码两边跑的是同一份 —— 详见
+> [task-inbox/README.md 的跨平台章节](task-inbox/README.md#跨平台)。
 
 详细用法见 [task-inbox/README.md](task-inbox/README.md)。
 
@@ -41,7 +54,8 @@ install.cmd
 ```
 Cabinet/
   task-inbox/          ← 在用的东西
-    core.mjs           存储（纯 Node，不依赖任何宿主）
+    core.mjs           任务逻辑（纯 Node，不依赖任何宿主）
+    storage.mjs        SQLite 底层：驱动探测 + 建表 + 迁移
     server.mjs         HTTP 服务（可独立跑，也可作 Alma 插件）
     main.mjs           Alma 插件外壳
     classify.mjs       判类型 / 优先级 / 项目
@@ -51,7 +65,8 @@ Cabinet/
     browse.mjs         目录浏览
     board.html         全部界面（单文件）
     cli.mjs            命令行
-    *.cmd              安装、启动、开机自启
+    *.cmd              Windows：安装、启动、开机自启
+    *.command          macOS：安装、启动、开机自启
   archive/             旧版 Cabinet（已冻结，留作参考）
   ARCHIVED.md          为什么停、哪部分资产还活着
 ```
@@ -63,7 +78,7 @@ Cabinet/
 
 - `node server.mjs` 能单独跑，Alma 关了也不影响
 - 插件只是它的一个宿主，换掉 Alma 也不用改代码
-- 数据在 `~/.config/alma/task-inbox/tasks.json`，不属于任何应用
+- 数据在 `~/.config/alma/task-inbox/tasks.db`（SQLite，WAL），不属于任何应用
 
 ## 关于旧的 Cabinet
 

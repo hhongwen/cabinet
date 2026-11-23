@@ -9,31 +9,65 @@
 
 ## 一分钟装好
 
+**Windows**
+
 ```cmd
 install.cmd
+```
+
+**macOS**
+
+```bash
+./install.command     # 或在 Finder 里双击 install.command
 ```
 
 四件事：查 node、同步到 Alma 插件目录、通知热重载、等端口起来。
 
 想要桌面快捷方式和开机自启：
 
-```cmd
-mklinks.cmd     桌面放「随手记」「任务看板」
-autostart.cmd   开机自启独立服务（Alma 关了也能用）
-```
+| | Windows | macOS |
+|---|---|---|
+| 桌面快捷方式 | `mklinks.cmd` | `./mklinks.command` |
+| 开机自启 | `autostart.cmd` | `./autostart.command` |
+| 取消自启 | `autostart.cmd off` | `./autostart.command off` |
+
+mac 的开机自启走 launchd（`~/Library/LaunchAgents/com.cabinet.task-inbox.plist`），
+plist 里写的是 node 的绝对路径 —— launchd 的 PATH 很短，brew 装的 node 找不到。
+
+> **从 Windows 拷过来的仓库**：`.command` 文件必须是 LF 换行、带可执行位。
+> 仓库里已经有 `.gitattributes` 管换行，`install.command` 会补 `chmod`。
+> 如果是压缩包传过去的，先跑一次 `chmod +x *.command`。
 
 ## 怎么打开
 
-| 方式 | 命令 | 说明 |
+| 方式 | Windows | macOS |
 |---|---|---|
-| 整页 | `start.cmd` | 起服务 + 独立窗口（1280×900） |
-| 只开随手记 | `start.cmd quick` | 起服务 + 小窗（460×340），隐藏看板 |
-| 直接访问 | http://127.0.0.1:46001/ | 浏览器 |
-| 命令行 | `node cli.mjs ls` | 不开任何界面 |
+| 整页 | `start.cmd` | `./start.command` |
+| 只开随手记 | `start.cmd quick` | `./start.command quick` |
+| 直接访问 | http://127.0.0.1:46001/ | 同左 |
+| 命令行 | `node cli.mjs ls` | 同左 |
 
-`start.cmd` 先探端口，已经在跑就直接开窗。
+启动脚本都先探端口，已经在跑就直接开窗。
 
-**独立窗口**用 `chrome --app`（或 Edge），没有地址栏和标签页，Alt+Tab 直接切回。
+**独立窗口**用 `chrome --app`（或 Edge）。Windows 走 `window.cmd`，
+mac 走 `start.command` 里的 `open -na`，两者都是无地址栏无标签页的独立窗口。
+mac 上没有 Chromium 系浏览器就退回默认浏览器普通标签页 —— 功能不缺，只是没有独立窗口。
+
+## 跨平台
+
+核心逻辑（`core.mjs` / `server.mjs` / `classify.mjs` / `brief.mjs` / `chat.mjs` / `cli.mjs` / `board.html`）
+是纯 Node + 标准库，没有一处 import 宿主 API，Windows 和 macOS 跑的是同一份代码。
+平台差异只在三个地方，都做了分支：
+
+| 能力 | Windows | macOS |
+|---|---|---|
+| 选文件夹对话框 | `pickdir.ps1` + PowerShell | `osascript` 的 `choose folder` |
+| 浏览器独立窗口 | `window.cmd` + `chrome --app` | `start.command` + `open -na --args` |
+| 开机自启 | Startup 文件夹放 `.cmd` | launchd LaunchAgent |
+| CLI 兜底通道 | `%APPDATA%\npm` 下的 `.exe` / `.js` | `/opt/homebrew`、`/usr/local` 下的 `lib/node_modules` |
+
+Linux 没专门适配，但选文件夹会**自动降级**到页面里逐层点目录（`/api/browse`），
+其余部分理论上直接能跑。
 
 ### 界面操作
 
@@ -74,7 +108,7 @@ node cli.mjs init                     初始化数据目录
 ```
             随手记（Ctrl+V 贴图 / Enter 存下）
                       ↓
-对话里说一句 ────→  tasks.json  ────→  看板（拖拽换列）
+对话里说一句 ────→  tasks.db  ────→  看板（拖拽换列）
                       ↑                    ↑
                   CLI 命令            独立窗口 / 浏览器
 ```
@@ -184,11 +218,13 @@ node cli.mjs init                     初始化数据目录
 
 保存立刻生效，不用重启。
 
-设置存在 `~/.config/alma/task-inbox/settings.json`：
+设置存在 `tasks.db` 的 `settings` 表里（键值）：
 
 ```json
 { "backend": "auto", "model": "auto/deepseek-v4.1-flash", "classify": true }
 ```
+
+老版本存在 `settings.json`，首次建库时一并搬进 `settings` 表。
 
 ### 为什么优先 magpie
 
@@ -213,36 +249,31 @@ Task Inbox 要的是「问一句拿个 JSON」，属于**调模型**不是**派 
 
 ```
 ~/.config/alma/task-inbox/
-  tasks.json      ← 唯一真相
-  settings.json   ← 通道与模型
+  tasks.db        ← SQLite，唯一真相（WAL 模式）
+  tasks.json      ← 老版本遗留，首次建库时自动迁进来，之后不再读
   images/         ← 贴进来的图
   files/          ← 附件
 ```
 
 ⚠️ **不要**放到 `~/.config/alma/tasks/` —— 那是 Alma 自己的任务队列，
-写进去会被 Alma 覆盖，读回来永远是空。文件里带 `version` 字段做签名，
-形状不对会拒绝读写而不是默默覆盖。
+写进去会被 Alma 覆盖，读回来永远是空。
 
-```json
-{
-  "id": "t_xxx",
-  "title": "一句话说清要做什么",
-  "kind": "text | image | image_text | link | file | mixed",
-  "payload": { "text": null, "images": [], "files": [], "urls": [] },
-  "project": "默认",
-  "project_id": "p_xxx",
-  "category": "工作",
-  "status": "todo | doing | done",
-  "priority": "p0..p4",
-  "note": "",
-  "brief": "整理后的需求（markdown）",
-  "messages": [],
-  "claimed_by": null,
-  "classify_state": "pending | done | failed | off",
-  "created_at": "...", "updated_at": "...",
-  "doing_at": null, "done_at": null
-}
-```
+用 SQLite 而不是整份 JSON 重写，是为了**多进程安全**：插件（Alma 进程内）和
+`serve.command` 起的独立服务可能同时在跑，还可能加上 CLI。JSON 全量重写会互相
+覆盖，WAL + `busy_timeout` 不会。
+
+五张表：
+
+| 表 | 装什么 |
+|---|---|
+| `tasks` | 任务本体。`payload` 是 JSON 字符串（text / images / files / urls） |
+| `messages` | 卡片抽屉里的对话，`ON DELETE CASCADE` |
+| `projects` | 项目，`aliases` / `dirs` 也是 JSON 字符串 |
+| `settings` | 通道、模型这类键值 |
+| `meta` | 库版本号，迁移用 |
+
+老数据自动迁移：建库时如果目录里还有 `tasks.json` 而且 `tasks` 表是空的，
+会一次性导入，然后把 JSON 改名留档。**不删任何东西。**
 
 `claimed_by` 是给以后 agent 领任务留的。领的时候用条件更新：
 
@@ -284,7 +315,8 @@ serve.cmd       探端口，没人就跑起来（开机自启用这个）
 
 ```
 task-inbox/
-  core.mjs       存储（纯 Node，不依赖任何宿主）
+  core.mjs       任务逻辑（纯 Node，不依赖任何宿主）
+  storage.mjs    SQLite 底层：驱动探测 + 建表 + 语句包装
   server.mjs     HTTP 服务（可独立跑，也可作插件）
   main.mjs       Alma 插件外壳：注册工具 + 状态栏
   classify.mjs   判类型 / 优先级 / 项目
@@ -293,9 +325,15 @@ task-inbox/
   backend.mjs    模型通道与降级
   browse.mjs     目录浏览
   cli.mjs        命令行
-  pickdir.ps1    系统选择文件夹对话框
+  pickdir.ps1    Windows 选文件夹对话框（mac 用 osascript，写在 server.mjs 里）
   board.html     全部界面（单文件，无构建）
+
+  # Windows
   install.cmd / start.cmd / serve.cmd / window.cmd / mklinks.cmd / autostart.cmd
+
+  # macOS
+  install.command / start.command / serve.command / mklinks.command / autostart.command
+  _lib.sh        mac 脚本共用：端口探测 / 等端口 / 查 node
 ```
 
 `core.mjs` 和 `server.mjs` 都不 import 宿主 API，所以插件只是个外壳。
