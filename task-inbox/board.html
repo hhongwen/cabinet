@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>任务看板</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Crect width='128' height='128' rx='27' fill='%23DDE2E3'/%3E%3Cpath d='M40 24H96V36H44V40H36V48H32V80H36V88H44V92H96V104H40V100H32V96H28V92H24V84H20V44H24V36H28V32H32V28H40Z' fill='%23252B30'/%3E%3Crect x='56' y='46' width='40' height='8' fill='%237E8A90'/%3E%3Crect x='56' y='64' width='40' height='8' fill='%237E8A90'/%3E%3Crect x='56' y='82' width='20' height='8' fill='%237E8A90'/%3E%3Crect x='84' y='78' width='12' height='12' fill='%23FA4616'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1024 1024'%3E%3Crect x='28' y='28' width='968' height='968' rx='150' fill='%23D9DEE5'/%3E%3Cg fill='%23111A24'%3E%3Crect x='270' y='154' width='580' height='86'/%3E%3Crect x='142' y='262' width='126' height='518'/%3E%3Crect x='206' y='218' width='64' height='44'/%3E%3Crect x='270' y='196' width='66' height='44'/%3E%3Crect x='268' y='240' width='64' height='72'/%3E%3Crect x='270' y='782' width='550' height='86'/%3E%3Crect x='206' y='738' width='64' height='44'/%3E%3Crect x='270' y='694' width='66' height='44'/%3E%3C/g%3E%3Cg fill='%238E99A8'%3E%3Crect x='460' y='350' width='390' height='72'/%3E%3Crect x='460' y='524' width='390' height='72'/%3E%3Crect x='458' y='702' width='254' height='72'/%3E%3C/g%3E%3Crect x='760' y='690' width='162' height='162' fill='%23FF5A14'/%3E%3C/svg%3E">
 <style>
 :root{
   --silver-00:#F7F8F8; --silver-50:#F1F3F3; --silver-100:#DDE2E3; --silver-200:#CBD2D4;
@@ -51,15 +51,16 @@ input,select,textarea{font:inherit}
 }
 .brand{display:flex; gap:9px; align-items:center; padding:2px 2px 20px}
 .brand-mark{width:34px;height:34px;flex:0 0 auto;display:block;line-height:0}
-.brand-mark svg{width:100%;height:100%;display:block;border-radius:8px}
+.brand-mark svg{width:100%;height:100%;display:block;border-radius:7px}
+.brand-mark svg rect{shape-rendering:crispEdges}
 /* 浅底用浅款，深底用深款 */
-:root{--lg-bg:#DDE2E3;--lg-c:#252B30;--lg-line:#7E8A90}
+:root{--lg-bg:#D9DEE5;--lg-c:#111A24;--lg-line:#8E99A8}
 @media (prefers-color-scheme: dark){
-  :root{--lg-bg:#252B30;--lg-c:#F2F5F5;--lg-line:#94A0A7}
+  :root{--lg-bg:#111A24;--lg-c:#F2F4F7;--lg-line:#B7C0CC}
 }
 .lg-bg{fill:var(--lg-bg)}
-.lg-c{fill:var(--lg-c)}
-.lg-line{fill:var(--lg-line)}
+.lg-c rect{fill:var(--lg-c)}
+.lg-line rect{fill:var(--lg-line)}
 .brand-name{font-size:14.5px;line-height:1;font-weight:800;letter-spacing:-.4px}
 .brand-name span{font-weight:350;color:var(--slate-700)}
 .brand-sub{font:8.5px var(--font-mono);color:#6c767a;margin-top:5px;letter-spacing:.8px}
@@ -570,15 +571,24 @@ body.solo #collapseBtn{display:none}
   <aside class="sidebar" id="sidebar">
     <div class="brand">
       <div class="brand-mark" aria-hidden="true">
-        <svg viewBox="0 0 128 128" role="img" aria-label="Cabinet">
-          <rect class="lg-bg" x="0" y="0" width="128" height="128" rx="27" fill="#DDE2E3"/>
-          <g shape-rendering="crispEdges">
-            <path class="lg-c" d="M40 24H96V36H44V40H36V48H32V80H36V88H44V92H96V104H40V100H32V96H28V92H24V84H20V44H24V36H28V32H32V28H40Z" fill="#252B30"/>
-            <rect class="lg-line" x="56" y="46" width="40" height="8" fill="#7E8A90"/>
-            <rect class="lg-line" x="56" y="64" width="40" height="8" fill="#7E8A90"/>
-            <rect class="lg-line" x="56" y="82" width="20" height="8" fill="#7E8A90"/>
-            <rect x="84" y="78" width="12" height="12" fill="#FA4616"/>
+        <svg viewBox="0 0 1024 1024" role="img" aria-label="Cabinet">
+          <rect class="lg-bg" x="28" y="28" width="968" height="968" rx="150" fill="#D9DEE5"/>
+          <g class="lg-c" fill="#111A24">
+            <rect x="270" y="154" width="580" height="86"/>
+            <rect x="142" y="262" width="126" height="518"/>
+            <rect x="206" y="218" width="64" height="44"/>
+            <rect x="270" y="196" width="66" height="44"/>
+            <rect x="268" y="240" width="64" height="72"/>
+            <rect x="270" y="782" width="550" height="86"/>
+            <rect x="206" y="738" width="64" height="44"/>
+            <rect x="270" y="694" width="66" height="44"/>
           </g>
+          <g class="lg-line" fill="#8E99A8">
+            <rect x="460" y="350" width="390" height="72"/>
+            <rect x="460" y="524" width="390" height="72"/>
+            <rect x="458" y="702" width="254" height="72"/>
+          </g>
+          <rect x="760" y="690" width="162" height="162" fill="#FF5A14"/>
         </svg>
       </div>
       <div style="flex:1;min-width:0">
