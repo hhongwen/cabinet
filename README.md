@@ -9,6 +9,7 @@
 目标是消掉这个位置：**我不该是它们之间的路由器和翻译。**
 
 - 路线图与技术判断 → [ROADMAP.md](ROADMAP.md)
+- Session / 交接 / 协作实施规划 → [docs/session-collaboration.md](docs/session-collaboration.md)
 - 待修问题清单 → [task-inbox/ISSUES.md](task-inbox/ISSUES.md)
 - 旧版 Cabinet（事件 → 规则派发 → 无头 Agent）已归档 → [ARCHIVED.md](ARCHIVED.md)
 
@@ -29,8 +30,8 @@
 | **会话** | ⬜ 未开始 | 卡片下挂 Codex / OpenCode 的持久会话，能连续对话 |
 | **交接** | ⬜ 未开始 | Session 之间传摘要 + 证据，人不用复制粘贴 |
 
-前三条已经能用了。后两条是这份仓库存在的理由，也是接下来要做的事 ——
-但先得把 [ISSUES.md](task-inbox/ISSUES.md) 里 P0/P1 的问题清掉。
+前三条已经能用了。下一步按 **1A 持久 Session → 1B 摘要与证据 → 1C 双向交接** 逐步验证，之后才进入阶段 2 的受控自动化。
+具体缺陷与修复进度由 [ISSUES.md](task-inbox/ISSUES.md) 单独维护。
 
 ## 快速开始
 
