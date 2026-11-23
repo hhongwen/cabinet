@@ -115,8 +115,8 @@ input,select,textarea{font:inherit}
 .sys-head{font-size:12.5px;font-weight:800;margin:10px 0 4px}
 .sys-info{font-size:10.5px;color:#647176;line-height:1.6}
 .sys-bar{display:flex;gap:3px;margin-top:10px}
-.sys-bar i{height:3px;flex:1;background:#8c999e;border-radius:6px}
-.sys-bar i:nth-child(-n+3){background:var(--orange)}
+.sys-bar i{height:3px;flex:1;background:#8c999e;border-radius:6px;transition:background .2s}
+.sys-bar i.on{background:var(--orange)}
 .sidebar-foot{font:8.5px/1.7 var(--font-mono);letter-spacing:.9px;color:#829094;padding:12px 6px 0}
 
 /* 侧栏开关 */
@@ -592,8 +592,8 @@ body.solo #collapseBtn{display:none}
         </svg>
       </div>
       <div style="flex:1;min-width:0">
-        <div class="brand-name">TASK<span> / INBOX</span></div>
-        <div class="brand-sub">CIRCUIT / WORKSPACE</div>
+        <div class="brand-name">CABINET<span> / TASK</span></div>
+        <div class="brand-sub">TASK INBOX / WORKSPACE</div>
       </div>
       <button class="side-toggle" id="sideToggle" title="收起侧栏">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>
@@ -637,17 +637,23 @@ body.solo #collapseBtn{display:none}
 
     <div class="sidebar-bottom">
       <div class="systembox">
-        <div class="sys-top"><span>CORE / 01</span><span class="sys-online">ONLINE</span></div>
-        <div class="sys-head" id="sysHead">系统正常运行</div>
-        <div class="sys-info" id="sysInfo">任务收件箱 / 硅银界面</div>
-        <div class="sys-bar"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="sys-top"><span>INBOX / 01</span><span class="sys-online" id="sysState">READY</span></div>
+        <div class="sys-head" id="sysHead">收件箱就绪</div>
+        <div class="sys-info" id="sysInfo">
+          <span id="sysTodo">0</span> 待办 · <span id="sysDoing">0</span> 进行中<br>
+          <span id="sysModel">模型探测中…</span>
+        </div>
+        <div class="sys-bar" id="sysBar"></div>
         <button class="sys-btn" id="settingsBtn" title="设置">
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>
           <span>设置</span>
         </button>
       </div>
     </div>
-    <div class="sidebar-foot">SILICON SILVER / REV 01<br>BENTO / CIRCUIT / ORANGE 172C</div>
+    <div class="sidebar-foot" id="sideFoot">
+      <div>LOCAL / 127.0.0.1:46001</div>
+      <div id="sideFootPath">JSON / 单文件</div>
+    </div>
   </aside>
 
   <main class="main">
@@ -879,6 +885,54 @@ function imgUrl(p){
   return '/images/' + encodeURIComponent(name);
 }
 
+/* ---------------- 左下角状态块 ---------------- */
+
+let backendName = '';
+
+async function refreshSystemBox(){
+  const c = store.counts || {};
+  const set = (id, v) => { const el = $('#' + id); if (el) el.textContent = v; };
+  set('sysTodo', c.todo || 0);
+  set('sysDoing', c.doing || 0);
+
+  // 七段进度条按「已完成占比」点亮
+  const bar = $('#sysBar');
+  if (bar) {
+    const total = Math.max(1, store.total || 1);
+    const done = c.done || 0;
+    const lit = Math.round((done / total) * 7);
+    if (bar.children.length !== 7) bar.innerHTML = '<i></i>'.repeat(7);
+    [...bar.children].forEach((el, i) => el.classList.toggle('on', i < lit));
+  }
+
+  // 头部文案跟着状态变
+  const head = $('#sysHead');
+  const state = $('#sysState');
+  if (head && state) {
+    if (c.todo > 0) { head.textContent = '有待办待处理'; state.textContent = 'ACTIVE'; }
+    else { head.textContent = '收件箱已清空'; state.textContent = 'READY'; }
+  }
+
+  // 模型通道：探一次就缓存
+  if (!backendName) {
+    try {
+      const b = await api('GET', '/api/backend');
+      const up = Object.entries(b || {}).filter(([, v]) => v).map(([k]) => k);
+      backendName = up.length ? up[0] : 'none';
+    } catch { backendName = 'unknown'; }
+  }
+  const st = store.settings || {};
+  const model = String(st.model || '').replace(/^auto\//, '');
+  set('sysModel', model ? (backendName + ' · ' + model) : backendName);
+
+  // 底部显示数据规模，比写死一句话有用
+  const fp = $('#sideFootPath');
+  if (fp) {
+    const n = store.total || 0;
+    fp.textContent = n + ' 条任务 / 本地 JSON';
+  }
+}
+
 /* ---------------- 侧栏收起 ---------------- */
 
 const LS_SIDE = 'ti.sideCollapsed';
@@ -1049,6 +1103,7 @@ function render(){
   $('#total').textContent = store.total ? `${store.total} 条` : '';
   bindDrag();
   renderSidebar();
+  refreshSystemBox();
 }
 
 function bindDrag(){
