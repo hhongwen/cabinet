@@ -122,11 +122,17 @@ try {
   }
 
   if (cmd === 'init') {
-    // 建数据目录 + 空库，不改已有数据
-    const d = core.load();
-    core.save(d);
-    console.log('数据目录已就绪: ' + core.dataFile);
-    console.log('现有任务: ' + d.tasks.length + ' 条');
+    // 建库建表；目录里如果有老的 tasks.json，顺手迁进来
+    const r = core.init();
+    console.log('数据目录已就绪: ' + core.dbFile);
+    if (r.migration?.migrated) {
+      console.log('已从 tasks.json 迁移: ' + r.migration.tasks + ' 个任务 / '
+        + r.migration.messages + ' 条消息 / ' + r.migration.projects + ' 个项目');
+      if (r.migration.backup) console.log('原文件已改名: ' + path.basename(r.migration.backup));
+    } else if (r.migration?.reason) {
+      console.log('迁移: ' + r.migration.reason);
+    }
+    console.log('现有任务: ' + core.count() + ' 条');
     process.exit(0);
   }
 
@@ -140,7 +146,7 @@ try {
   init                                           初始化数据目录
   open                                           打印看板地址
 
-数据: ${core.dataFile}`);
+数据: ${core.dbFile}`);
 } catch (e) {
   console.error('错误: ' + e.message);
   process.exit(1);

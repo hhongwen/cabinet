@@ -139,11 +139,19 @@ export async function activate(ctx) {
   const dataDir = process.env.TASK_INBOX_DATA || DEFAULT_DATA_DIR;
   core = createCore(dataDir);
 
-  // 初始化数据目录（顺便验证可写）
+  // 建库建表（顺手把老的 tasks.json 迁进来），同时验证可写
   try {
-    core.save(core.load());
+    const r = core.init();
+    const mg = r.migration;
+    if (mg?.migrated) {
+      logger.info('[task-inbox] 已从 tasks.json 迁移：'
+        + mg.tasks + ' 个任务 / ' + mg.messages + ' 条消息 / ' + mg.projects + ' 个项目'
+        + (mg.backup ? '，原文件改名为 ' + mg.backup.split(/[\\/]/).pop() : ''));
+    } else if (mg?.reason && !/没有 tasks\.json/.test(mg.reason)) {
+      logger.info('[task-inbox] 迁移跳过：' + mg.reason);
+    }
   } catch (e) {
-    logger.warn('[task-inbox] 初始化数据: ' + e.message);
+    logger.warn('[task-inbox] 初始化数据库: ' + e.message);
   }
 
   TOOL_DEFS(ctx);
@@ -193,6 +201,7 @@ export async function activate(ctx) {
     dispose() {
       try { if (server) server.close(); } catch {}
       if (globalThis.__taskInboxServer === server) globalThis.__taskInboxServer = null;
+      try { core?.close?.(); } catch { /* 数据库句柄 */ }
       try { statusItem?.dispose?.(); } catch {}
       // 清掉模块缓存标记，下次激活会重新探测
       server = null;

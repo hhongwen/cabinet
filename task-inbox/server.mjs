@@ -100,7 +100,7 @@ export function createClassifyQueue(core, opts = {}) {
   function resetClassifier() { classifier = null; classifierKey = ''; }
 
   async function runOne(id) {
-    const t = core.load().tasks.find((x) => x.id === id);
+    const t = core.getTask(id);
     if (!t) return null;
 
     core.patch(id, { classify_state: 'pending' });
@@ -169,14 +169,18 @@ export function createClassifyQueue(core, opts = {}) {
   };
 }
 
-// 弹系统原生的选择文件夹对话框。
-// 浏览器做不到这件事，只有进程能调 —— 我们用 PowerShell 的
-// FolderBrowserDialog（Windows 自带，不用装任何东西）。
+// 弹系统原生的选择文件夹对话框。浏览器做不到这件事，只有进程能调。
+//   Windows → PowerShell 的 IFileOpenDialog（pickdir.ps1）
+//   macOS   → osascript 的 choose folder
+// 其它平台直接 reject，前端会退回 /api/browse 逐层点 —— 那不是错误，是降级。
 function pickDir(initial) {
+  if (process.platform === 'win32') return pickDirWindows(initial);
+  if (process.platform === 'darwin') return pickDirMac(initial);
+  return Promise.reject(new Error('这个系统没有原生目录对话框，用 /api/browse 逐层选'));
+}
+
+function pickDirWindows(initial) {
   return new Promise((resolve, reject) => {
-    if (process.platform !== 'win32') {
-      return reject(new Error('这个系统没有原生目录对话框，用 /api/browse 逐层选'));
-    }
     const script = path.join(HERE, 'pickdir.ps1');
     if (!fs.existsSync(script)) return reject(new Error('缺 pickdir.ps1'));
 
@@ -198,6 +202,61 @@ function pickDir(initial) {
       clearTimeout(timer);
       if (code !== 0) return reject(new Error(err.trim() || ('退出码 ' + code)));
       resolve(out.trim());
+    });
+  });
+}
+
+// macOS：osascript 的 choose folder。
+// 用户点取消时 AppleScript 抛 error number -128，这里当成「没选」返回 null ——
+// 前端对 null 和抛错的处理不一样（null 什么都不做，抛错才降级到页面浏览）。
+// 初始目录通过 argv 传进去，不拼进脚本，免掉引号和反斜杠的转义问题。
+function pickDirMac(initial) {
+  // default location 指到一个不存在/无权限的路径会让 choose folder 直接抛错，
+  // 用户看到的就是「打不开对话框」。所以先自己验一遍，不合格就不传。
+  let valid = '';
+  try {
+    if (initial && fs.statSync(initial).isDirectory()) valid = initial;
+  } catch { /* 路径不存在，不传初始目录 */ }
+
+  const script = [
+    'on run argv',
+    '  set init to item 1 of argv',
+    '  try',
+    '    if init is "" then',
+    '      set p to POSIX path of (choose folder with prompt "选择项目目录")',
+    '    else',
+    '      set p to POSIX path of (choose folder with prompt "选择项目目录" default location (POSIX file init))',
+    '    end if',
+    '    return p',
+    '  on error number -128',
+    '    return ""',
+    '  end try',
+    'end run'
+  ].join('\n');
+
+  return new Promise((resolve, reject) => {
+    const child = spawn('osascript', ['-e', script, valid],
+      { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '', err = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { err += d; });
+
+    const timer = setTimeout(() => { try { child.kill(); } catch {} reject(new Error('对话框超时')); }, 5 * 60 * 1000);
+
+    child.on('error', (e) => {
+      clearTimeout(timer);
+      // 没有 GUI 会话（ssh / launchd 里跑）时 osascript 直接起不来
+      reject(new Error('osascript 起不来：' + e.message + '（换成 /api/browse 逐层选）'));
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code !== 0) return reject(new Error(err.trim() || ('osascript 退出码 ' + code)));
+      let p = out.trim();
+      if (!p) return resolve(null);                 // 用户取消
+      if (p.length > 1) p = p.replace(/\/+$/, '');  // choose folder 带尾斜杠
+      resolve(p);
     });
   });
 }
@@ -275,7 +334,7 @@ export function createHandler(core, opts = {}) {
       }
       if (p === '/api/ping') {
         let n = 0;
-        try { n = core.load().tasks.length; } catch { /* 忽略 */ }
+        try { n = core.count(); } catch { /* 忽略 */ }
         return json(res, 200, { ok: true, tasks: n });
       }
       if (p === '/api/state' && req.method === 'GET') {
@@ -372,9 +431,9 @@ export function createHandler(core, opts = {}) {
         const dm = p.match(/^\/api\/tasks\/([^/]+)$/);
         if (dm && req.method === 'GET') {
           const id = decodeURIComponent(dm[1]);
-          const t = core.load().tasks.find((x) => x.id === id);
+          const t = core.getTask(id);
           if (!t) return json(res, 404, { error: '任务不存在' });
-          return json(res, 200, { task: t, messages: t.messages || [] });
+          return json(res, 200, { task: t, messages: core.listMessages(id) });
         }
       }
 
@@ -382,7 +441,7 @@ export function createHandler(core, opts = {}) {
       if (p === '/api/brief' && req.method === 'POST') {
         if (!queue) return json(res, 400, { error: '模型未启用' });
         const b = await readBody(req);
-        const t = core.load().tasks.find((x) => x.id === b.taskId);
+        const t = core.getTask(b.taskId);
         if (!t) return json(res, 404, { error: '任务不存在' });
 
         // 用户手改过的说明，不覆盖
@@ -391,8 +450,11 @@ export function createHandler(core, opts = {}) {
         }
 
         const project = t.project_id
-          ? core.load().projects.find((x) => x.id === t.project_id)
+          ? core.getProject(t.project_id)
           : core.listProjects().find((x) => x.name === t.project);
+
+        // 老版本靠 task.messages 拿上下文，现在单独查最近几条
+        const briefTask = { ...t, messages: core.recentMessages(t.id, 6) };
 
         const writer = createBriefWriter({
           ...opts,
@@ -403,7 +465,7 @@ export function createHandler(core, opts = {}) {
         });
 
         try {
-          const r = await writer.write({ task: t, project });
+          const r = await writer.write({ task: briefTask, project });
           const updated = core.setBrief(t.id, r.brief);
           return json(res, 200, { brief: updated.brief, brief_at: updated.brief_at, from: r.backend });
         } catch (e) {
@@ -421,11 +483,14 @@ export function createHandler(core, opts = {}) {
       if (p === '/api/chat' && req.method === 'POST') {
         if (!queue) return json(res, 400, { error: '模型未启用' });
         const b = await readBody(req);
-        const t = core.load().tasks.find((x) => x.id === b.taskId);
+        const t = core.getTask(b.taskId);
         if (!t) return json(res, 404, { error: '任务不存在' });
 
         const userText = String(b.text || '').trim();
         if (!userText) return json(res, 400, { error: '说点什么' });
+
+        // 先取旧对话当上下文（不含这条新消息，和改造前一致），再写库
+        const thread = core.listMessages(t.id);
 
         // 先把用户这句存进去，再调模型
         core.pushMessage(t.id, { role: 'user', text: userText });
@@ -442,7 +507,7 @@ export function createHandler(core, opts = {}) {
         try {
           result = await chat.reply({
             task: t,
-            thread: t.messages || [],
+            thread,
             userText,
             projects: core.listProjects()
           });
@@ -477,7 +542,7 @@ export function createHandler(core, opts = {}) {
           reply: result.reply,
           patch: result.patch,
           message: msg,
-          task: core.load().tasks.find((x) => x.id === t.id)
+          task: core.getTask(t.id)
         });
       }
 
@@ -543,6 +608,17 @@ if (isMain) {
   const dataDir = process.env.TASK_INBOX_DATA || DEFAULT_DATA_DIR;
   const core = createCore(dataDir);
 
+  // 建库建表；目录里如果有老的 tasks.json，顺手迁进来
+  const initResult = core.init();
+  if (initResult.migration?.migrated) {
+    const mg = initResult.migration;
+    console.log('[task-inbox] 已从 tasks.json 迁移：'
+      + mg.tasks + ' 个任务 / ' + mg.messages + ' 条消息 / ' + mg.projects + ' 个项目'
+      + (mg.backup ? '，原文件改名为 ' + path.basename(mg.backup) : ''));
+  } else if (initResult.migration?.reason && !/没有 tasks\.json/.test(initResult.migration.reason)) {
+    console.log('[task-inbox] 迁移跳过：' + initResult.migration.reason);
+  }
+
   const started = await start(core, { port: argPort });
   if (!started) {
     console.error('[task-inbox] 端口都被占用了：' + [argPort, ...FALLBACK_PORTS].join(', '));
@@ -553,7 +629,7 @@ if (isMain) {
   console.log('[task-inbox] 已启动');
   console.log('  看板：' + base + '/');
   console.log('  随手记：' + base + '/quick');
-  console.log('  数据：' + core.dataFile);
+  console.log('  数据：' + core.dbFile);
 
   const stop = () => { try { started.server.close(); } catch {} process.exit(0); };
   process.on('SIGINT', stop);

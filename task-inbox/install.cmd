@@ -15,8 +15,21 @@ if errorlevel 1 (
 )
 echo [OK] node found
 
+rem SQLite storage uses built-in node:sqlite - needs Node 22.5+ (24+ recommended)
+for /f "tokens=1 delims=." %%v in ('node -p "process.versions.node"') do set "NODEMAJOR=%%v"
+if !NODEMAJOR! LSS 22 (
+  echo [X] Node !NODEMAJOR! is too old. Need Node 22.5+ ^(24+ recommended^).
+  echo     Download: https://nodejs.org/
+  exit /b 1
+)
+if !NODEMAJOR! EQU 22 (
+  echo [!] Node 22 detected. node:sqlite may need --experimental-sqlite. Node 24+ recommended.
+) else (
+  echo [OK] node !NODEMAJOR! ^(node:sqlite built in^)
+)
+
 if not exist "%DST%" mkdir "%DST%"
-for %%f in (manifest.json main.mjs core.mjs server.mjs classify.mjs backend.mjs chat.mjs browse.mjs pickdir.ps1 board.html) do (
+for %%f in (manifest.json main.mjs core.mjs storage.mjs server.mjs classify.mjs backend.mjs chat.mjs brief.mjs browse.mjs cli.mjs pickdir.ps1 board.html) do (
   if exist "%%f" (
     copy /Y "%%f" "%DST%" >nul
     echo [OK] %%f
