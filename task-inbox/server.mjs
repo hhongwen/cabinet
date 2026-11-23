@@ -521,6 +521,10 @@ export function createHandler(core, opts = {}) {
         const full = core.filePath(name);
         return serveFile(res, full, MIME[path.extname(name).toLowerCase()] || 'application/octet-stream');
       }
+      // 同步分类：等模型跑完才返回，会卡住请求几秒。
+      // 内部已经没人调了（前端走 POST /api/tasks/:id/reclassify 进队列，异步不阻塞），
+      // 留着是因为它是个"立刻要结果"的调试入口，curl 一下就能验通道通不通。
+      // 新代码别用它。
       if (p === '/api/classify' && req.method === 'POST') {
         const b = await readBody(req);
         return json(res, 200, await runClassify(b.id));

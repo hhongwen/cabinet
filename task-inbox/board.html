@@ -1285,7 +1285,7 @@ body.solo #collapseBtn{display:none}
     </div>
     <div class="sidebar-foot" id="sideFoot">
       <div>LOCAL / 127.0.0.1:46001</div>
-      <div id="sideFootPath">JSON / 单文件</div>
+      <div id="sideFootPath">SQLite / WAL</div>
     </div>
   </aside>
 
@@ -1589,11 +1589,13 @@ async function refreshSystemBox(){
   const model = String(st.model || '').replace(/^auto\//, '');
   set('sysModel', model ? (backendName + ' · ' + model) : backendName);
 
-  // 底部显示数据规模，比写死一句话有用
+  // 底部显示数据规模，比写死一句话有用。
+  // 存储早就从单文件 JSON 搬到 SQLite 了（见 storage.mjs），
+  // 这里以前还写着「本地 JSON」，等于界面在跟用户说假话。
   const fp = $('#sideFootPath');
   if (fp) {
     const n = store.total || 0;
-    fp.textContent = n + ' 条任务 / 本地 JSON';
+    fp.textContent = n + ' 条任务 / SQLite';
   }
 }
 
