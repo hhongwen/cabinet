@@ -1,104 +1,76 @@
-> ⚠️ **已归档（2026-11-17）** —— 功能开发已冻结。
-> 这套系统想做的事现在已是平台自带能力，先读 [ARCHIVED.md](./ARCHIVED.md) 了解为什么停、
-> 以及哪部分资产还活着（那 19 条平台坑已迁成 skill）。
-
 # Cabinet
 
 > 内阁，也是文件柜。
 
-你雇了一屋子 Agent。它们自己找活、自己干、自己收尾。
-**Cabinet** 是中间那个角色：替你张罗、替你留底，只有真正该你拍板的事才呈上来。
+一个**任务收件箱**：想到什么就丢进来，模型自动判断它属于哪个项目、多重要，
+整理成能直接派给 Agent 的需求说明。
 
-要是你更爱卡兹克那个比喻——你只负责**批奏折**，其余免打扰。
+原名 Cabinet（事件 → 规则派发 → 无头 Agent → 批奏折）的版本已归档，
+见 [archive/](archive/) 和 [ARCHIVED.md](ARCHIVED.md)。
 
 ---
 
-单机版个人 Agent 自动化系统。参考
-[数字生命卡兹克：折腾了整整1年，我这套Agent自动化系统](https://x.com/Khazix0918/article/2117054043868860521)
-和 DeepSeek《Super-agent 设计探索》。
+## 现在是什么
 
-**核心命题**：把任务的起点从人身上拿掉。事件触发 Agent，Agent 自己干，
-只有需要拍板的时候才来找你。
+```
+随手记一句  →  自动判类型 / 优先级 / 项目  →  整理成需求  →  派给 Agent
+```
 
-## 和卡兹克那套的差别
+四件事，一件一件来：
 
-他的是**多机 + 公网**：事件中台在云服务器，Agent 在办公室/家里内网的 Mac 上，
-靠长轮询接单；审批走飞书卡片。
-
-你这只有一两台电脑，所以砍掉一半：
-
-| 他那套 | 你这套 | 原因 |
+| 阶段 | 状态 | 在哪 |
 |---|---|---|
-| 云服务器上的中台 | 本机常驻进程 | 不用服务器，不用公网 IP |
-| 长轮询接单程序 | 本地直跑；跨机时同一套 `worker` 拉取 | Windows/Mac 都能当 worker |
-| 飞书卡片审批 | 本地 http://127.0.0.1:8787 面板 | 零外部依赖，通道留 adapter |
-| rules.json 派发 | **保留**（这是他这套最值钱的部分） | 换 Agent / 换模型改一行 |
+| **收** | ✅ 可用 | 底栏输入框，贴图、拖文件、甩链接都行 |
+| **判** | ✅ 可用 | P0–P4 五级，自动归项目，失败会标「选项目」 |
+| **理** | ✅ 可用 | 卡片抽屉里生成需求说明（目标/背景/步骤/验收/待确认） |
+| **派** | ⬜ 下一步 | 派给 alma / codex / opencode，结果回卡片 |
 
-## 四层
+## 快速开始
 
+```cmd
+cd task-inbox
+install.cmd
 ```
-事件源 (cron / 文件监控 / HTTP / CLI)
-        │  统一信封 {source,type,subject,summary,link}
-        ▼
-   事件中台 (hub)
-        │  rules.json 决定：谁干、在哪干、用什么模型、要不要你批
-        │  去重 + 并发限制 + 全量落库
-        ▼
-   执行层 (worker)
-        │  codex exec / opencode run 无头运行，transcript 全留
-        ▼
-   决策层 (批奏折)
-           面板里 approve / reject，点完 Agent 继续
-```
+
+装完点桌面快捷方式，或者直接开 http://127.0.0.1:46001/
+
+详细用法见 [task-inbox/README.md](task-inbox/README.md)。
 
 ## 目录
 
 ```
 Cabinet/
-  bin/cabinet.mjs      CLI 入口
-  src/hub.mjs             HTTP 服务 + 面板 + API
-  src/db.mjs              node:sqlite 存储
-  src/rules.mjs           rules.json 加载与匹配
-  src/queue.mjs           去重、排队、并发
-  src/runner.mjs          调 codex / opencode
-  src/sources/cron.mjs    定时
-  src/sources/watch.mjs   文件变化
-  src/sources/http.mjs    POST /api/events
-  src/notify.mjs          审批通知 adapter（panel / webhook / feishu 预留）
-  public/index.html       面板
-  rules.example.json      规则示例
-  cabinet.config.json    运行配置
+  task-inbox/          ← 在用的东西
+    core.mjs           存储（纯 Node，不依赖任何宿主）
+    server.mjs         HTTP 服务（可独立跑，也可作 Alma 插件）
+    main.mjs           Alma 插件外壳
+    classify.mjs       判类型 / 优先级 / 项目
+    brief.mjs          整理成需求说明
+    chat.mjs           卡片抽屉里的对话
+    backend.mjs        模型通道：magpie / alma / cli 自动降级
+    browse.mjs         目录浏览
+    board.html         全部界面（单文件）
+    cli.mjs            命令行
+    *.cmd              安装、启动、开机自启
+  archive/             旧版 Cabinet（已冻结，留作参考）
+  ARCHIVED.md          为什么停、哪部分资产还活着
 ```
 
-## 快速开始
+## 为什么拆成两层
 
-```bash
-node bin/cabinet.mjs doctor          # 检查 codex / opencode
-node bin/cabinet.mjs start           # 起中台 + 本地 worker
-node bin/cabinet.mjs emit --source cli --type manual \
-  --subject han_kl --summary "整理 00_Inbox 里今天的笔记"
-node bin/cabinet.mjs jobs            # 看任务
-node bin/cabinet.mjs approve <jobId>
-```
+`task-inbox/core.mjs` 和 `task-inbox/server.mjs` **不 import 任何宿主 API**。
+所以：
 
-面板：http://127.0.0.1:8787
+- `node server.mjs` 能单独跑，Alma 关了也不影响
+- 插件只是它的一个宿主，换掉 Alma 也不用改代码
+- 数据在 `~/.config/alma/task-inbox/tasks.json`，不属于任何应用
 
-## 状态机
+## 关于旧的 Cabinet
 
-```
-queued ──(需要事前批)──> awaiting_approval ──approve──> running
-   │                          └──reject──> rejected
-   └──(无需批)────────────────────────────────────────> running
-                                                            │
-                              ┌──需要事后确认──> review ──approve──> accepted
-                              └──无需确认──────────────────────> done
-                                                        running ──err──> failed
-```
+那套系统（任务图、LLM 拆解、飞书长连接、调度器）跑通过，但停在了
+「一天做完架构，还没承载过一天真实工作」的位置。
 
-## 设计约束
+**19 条跨平台踩坑记录**是它最值钱的产出，已提炼成
+`~/.config/alma/skills/win-gitbash-agent-automation/SKILL.md`。
 
-- **零 npm 依赖**：只用 Node 24 内置（`node:sqlite` / `node:http` / `node:child_process`），
-  Windows 和 Mac 都是 `git clone` 就能跑。
-- **不暴露公网**：默认只绑 `127.0.0.1`；跨机用 Tailscale/SSH 隧道。
-- **所有事件必留底**：谁来的、交给了谁、结论是什么、要不要你留意，全在库里。
-- **Prompt 走 stdin**：避免 Windows `.cmd` 的引号地狱。
+细节见 [ARCHIVED.md](ARCHIVED.md)。
