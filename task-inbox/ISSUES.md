@@ -168,33 +168,38 @@ core.mjs   : saveFile()     附件上限    25 MB
 
 ## P1 — 明显影响使用
 
-### 🟡 P1-1 每 3 秒全量拉一次看板，2000 条任务时一天 26 GB
+### ✅ P1-1 每 3 秒全量拉一次看板，2000 条任务时一天 26 GB
 
-> **第一步已做**：`document.hidden` 时不轮询；切回前台立刻补一次（`visibilitychange`）。
-> **还没做**：仍是全量拉 `/api/state`。彻底解决要加 `?since=` 或 revision 短轮询。
+> **已修**：`/api/state` 返回 `revision`，轮询时带 `?since=`。库没变只回 150 字节
+> （`{unchanged:true, revision, build}`），前端连 `render()` 都不跑，滚动位置不会被重置。
+> 页面隐藏时不轮询，切回前台拉一次全量（不能用 since —— 后台期间库可能变过）。
+>
+> **第一版是错的**，记下来：用各表 `COUNT` + `MAX(updated_at)` 算指纹，
+> 漏掉两种 —— 改状态只动 `status` 列（同毫秒内 `updated_at` 不变）、
+> 改 `settings` 那张表根本没有时间戳列。两个都被测试抓到了。
+> 现在用 `total_changes()`（本连接累计改动行数）+ `PRAGMA data_version`
+> （别的连接提交时会变，实测 2→3），O(1) 不扫表。
+>
+> 实测 401 条任务：全量 254080 字节 → 不变时 150 字节，省 99.9%；
+> 一天 8 小时轮询从 2.3 GB 降到几乎为 0。
 
-```
-board.html : 尾部 setInterval(() => { refresh().catch(() => {}); }, 3000)
-             → refresh() 是 store = await api('GET','/api/state')   ← 全量
-```
+**当时的实测数字**（修之前）：
 
-`/api/state` 返回**全部任务**。实测：
-
-| 数据量 | 每次轮询 | 耗时 | 一天流量（3 秒一次） |
+| 数据量 | 每次轮询 | 耗时 | 一天流量（3 秒一次，8 小时） |
 |---|---|---|---|
 | 12 条 | 12 KB | ~1 ms | 350 MB |
+| 401 条 | 254 KB | 11 ms | 2.3 GB |
 | 2000 条 | 0.93 MB | 75 ms | **26 GB** |
 
 而且 `render()` 是**全量重绘**：`board.innerHTML = COLS.map(...)`，每次轮询
 重建整个看板 DOM。滚动容器 `.board-scroll` 的 `scrollTop` 没有恢复逻辑，
 所以数据一多，正在滚动的列表每 3 秒跳一次。
 
-**修法（两步，都不大）**：
+**修完之后**：401 条任务时，库没变的轮询只回 **150 字节**（省 99.9%），
+1ms 返回，且前端直接跳过 `render()`，滚动位置不受影响。
 
-1. **页面不可见时不轮询** —— 判断 `document.hidden`（现在是 0 处使用），
-   后台标签页直接跳过。十分钟能改完，砍掉 80% 的无效请求
-2. **只拉变化** —— `/api/state` 加 `?since=`，只返更新过的任务；
-   或者更简单：返回一个 `revision`（`MAX(updated_at)`），没变就返回 `204`
+**为什么不用 304**：`fetch` 的 `res.ok` 对 304 是 `false`，前端得多写一个分支，
+省下的字节远不值得多一处判断。
 
 ---
 
@@ -236,7 +241,15 @@ cli.mjs 有 rm，但得开终端、手敲 id
 
 ---
 
-### P1-4 没有备份 / 导出，误删不可恢复
+### ✅ P1-4 没有备份 / 导出，误删不可恢复
+
+> **已修**：`node cli.mjs export [文件]` 把整库导成老的 `tasks.json` 形状
+> （正是 `migrateFromJson` 认识的格式，所以导出文件能原样倒回去）；
+> `node cli.mjs backup [文件]` 用 `VACUUM INTO` 热备，服务在跑也能备。
+> 不传路径就落在数据目录，文件名带时间戳。目标已存在时拒绝覆盖。
+>
+> 验证：导出 11 个任务 / 4 个项目 / 8 条消息；备份文件能独立打开且行数一致。
+
 
 ```
 core.mjs / server.mjs / board.html 里 backup/export 的实现: 0
@@ -333,7 +346,16 @@ SQLite 加 `LIKE` 查询半天就能做，加 FTS5 一天。
 
 **触发条件**：跟 P2-1 一起做，或者轮询优化之后还是慢。
 
-### P2-3 非存储层的测试
+### ✅ P2-3 非存储层的测试
+
+> **已修**：`node test-parsers.mjs` → 57 项，注入假 backend，不碰真模型。
+> 覆盖 classify 的畸形输出（code fence、前后夹废话、非法枚举、缺标题、
+> 无信息量标题、完全不返回 JSON）、chat 的 patch 白名单（拒 `id` / `claimed_by` /
+> `created_at`）、以及两个模块的 prompt 拼装。
+>
+> 最后一项值得留着：断言 `FIELD_LABEL` 里每个字段都能真的通过 `core.patch` 写进去。
+> `needs_project` 那个 bug 就属于这一类 —— 模型给得出、前端读得到、库里存不下。
+
 
 ```
 test-sqlite.mjs   60 项，全绿，只覆盖存储层
@@ -389,23 +411,30 @@ Startup 里有 `task-inbox.cmd`（开机自启已生效），但桌面上没有�
 ## 进度
 
 ```
-第一批（P0）        ✅ 全部完成 2026-11-23
-  ✅ P0-1  版本可见 + 装完重启
-  ✅ P0-2  needs_project         （P1-5 的迁移机制一起做了）
-  ✅ P0-4  上传上限统一
-  ✅ P0-3  删任务清附件
+第一批（P0）        ✅ 2026-11-23
+  P0-1  版本可见 + 装完重启
+  P0-2  needs_project（P1-5 的迁移机制一并完成）
+  P0-4  上传上限统一
+  P0-3  删任务清附件
 
-第二批（P1）        ✅ 全部完成 2026-11-23
-  ✅ P1-2  启动清 pending
-  ✅ P1-3  界面删任务
-  ✅ P1-1  轮询第一步（不可见时不轮询）
-  ✅ P1-6  WAL 关库时截断（顺手）
-  ✅ P1-7  首屏失败给重试（顺手）
+第二批（P1）        ✅ 2026-11-23
+  P1-1  轮询：不可见不轮询 + ?since= 短轮询
+  P1-2  启动清 pending
+  P1-3  界面删任务
+  P1-6  WAL 关库时截断
+  P1-7  首屏失败给重试
+  P1-4  导出 / 热备份
+
+第三批（P2）        ✅ 2026-11-23
+  P2-3  classify / chat 的解析层测试
 
 还留着
-  P1-1 后半段   轮询仍是全量，需要 ?since= 或 revision
-  P1-4          备份 / 导出
-  P2-3          补 classify / chat 的测试
+  P2-1  搜索
+  P2-2  分页
+  P2-4  分类失败不重试
+  P2-5  分类队列的 setInterval 等位
+  P2-6  桌面快捷方式没装
+  P2-7  界面图标是文字符号
 
 之后
   → 回 ROADMAP.md 的阶段 1，开始做 Session
@@ -413,25 +442,30 @@ Startup 里有 `task-inbox.cmd`（开机自启已生效），但桌面上没有�
 
 ### 验收记录（2026-11-23）
 
-**自动化测试**：`node test-sqlite.mjs` → **80/80 全绿**（原 60 项 + 新增 20 项）。
+**自动化测试**：两套，都不碰真模型。
 
-新增覆盖：`needs_project` 四态往返、删任务清附件（含目录外路径不被误删）、
-卡死 pending 回收、v1→v2 schema 迁移、WAL 关库截断。
+| 脚本 | 覆盖 | 结果 |
+|---|---|---|
+| `node test-sqlite.mjs` | 迁移、增删改、项目、级联删除、排序过滤、批量 id、revision、导出备份、schema 升级 | **100 / 100** |
+| `node test-parsers.mjs` | classify 的畸形模型输出、chat 的 patch 白名单、两处 prompt 拼装、字段一致性 | **57 / 57** |
+| `node style-audit.mjs` | 样式规范 | 0 error / 1 warning（历史遗留 63 处写死颜色） |
 
 **HTTP 层实测**：
 
 | 项 | 结果 |
 |---|---|
-| `GET /api/ping` | 返回 `version` / `pid` / `started_at` / `stale` / `node` |
-| 改磁盘文件后 `stale` | `false` → `true`，重启后回到 `false` |
+| `GET /api/ping` | 带 `version` / `pid` / `started_at` / `stale` / `node` |
+| 改磁盘文件后 `stale` | `false` → `true`；重启后回 `false` |
+| `?since=` 库没变 | `150` 字节，`unchanged: true` |
+| `?since=` 过期值 | 走全量，正常返回 |
+| 改 status / 改 settings 后 | revision 确实变了（第一版方案在这两处漏判） |
 | 附件 12 / 20 / 24 MB | 全部 200 |
 | 附件 26 / 28 MB | 「附件太大（>25MB）」 |
 | 请求体 44 MB | `413` + 可读文案（不再是 `fetch failed`） |
-| 删带 1 张图的任务 | `attachments_removed: 1`，图片文件真的没了 |
-| `PATCH { needs_project: true }` | 返回 `true`，`/api/state` 里也是 `true` |
+| 删带 1 张图的任务 | `attachments_removed: 1`，文件真的没了 |
+| `export` / `backup` | 11 任务 / 4 项目 / 8 消息；备份能独立打开且行数一致 |
 
-**线上数据**（真实库，非测试库）：schema 已从 v1 迁到 v2，12 条任务一条没丢，
-`needs_project` 列已补上，全部为 `false`（历史任务本来就都分类成功了）。
+**线上数据**：schema 已迁到 v2，11 条任务一条没丢，`needs_project` 列已补上。
 
 ### 为什么这个顺序
 

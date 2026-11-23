@@ -97,9 +97,15 @@ node cli.mjs move <id> doing          换列
 node cli.mjs done <id>                标完成
 node cli.mjs rm <id>                  删除
 node cli.mjs init                     初始化数据目录
+node cli.mjs export [文件]            导成 tasks.json（给迁移 / 审阅 / diff）
+node cli.mjs backup [文件]            热备份成 .db（服务在跑也能备）
 ```
 
 优先级：`--p0` 阻塞 / `--p1` 紧急 / `--p2` 常规 / `--p3` 低 / `--p4` 待定（默认）。
+
+`export` 写出来的就是老 `tasks.json` 的形状 —— 跟迁移代码认的格式一致，
+所以它既是备份，也是一个能原样倒回去的迁移包。不传路径就落在数据目录，
+文件名带时间戳。
 
 ---
 
@@ -362,21 +368,31 @@ node style-audit.mjs
 
 完整的清单在 [ISSUES.md](ISSUES.md)，带证据和复现步骤。
 
-**2026-11-23 已修（P0 全部 + P1 前三条）**：
+**2026-11-23 修掉的一批**（每条的证据和踩坑都在 [ISSUES.md](ISSUES.md)）：
 
 | 原来 | 现在 |
 |---|---|
 | 改了代码不重启不生效，还看不出来 | `/api/ping` 和 `/api/state` 带 `stale`；磁盘代码比进程新时页面顶部挂黄条；`install.cmd` 装完自动停旧服务 |
-| 「选项目」徽章从不出现 | `needs_project` 真的进了库（schema v2） |
+| 「选项目」徽章从不出现 | `needs_project` 真的进了库（schema v2，迁移机制同时补上） |
 | 删任务后附件永久残留 | 删任务时一起清附件，且只清 payload 里指向本目录的文件 |
 | 超 12 MB 传不上去，报错 `fetch failed` | 请求体上限 40 MB，超限返回 413 和一句人话；附件 25 MB、图片 12 MB 都真的能到 |
 | 分类卡在「判断中…」永不恢复 | 启动时把超 5 分钟的 `pending` 收成 `failed` |
 | 界面不能删任务 | 抽屉右上角「删」，带确认和附件数提示 |
-| 每 3 秒全量轮询，后台也拉 | 页面隐藏时不轮询，切回前台立刻补一次 |
+| 每 3 秒全量轮询，后台也拉 | 隐藏时不轮询；轮询带 `?since=`，库没变只回 150 字节且不重绘（401 条时省 99.9%） |
 | 首屏失败只插一行红字 | 有「重试」按钮 |
+| 没有备份 / 导出 | `node cli.mjs export` 导出 tasks.json 形状 / `backup` 用 VACUUM INTO 热备 |
+| classify / chat 没有测试 | `node test-parsers.mjs`，57 项，假 backend 覆盖畸形输出和 patch 白名单 |
 
-**还留着的（P1 剩余 + P2）**：轮询仍是全量（只是不再空转）、没有搜索、没有备份导出、
-非存储层没有测试。详见 [ISSUES.md](ISSUES.md)。
+**还留着的（P2）**：没有搜索、分页、分类失败不重试、桌面快捷方式没装。
+详见 [ISSUES.md](ISSUES.md)。
+
+### 测试
+
+```bash
+node test-sqlite.mjs    # 存储层，100 项
+node test-parsers.mjs   # classify / chat 的解析层，57 项，不碰真模型
+node style-audit.mjs    # 界面样式规范
+```
 
 ### Alma 插件系统本身的缺口（不是本项目的 bug）
 
