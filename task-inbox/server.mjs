@@ -19,6 +19,7 @@ const loadLocal = (rel) => import(pathToFileURL(path.join(path.dirname(fileURLTo
 
 const { createCore } = await loadLocal('core.mjs');
 const { createClassifier } = await loadLocal('classify.mjs');
+const { listRoots, listDir } = await loadLocal('browse.mjs');
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -291,6 +292,15 @@ export function createHandler(core, opts = {}) {
       if (p === '/api/classify' && req.method === 'POST') {
         const b = await readBody(req);
         return json(res, 200, await runClassify(b.id));
+      }
+      if (p === '/api/browse' && req.method === 'GET') {
+        const target = url.searchParams.get('path');
+        try {
+          if (!target) return json(res, 200, { roots: listRoots(), home: os.homedir() });
+          return json(res, 200, listDir(target));
+        } catch (e) {
+          return json(res, 400, { error: e.message });
+        }
       }
       if (p === '/api/projects' && req.method === 'GET') {
         return json(res, 200, { projects: core.listProjects() });

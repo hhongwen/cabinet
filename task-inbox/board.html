@@ -203,6 +203,23 @@
   .mini{font-size:11.5px; border:1px dashed var(--line); background:transparent;
     color:var(--muted); border-radius:7px; padding:5px 9px; cursor:pointer; width:100%}
   .mini:hover{color:var(--text); border-color:var(--todo)}
+  #pickDlg{border:1px solid var(--line); background:var(--panel); color:var(--text);
+    border-radius:14px; padding:0; width:min(520px,94vw)}
+  #pickDlg::backdrop{background:rgba(0,0,0,.5)}
+  .pick-bar{display:flex; gap:6px; margin-bottom:9px}
+  .pick-bar button{font:inherit; font-size:13px; color:var(--text); background:var(--card);
+    border:1px solid var(--line); border-radius:7px; padding:5px 11px; cursor:pointer}
+  .pick-bar input{flex:1; font:inherit; font-size:12px; color:var(--muted); background:var(--bg);
+    border:1px solid var(--line); border-radius:7px; padding:6px 9px}
+  .pick-list{height:300px; overflow:auto; border:1px solid var(--line); border-radius:9px}
+  .pick-item{display:flex; align-items:center; gap:8px; padding:8px 11px;
+    border-bottom:1px solid var(--line); cursor:pointer; font-size:13px}
+  .pick-item:last-child{border-bottom:none}
+  .pick-item:hover{background:var(--card-hover)}
+  .pick-item .ico{opacity:.65; font-size:12px}
+  .pick-item .tag2{margin-left:auto; font-size:10px; color:var(--muted);
+    background:rgba(139,147,167,.14); border-radius:999px; padding:1px 6px}
+  .pick-empty{padding:18px; text-align:center; color:var(--muted); font-size:12.5px}
   #lightbox{position:fixed; inset:0; background:rgba(0,0,0,.82); display:none; place-items:center; z-index:99; cursor:zoom-out}
   #lightbox.on{display:grid}
   #lightbox img{max-width:92vw; max-height:92vh; border-radius:8px}
@@ -351,6 +368,21 @@
       <button type="submit" class="primary">保存</button>
     </div>
   </form>
+</dialog>
+
+<dialog id="pickDlg">
+  <div class="dlg">
+    <h2>选择目录</h2>
+    <div class="pick-bar">
+      <button type="button" id="pickUp" title="上一级">↑</button>
+      <input id="pickPath" readonly>
+    </div>
+    <div class="pick-list" id="pickList"></div>
+    <div class="dlg-foot">
+      <button type="button" id="pickCancel">取消</button>
+      <button type="button" class="primary" id="pickOk">选这个目录</button>
+    </div>
+  </div>
 </dialog>
 
 <div id="lightbox"><img alt=""></div>
@@ -783,6 +815,83 @@ async function openSettings(){
   $('#cfg').showModal();
 }
 
+/* ---------------- 目录浏览 ---------------- */
+
+let pickState = { path: null, parent: null, onPick: null };
+
+async function openPicker(startPath, onPick) {
+  pickState.onPick = onPick;
+  $('#pickDlg').showModal();
+
+  // 起点优先级：已填的路径（存在就进去）→ 它父目录 → 项目里第一个目录 → 用户目录
+  let start = String(startPath || '').trim();
+  if (start) {
+    if (await loadDir(start)) return;          // 能打开就直接用
+    // 打不开（路径不存在 / 没权限）：退到父目录
+    const cut = start.replace(/[\\/]+$/, '').split(/[\\/]/);
+    cut.pop();
+    start = cut.length ? cut.join('\\') : '';
+  }
+
+  if (!start) {
+    const withDir = (store.projects || []).find(p => (p.dirs || []).length);
+    if (withDir) start = withDir.dirs[0].path;
+  }
+
+  if (start && await loadDir(start)) return;
+
+  // 最后一档：用户目录 -> 第一个盘符
+  const r = await api('GET', '/api/browse');
+  await loadDir(r.home || (r.roots && r.roots[0] && r.roots[0].path));
+}
+
+async function loadDir(target) {
+  const list = $('#pickList');
+  list.innerHTML = '<div class="pick-empty">读取中…</div>';
+  try {
+    const r = await api('GET', '/api/browse?path=' + encodeURIComponent(target || ''));
+    pickState.path = r.path || null;
+    pickState.parent = r.parent || null;
+    $('#pickPath').value = r.path || r.home || '';
+    $('#pickUp').disabled = !r.parent;
+
+    // 没给 path 时是盘符列表
+    if (r.roots) {
+      list.innerHTML = r.roots.map(x => `
+        <div class="pick-item" data-go="${esc(x.path)}">
+          <span class="ico">💽</span><span>${esc(x.name)}</span>
+        </div>`).join('') || '<div class="pick-empty">没有可读的盘符</div>';
+    } else {
+      const parts = [];
+      if (r.isProject) parts.push(`<span class="tag2">${r.isGitRepo ? 'git 仓库' : '像项目目录'}</span>`);
+      const head = `<div class="pick-item" data-go="${esc(r.path)}" style="cursor:default">
+        <span class="ico">📂</span><span style="color:var(--muted)">当前：${esc(r.path)}</span>${parts.join('')}
+      </div>`;
+      const rows = (r.dirs || []).map(d => `
+        <div class="pick-item" data-go="${esc(d.path)}">
+          <span class="ico">📁</span><span>${esc(d.name)}</span>
+        </div>`).join('');
+      list.innerHTML = head + (rows || '<div class="pick-empty">这个目录下没有子目录</div>');
+    }
+
+    list.querySelectorAll('.pick-item[data-go]').forEach((el) => {
+      el.addEventListener('click', () => loadDir(el.dataset.go));
+    });
+    return true;
+  } catch (e) {
+    list.innerHTML = `<div class="pick-empty">打不开：${esc(e.message)}</div>`;
+    return false;
+  }
+}
+
+$('#pickUp')?.addEventListener('click', () => { if (pickState.parent) loadDir(pickState.parent); });
+$('#pickCancel')?.addEventListener('click', () => $('#pickDlg').close());
+$('#pickOk')?.addEventListener('click', () => {
+  const chosen = pickState.path || $('#pickPath').value;
+  if (chosen && pickState.onPick) pickState.onPick(chosen);
+  $('#pickDlg').close();
+});
+
 /* ---------------- 项目管理 ---------------- */
 
 let editingProjectId = null;
@@ -813,15 +922,21 @@ function dirRow(d = {}){
   const wrap = document.createElement('div');
   wrap.className = 'dir-row';
   wrap.innerHTML = `
-    <input class="dp" placeholder="D:\\WorkFiles\\code\\xxx" value="${esc(d.path || '')}">
-    <input class="dn" placeholder="说明（可选）" value="${esc(d.note || '')}" style="max-width:120px">
-    <select class="dm" style="max-width:76px">
+    <input class="dp" placeholder="点右边选，或直接粘贴路径" value="${esc(d.path || '')}">
+    <button type="button" class="pick" title="浏览目录">📁</button>
+    <input class="dn" placeholder="说明（可选）" value="${esc(d.note || '')}" style="max-width:110px">
+    <select class="dm" style="max-width:72px">
       <option value="">副</option>
       <option value="1" ${d.primary ? 'selected' : ''}>主要</option>
     </select>
     <button type="button" class="rm" title="移除">✕</button>
   `;
   wrap.querySelector('.rm').addEventListener('click', () => wrap.remove());
+  wrap.querySelector('.pick').addEventListener('click', () => {
+    openPicker(wrap.querySelector('.dp').value.trim(), (chosen) => {
+      wrap.querySelector('.dp').value = chosen;
+    });
+  });
   return wrap;
 }
 
