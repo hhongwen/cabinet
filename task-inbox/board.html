@@ -48,7 +48,7 @@ input,select,textarea{font:inherit}
   padding:22px 14px 16px; border-right:1px solid #b9c3c6; overflow:auto;
   background:linear-gradient(145deg,#e9eded 0%,#d9dfe1 72%,#cbd2d4 100%);
 }
-.brand{display:flex; gap:10px; align-items:center; padding:2px 4px 22px}
+.brand{display:flex; gap:9px; align-items:center; padding:2px 2px 20px}
 .brand-mark{
   width:32px;height:32px;display:grid;grid-template-columns:repeat(3,1fr);
   grid-template-rows:repeat(3,1fr);gap:2px;padding:5px;border-radius:10px;
@@ -62,26 +62,40 @@ input,select,textarea{font:inherit}
 
 .section-title{
   font:9.5px var(--font-mono); color:#6d797c; letter-spacing:1.5px;
-  padding:11px 10px 7px; text-transform:uppercase;
+  padding:11px 11px 6px; text-transform:uppercase;
 }
 .menu{display:flex; flex-direction:column; gap:3px}
 .nav-link{
   display:flex; align-items:center; gap:9px; justify-content:space-between;
-  border:1px solid transparent; padding:10px 11px; border-radius:11px;
-  font-size:12px; color:#465155; transition:.18s; cursor:pointer;
+  border:1px solid transparent; padding:9px 10px; border-radius:10px;
+  font-size:12px; color:#465155; cursor:pointer;
+  transition:background .16s, border-color .16s, color .16s;
+  position:relative;
+}
+.nav-link::before{
+  content:""; position:absolute; left:0; top:50%; transform:translateY(-50%);
+  width:2px; height:0; border-radius:2px; background:var(--orange);
+  transition:height .18s cubic-bezier(.2,0,0,1);
+}
+.nav-link.active::before{height:16px}
+.nav-link.active{
+  background:rgba(255,255,255,.72); border-color:#b3bfc2; color:#13191d;
+  font-weight:700; box-shadow:0 1px 6px #b2babd26;
 }
 .nav-link .name{display:flex;align-items:center;gap:9px;min-width:0}
-.nav-link svg{width:15px;height:15px;stroke-width:1.7;flex:0 0 auto}
+.nav-link svg{width:14px;height:14px;stroke-width:1.6;flex:0 0 auto;opacity:.85;
+  stroke-linecap:round;stroke-linejoin:round}
 .nav-link .cnt{
-  font:10px var(--font-mono); color:#7b878b; padding:0 5px;
-  border-radius:999px; background:rgba(255,255,255,.5);
+  font:9.5px/15px var(--font-mono); color:#7b878b; min-width:19px; text-align:center;
+  padding:0 5px; border-radius:999px; background:rgba(255,255,255,.52);
+  border:1px solid transparent; transition:.16s;
 }
 .nav-link:hover{border-color:#aeb9bc;background:rgba(255,255,255,.32)}
 .nav-link.active{
   background:rgba(255,255,255,.66); border-color:#acb8bc; color:#13191d;
   font-weight:700; box-shadow:0 2px 10px #b2babd2e;
 }
-.nav-link.active .cnt{background:var(--orange);color:#fff}
+.nav-link.active .cnt{background:var(--orange);color:#fff;border-color:var(--orange)}
 
 .sidebar-bottom{margin-top:auto; padding:16px 6px 0}
 .systembox{
@@ -102,27 +116,31 @@ input,select,textarea{font:inherit}
 
 /* 侧栏开关 */
 .side-toggle{
-  width:22px;height:22px;flex:0 0 auto;display:grid;place-items:center;padding:0;
-  border:1px solid #aeb9bc;background:rgba(255,255,255,.5);color:#5a666b;
-  border-radius:7px;font-size:11px;line-height:1;transition:.16s;
+  width:23px;height:23px;flex:0 0 auto;display:grid;place-items:center;padding:0;
+  border:1px solid #b0bcc0;background:rgba(255,255,255,.55);color:#5a666b;
+  border-radius:7px;transition:.16s;
 }
-.side-toggle:hover{background:#fff;border-color:#8fa0a5;color:var(--ink)}
+.side-toggle svg{width:13px;height:13px;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.side-toggle:hover{background:#fff;border-color:#8c9da2;color:var(--ink)}
 .side-open{
-  position:fixed;left:12px;top:16px;z-index:60;display:none;
+  position:fixed;left:12px;top:14px;z-index:60;display:none;
   width:30px;height:30px;padding:0;place-items:center;
-  border:1px solid #aeb9bc;background:rgba(255,255,255,.78);color:#394549;
-  border-radius:9px;transition:.16s;backdrop-filter:blur(8px);
+  border:1px solid #b0bcc0;background:rgba(255,255,255,.8);color:#394549;
+  border-radius:9px;transition:.16s cubic-bezier(.2,0,0,1);
+  backdrop-filter:blur(8px);box-shadow:0 2px 8px #36495010;
 }
-.side-open:hover{background:#fff;border-color:#8fa0a5}
+.side-open svg{stroke-linecap:round}
+.side-open:hover{background:#fff;border-color:#8c9da2}
 .app.side-collapsed ~ .side-open{display:grid}
 
 /* 系统块里的设置按钮 */
 .sys-btn{
-  margin-top:11px;width:100%;display:flex;align-items:center;justify-content:center;gap:6px;
-  padding:6px 8px;border:1px solid #a9b5b8;background:rgba(255,255,255,.5);
-  color:#455156;border-radius:9px;font-size:11px;transition:.16s;
+  margin-top:10px;width:100%;display:flex;align-items:center;justify-content:center;gap:6px;
+  padding:6px 8px;border:1px solid #a9b5b8;background:rgba(255,255,255,.55);
+  color:#455156;border-radius:9px;font-size:11px;letter-spacing:.2px;
+  transition:.16s cubic-bezier(.2,0,0,1);
 }
-.sys-btn svg{width:13px;height:13px;stroke-width:1.7}
+.sys-btn svg{width:13px;height:13px;stroke-width:1.6;stroke-linecap:round}
 .sys-btn:hover{background:#fff;border-color:#8fa0a5;color:var(--ink)}
 
 /* ---------- 主区 ---------- */
@@ -167,12 +185,14 @@ h1{
 .count{font:10px var(--font-mono);color:#8c989c;letter-spacing:.4px}
 .spacer{flex:1}
 .icon-btn{
-  width:29px;height:29px;display:grid;place-items:center;padding:0;
-  border:1px solid #aeb9bc;background:rgba(255,255,255,.5);color:#394549;
-  border-radius:9px;font-size:13px;transition:.16s;
+  width:32px;height:32px;display:grid;place-items:center;padding:0;
+  border:1px solid #b0bcc0;background:rgba(255,255,255,.58);color:#3d4a4f;
+  border-radius:9px;transition:.16s cubic-bezier(.2,0,0,1);
 }
-.icon-btn:hover{background:#fff;border-color:#8fa0a5}
-.icon-btn:disabled{opacity:.45;cursor:default}
+.icon-btn svg{width:15px;height:15px;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.icon-btn:hover{background:#fff;border-color:#8c9da2;color:var(--ink)}
+.icon-btn:active{transform:scale(.96)}
+.icon-btn:disabled{opacity:.4;cursor:default;transform:none}
 
 .filters{display:flex;gap:7px;flex-wrap:wrap;margin-top:13px}
 .filters select{
@@ -268,14 +288,19 @@ h1{
 }
 .dock textarea:focus{border-color:var(--orange);background:#fff}
 .dock textarea::placeholder{color:#96a1a5}
-.dock .side{display:flex;align-items:center;gap:6px;padding-bottom:1px}
+.dock .side{display:flex;align-items:center;gap:7px;padding-bottom:0}
 .dock .go{
-  font-size:12px;font-weight:750;color:#fff;background:var(--orange);
-  border:1px solid var(--orange);border-radius:10px;padding:9px 16px;white-space:nowrap;
-  box-shadow:0 4px 14px #fa461626;transition:.16s;
+  height:32px;font-size:12px;font-weight:750;color:#fff;background:var(--orange);
+  border:1px solid var(--orange);border-radius:9px;padding:0 16px;white-space:nowrap;
+  box-shadow:0 3px 12px #fa461622;transition:.16s cubic-bezier(.2,0,0,1);
+  letter-spacing:.4px;
 }
-.dock .go:hover{background:#e84010}
-.dock .go:disabled{opacity:.4;cursor:default;box-shadow:none}
+.dock .go:hover:not(:disabled){background:#e84010;box-shadow:0 5px 16px #fa461633}
+.dock .go:active:not(:disabled){transform:scale(.98)}
+.dock .go:disabled{
+  background:var(--silver-200);border-color:#bcc7ca;color:#96a1a5;
+  box-shadow:none;cursor:default;font-weight:600;
+}
 .dock .thumbs:empty{display:none}
 .dock .cap-msg{font:10.5px var(--font-mono);color:#7c898d}
 .dock .cap-msg:empty{display:none}
@@ -545,7 +570,9 @@ body.solo #collapseBtn{display:none}
         <div class="brand-name">TASK<span> / INBOX</span></div>
         <div class="brand-sub">CIRCUIT / WORKSPACE</div>
       </div>
-      <button class="side-toggle" id="sideToggle" title="收起侧栏">«</button>
+      <button class="side-toggle" id="sideToggle" title="收起侧栏">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
     </div>
 
     <div class="section-title">status</div>
@@ -648,9 +675,13 @@ body.solo #collapseBtn{display:none}
         <div class="cap-msg" id="msg"></div>
       </div>
       <div class="side">
-        <button class="icon-btn" id="attachBtn" title="添加附件">📎</button>
+        <button class="icon-btn" id="attachBtn" title="添加附件">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M21 12.5l-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg>
+        </button>
         <button class="go" id="go" disabled>存下</button>
-        <button class="icon-btn" id="collapseBtn" title="收起底栏">⌄</button>
+        <button class="icon-btn" id="collapseBtn" title="收起底栏">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
       </div>
       <input type="file" id="fileInput" multiple hidden>
     </footer>
@@ -782,7 +813,7 @@ const COLS = [
 const PRI_LABEL = { p0:'P0 阻塞', p1:'P1 紧急', p2:'P2 常规', p3:'P3 低', p4:'P4 待定' };
 const PRI_COLOR = { p0:'var(--p0)', p1:'var(--p1)', p2:'var(--p2)', p3:'var(--p3)', p4:'var(--p4)' };
 const KIND_LABEL = { text:'文字', image:'图片', image_text:'图文', link:'链接', file:'附件', mixed:'混合' };
-const KIND_ICON = { text:'', image:'🖼', image_text:'🖼', link:'🔗', file:'📎', mixed:'📎' };
+
 
 const SOLO = new URLSearchParams(location.search).has('solo');
 const LS_W = 'ti.captureWidth';
