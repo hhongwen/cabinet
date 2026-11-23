@@ -5,17 +5,21 @@ cd /d "%~dp0"
 
 set "DESK=%USERPROFILE%\Desktop"
 set "HERE=%~dp0"
+set "ICO=%HERE%icons\cabinet-light.ico"
 
-REM 用 .cmd 快捷方式指向本目录的脚本，换机器也能用
-set "S1=%DESK%\随手记.cmd"
-set "S2=%DESK%\任务看板.cmd"
+REM 图标缺失时退回系统图标，不要让快捷方式变成空白页
+if not exist "%ICO%" set "ICO="
 
-> "%S1%" echo @echo off
->>"%S1%" echo call "%HERE%start.cmd" quick
->>"%S1%" echo exit
+call :make "%DESK%\任务看板.url" "http://127.0.0.1:46001/" "任务看板"
+call :make "%DESK%\随手记.url" "http://127.0.0.1:46001/?solo=1" "随手记"
 
-> "%S2%" echo @echo off
->>"%S2%" echo call "%HERE%start.cmd"
->>"%S2%" echo exit
+echo [OK] 桌面快捷方式已重建
+exit /b 0
 
-echo [OK] 桌面已放：随手记.cmd / 任务看板.cmd
+:make
+> "%~1" echo [InternetShortcut]
+>>"%~1" echo URL=%~2
+if defined ICO >>"%~1" echo IconFile=%ICO%
+if defined ICO >>"%~1" echo IconIndex=0
+echo [OK] %~3
+exit /b 0
