@@ -9,6 +9,7 @@
 目标是消掉这个位置：**我不该是它们之间的路由器和翻译。**
 
 - 路线图与技术判断 → [ROADMAP.md](ROADMAP.md)
+- 阶段 1A 实施计划（持久 Agent Session）→ [docs/plans/2026-11-24-session-1a-implementation.md](docs/plans/2026-11-24-session-1a-implementation.md)
 - Session / 交接 / 协作实施规划 → [docs/session-collaboration.md](docs/session-collaboration.md)
 - 卡片关系（合/拆/层级/依赖）与表格视图 → [docs/relations-and-table.md](docs/relations-and-table.md)
 - 待修问题清单 → [task-inbox/ISSUES.md](task-inbox/ISSUES.md)
@@ -19,8 +20,8 @@
 ## 现在到哪一步了
 
 ```
-随手记一句 → 判类型/优先级/项目 → 判够不够开工 → 整理成需求 → 合并/拆分/依赖/层级 → 挂 Agent 会话 + 交接
-   ✅              ✅                  ✅              ✅               ✅                    ⬜ 下一步
+随手记一句 → 判类型/优先级/项目 → 判够不够开工 → 整理成需求 → 合并/拆分/依赖/层级 → 挂 Agent 会话 → 交接
+   ✅              ✅                  ✅              ✅               ✅               ✅ 1A        ⬜ 1C
 ```
 
 | 阶段 | 状态 | 说明 |
@@ -32,10 +33,11 @@
 | **收尾** | ✅ 可用 | 已完成 30 天自动归档，归档不删数据，能取回 |
 | **串** | ✅ 可用 | 卡片之间能合并、拆分、挂父子、设前置依赖；【合】【拆】【等 N】徽章可点开看原始记录 |
 | **看** | ✅ 可用 | 看板 / 表格两种画法，同一份数据同一套筛选；表格能缩进、排序、行内改负责人和工时 |
-| **会话** | ⬜ 未开始 | 卡片下挂 Codex / OpenCode 的持久会话，能连续对话 |
-| **交接** | ⬜ 未开始 | Session 之间传摘要 + 证据，人不用复制粘贴 |
+| **会话** | ✅ 1A（OpenCode） | 卡片下挂 OpenCode 持久会话，能连续对话；重启后仍能定位原 Session |
+| **交接** | ⬜ 1C | Session 之间传摘要 + 证据，人不用复制粘贴 |
 
-五条流水线已经能用了。下一步按 **1A 持久 Session → 1B 摘要与证据 → 1C 双向交接** 逐步验证，之后才进入阶段 2 的受控自动化。
+任务流水线已经能用了。**1A 已完成**（OpenCode 持久 Session、Turn 记录、重启恢复、项目默认 Agent / 模型），下一步按 **1B 摘要与证据 → 1C 双向交接** 逐步验证，之后才进入阶段 2 的受控自动化。
+1A 的实施与验收见 [docs/plans/2026-11-24-session-1a-implementation.md](docs/plans/2026-11-24-session-1a-implementation.md)。
 具体缺陷与修复进度由 [ISSUES.md](task-inbox/ISSUES.md) 单独维护。
 
 > 2026-11-23 那一轮把「一条任务怎么走完全程」补齐了：

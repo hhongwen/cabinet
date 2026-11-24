@@ -307,6 +307,46 @@ node cli.mjs backup [文件]            热备份成 .db（服务在跑也能备
 
 ---
 
+## Agent 会话（阶段 1A）
+
+抽屉里的 **Agent 会话** 是外部 CLI 的持久会话，和上面的「与 Cabinet 对话」不是一回事：
+
+| | 与 Cabinet 对话 | Agent 会话 |
+|---|---|---|
+| 谁在回 | Cabinet 的模型通道 | OpenCode CLI |
+| 能做什么 | 改这张卡的字段、讨论方案 | 真正读代码、跑命令、改文件 |
+| 数据在哪 | `messages` 表 | `agent_sessions` / `session_turns` |
+| 一轮结束 | 返回一段话 + 结构化补丁 | 更新 Turn 状态和结果，**不改任务状态** |
+
+### 怎么用
+
+1. 打开卡片抽屉 → **Agent 会话** → **挂一个**
+2. 选角色（开发 / 审阅 / 规划 / 测试）、Agent、工作目录和模型
+   - 项目里配了默认 Agent / 模型时，新会话自动继承
+   - 工作目录默认取项目的「主要目录」
+3. 在输入框里发消息；`Ctrl+Enter` 发送
+4. 运行中显示「执行中」，可以点 **停止**；结束后显示结果
+5. 服务重启后如果这一轮没跑完，会显示 **待核对**，点 **核对状态** 让 Cabinet
+   用 `opencode session export` 对回原 Session
+
+### 几条硬规则
+
+- **工作目录在首次发送后不能改**。OpenCode 的 Session 按工作目录归属，换了目录同一个 ID 可能打不开。
+- **同一会话同时只跑一轮**。运行中再发会得到 `409`，不会排两个 Turn 抢同一个会话。
+- **Turn 完成 ≠ 任务完成**。Cabinet 不会因为 Agent 说完成就把卡片改成已完成。
+- **重启不猜结果**。未完成的 Turn 一律先标 `unknown`；只有导出明确证明完成时才改 `completed`。
+- **Agent 以 `--auto` 运行**，会在工作目录直接执行命令（自动批准权限）。这是非交互模式的必要前提，工作目录要自己选对。
+
+### 数据和证据
+
+```
+agent_sessions   一个角色实例一条：task_id / role / agent / external_session_id / working_directory / model / status
+session_turns    每一轮：status / user_text / result_text / error / events_file / external_ref / 起止时间
+```
+
+每轮的原始 JSONL 事件落在数据目录的 `sessions/<turn_id>.jsonl`，删任务时一起清掉。
+目前只有 OpenCode 一个 Adapter；Codex 留到 1C。Agent 会话暂不支持图片 / 文件附件。
+
 ## 模型接入：三条通道自动降级
 
 按顺序探测，第一个能用的就走：
@@ -461,18 +501,20 @@ T-014  表父卡       未开始  P2 常规  Cabinet   张工    8     6.5   11-
 在跑（`cli.mjs` 每次执行都是一个新进程）。JSON 全量重写会互相覆盖，
 WAL + `busy_timeout` 不会。
 
-六张表：
+八张表：
 
 | 表 | 装什么 |
 |---|---|
 | `tasks` | 任务本体。`payload` / `dev_gaps` 是 JSON 字符串；`dev_ready` / `archived_at` 是流水线那两个位；`merged_into` 指向合并它的那张卡 |
-| `messages` | 卡片抽屉里的对话，`ON DELETE CASCADE`；`attachments` 是 JSON（images / files） |
-| `projects` | 项目，`aliases` / `dirs` 是 JSON，`sort_order` 是侧栏顺序（「默认」永远是 0） |
+| `messages` | 卡片抽屉里「与 Cabinet 对话」的消息，`ON DELETE CASCADE`；`attachments` 是 JSON（images / files） |
+| `projects` | 项目，`aliases` / `dirs` 是 JSON，`sort_order` 是侧栏顺序（「默认」永远是 0）；`default_agent` / `default_model` 给新会话继承，`archived_at` 归档但不删 |
 | `links` | 卡片之间的关系边：`kind` + `from_id` + `to_id`，`UNIQUE(kind,from,to)`，两端都 `ON DELETE CASCADE` |
+| `agent_sessions` | 一张卡下的外部 Agent 会话：角色 / Agent / 外部 Session ID / 工作目录 / 模型 / 状态 |
+| `session_turns` | 每一轮的输入、结果、错误、事件文件、外部 messageID、起止时间；同一会话用部分唯一索引保证只有一轮没结束 |
 | `settings` | 通道、模型、`archive_after_days` 这类键值 |
 | `meta` | 库版本号，迁移用 |
 
-**schema 版本**：现在 **v8**。加字段时 `SCHEMA_VERSION +1` 并在 `MIGRATIONS` 里补一条，
+**schema 版本**：现在 **v9**。加字段时 `SCHEMA_VERSION +1` 并在 `MIGRATIONS` 里补一条，
 **一次改动只占一个号** —— 分两次加字段时，后落地的那条会被
 `fromVersion < SCHEMA_VERSION` 跳过，字段永远补不上。
 
@@ -484,6 +526,7 @@ v5  links 表 + tasks.merged_into / tasks.split_state
 v6  tasks.link_warn（前置断开时给下游留一句提示）
 v7  tasks.parent_id + idx_tasks_parent（层级）
 v8  seq_no / plan_start_at / plan_end_at / owner / estimate_hours / actual_hours（表格）
+v9  agent_sessions / session_turns + projects.default_agent / default_model / archived_at（1A 会话）
 ```
 
 老数据自动迁移：建库时如果目录里还有 `tasks.json` 而且 `tasks` 表是空的，
@@ -601,26 +644,29 @@ node style-audit.mjs
 | 底栏「P2 常规 · 工作」永久驻留 | 那是分类回声，6 秒后自动消失；顺带修了提示出现时输入框被顶上去 19px |
 
 **还留着的**：搜索、分页（任务过 100 条再做）；手机端看板卡片的跨列拖拽
-（用抽屉里的状态下拉替代，功能不缺）。详见 [ISSUES.md](ISSUES.md)。
+（用抽屉里的状态下拉替代，功能不缺）；1A 只有 OpenCode、Agent 会话不支持图片/文件、
+不做自动交接。详见 [ISSUES.md](ISSUES.md)。
 
 ### 测试
 
 ```bash
-node test-sqlite.mjs    # 存储层 + schema 迁移 + 卡片关系 + 层级 + 表格字段，365 项
-node test-parsers.mjs   # classify / chat 解析层 + 队列路由，86 项，不碰真模型
-node style-audit.mjs    # 界面样式规范
+node test-sqlite.mjs        # 存储层 + schema 迁移 + 卡片关系 + 层级 + 表格 + 会话，400 项
+node test-agent.mjs         # 事件解析 / 导出核对 / Turn 运行器 / CLI 解析，54 项
+node test-agent-http.mjs    # Session / Turn HTTP 路由 + 409，32 项
+node test-parsers.mjs       # classify / chat 解析层 + 队列路由，86 项，不碰真模型
+node style-audit.mjs        # 界面样式规范
 ```
 
 ---
 
 ## 下一步
 
-**先修问题，再加功能。** 顺序见 [ISSUES.md](ISSUES.md) 末尾，
-路线图见 [../ROADMAP.md](../ROADMAP.md)。
+**1A 已完成**：OpenCode 持久 Session、Turn 记录、重启恢复、项目默认 Agent / 模型。
+下一步按 [ROADMAP.md](../ROADMAP.md) 的 **1B 摘要与证据 → 1C 双向交接** 推进；
+具体问题清单和验收记录见 [ISSUES.md](ISSUES.md)。
 
-当前的方向是「多 Agent Session 协作」，但在开始之前要先清掉
-[ISSUES.md](ISSUES.md) 里的 P0 和 P1 —— 那些是已经坏了、或者马上会坏的东西。
-带着这些问题做 Session，同一个坑会重复三次。
+1A 的已知限制：只有 OpenCode 一个 Adapter、Agent 会话不支持图片/文件附件、
+不做自动选下游和自动路由 —— 这些不影响单 Agent 连续对话，但要等 1B/1C 再补。
 
 ---
 

@@ -360,55 +360,73 @@ context      累积的最新共识（markdown）← 待建（可更新，带来�
 | 看 | 看板（三列）+ 表格（11 列、层级缩进、排序、5 列行内编辑）两种画法 |
 | 收尾 | 已完成 30 天自动归档，不删数据，可取回 |
 | 谈 | 卡片抽屉里对话，模型返回结构化补丁直接改卡片字段 |
-| 存 | SQLite（WAL），schema v8，老 `tasks.json` 自动迁移 |
-| 接 | 四条模型通道自动降级：magpie → alma → opencode → codex |
-| 跑 | Alma 插件 / 独立服务两种方式，Windows + macOS |
+| 存 | SQLite（WAL），schema v9，老 `tasks.json` 自动迁移 |
+| 接 | 三条模型通道自动降级：magpie → opencode → codex |
+| 跑 | 独立服务，Windows + macOS |
+| **会话** | **OpenCode 持久 Session、Turn 记录、停止 / 核对、重启恢复** |
+| **项目** | **默认 Agent / 模型、归档 / 恢复；新会话自动继承** |
 
-测试：`test-sqlite` 362 项、`test-parsers` 86 项，全绿。
+测试：`test-sqlite` 400 项、`test-agent` 54 项、`test-agent-http` 32 项、
+`test-parsers` 86 项，全绿；`style-audit` 0 error。
 
 ### 还没开始的
 
-**持久 Session、结果摘要、双向交接 —— 对应阶段 1A / 1B / 1C，尚未开始。**
+**1A 已完成（2026-11-24，OpenCode）。1B 摘要与证据、1C 双向交接仍未开始。**
 
-`tasks.claimed_by` 是留给它的占位，至今没有代码写过。
-`core.mjs` / `backend.mjs` / `chat.mjs` 里 `session` 这个词出现 **0 次** ——
-现在只有「一次调用拿一个字符串」，没有「一个能连续对话的会话」。
+1A 落地的部分：
 
-按第一节的边界，1A 要补的第一批东西（见下节「补丁清单」）：
-`agent_sessions` / `session_turns` 两张表，`projects.default_agent`，
-`projects.archived_at`，以及 `agent.mjs` + 第一个 OpenCode adapter。
+```
+schema v9   agent_sessions / session_turns
+            projects.default_agent / default_model / archived_at
+adapter     opencode-agent.mjs：run --format json --auto --session、session export
+runner      agent.mjs：串行、超时、事件落盘、unknown 恢复、interrupt
+http        /api/agents、/api/tasks/:id/sessions、/api/sessions/:id/turns、reconcile
+ui          抽屉「Agent 会话」区、卡片 Agent 徽标、项目默认 Agent / 归档
+```
+
+`tasks.claimed_by` 仍是占位 —— 1A 的分配是「用户选 Session」，不是「Agent 抢任务」。
+
+### 1A 验收记录（2026-11-24）
+
+| 验收项 | 证据 |
+|---|---|
+| 两轮复用同一个外部 Session | 临时库实测：同一 `ses_...` 连续两轮，第一轮「只回复两个字：收到」→「收到」，第二轮问「刚才的两个字是什么」→「收到」 |
+| 重启后仍能定位原 Session | 停服务再起，同一 `external_session_id` 保留；第二、三轮继续在原 Session 上跑 |
+| 未完成 Turn 不误报完成 | 手工把 Turn 置 `running` 后重启：Turn 和 Session 都变 `unknown`；`session export` 核对不到时保持 `unknown`，任务状态仍是 `todo` |
+| 同会话不并行 | 运行中再发返回 `409`；数据库部分唯一索引兜底 |
+| 删除清证据 | 删除任务时 `sessions/<turn>.jsonl` 一起清掉 |
+| 前端可用 | 抽屉里能建会话、发送、停止、核对；卡片显示「Agent 运行中 / Agent N」 |
+| 项目默认值 | 项目设置保存 Agent / 模型后刷新仍在；新会话继承 Agent、模型占位符和主目录 |
+| 项目归档 | 有活跃任务时拒绝并报条数；空项目归档后侧栏消失，设置里可恢复 |
 
 ### 阶段 1 的补丁清单（2026-11-24 边界复核后）
 
 原计划没覆盖、但不动会出问题的四件事：
 
-| # | 补什么 | 在哪一步 |
-|---|---|---|
-| 1 | `projects.default_agent` / `projects.archived_at` 两列 | 1A（第 1 块） |
-| 2 | `artifacts` 表（替掉「证据存哪」的散字段） | 1B（第 4 块） |
-| 3 | `task_context`（可更新的共识，区别于 append-only 摘要） | 1B（第 4 块） |
-| 4 | 跨项目依赖补一例测试（技术上已支持，从没验证过） | 1C 之前
+| # | 补什么 | 在哪一步 | 状态 |
+|---|---|---|---|
+| 1 | `projects.default_agent` / `default_model` / `archived_at` 三列 | 1A（第 1 块） | ✅ 已落地 |
+| 2 | `artifacts` 表（替掉「证据存哪」的散字段） | 1B（第 4 块） | ⬜ 未开始 |
+| 3 | `task_context`（可更新的共识，区别于 append-only 摘要） | 1B（第 4 块） | ⬜ 未开始 |
+| 4 | 跨项目依赖补一例测试（技术上已支持，从没验证过） | 1C 之前 | ⬜ 未开始 |
 
-### 实际使用数据（2026-11-23 20:05 的快照）
+### 实际使用数据（2026-11-24 21:00 的快照）
 
 > 这不是实时数字。想看当前的，跑 `node cli.mjs ls` 或打开看板。
 > 更重要的是：**每过一段时间重新看一次这个比例，它是判断"该做什么"的依据。**
 
-最新一次快照（当天早些时候是 12 条，涨了 5 条）：
+最新一次快照：
 
 ```
-17 条任务 / 5 个项目 / 14 条消息
-来源:     quick 16, chat 1
-分类:     done 17（全部成功，0 条 needs_project）
-状态:     待办 7 / 进行中 2 / 已完成 8
-有 brief: 2/17
-有对话:   4/17
+27 条任务（1 条已归档）/ 6 个项目（含「默认」筐）
+状态:     待办 4 / 进行中 2 / 已完成 20
+有 brief: 13/26
+有对话:   6/26
 ```
 
-**"收"和"判"跑起来了，"理"和"谈"刚开始有动作。**
-和上一版（12 条 / 1 brief / 1 对话）比，brief 从 1 涨到 2、对话从 1 涨到 4 ——
-右侧文档预览那个入口确实降低了"看一眼需求"的成本，但绝对值还是很低：
-17 条里只有 2 条被整理过、4 条聊过。
+**"收"和"判"已经在承载真实工作了，"理"过了半数，"谈"仍然少。**
+26 条活跃任务里 13 条被整理过、6 条聊过 —— 比 11-23 的 2/17 和 4/17 明显上升，
+但「派给 Agent 执行」还是刚起步：1A 落地当天只有少数卡片真的挂了会话。
 
 这个比例比任何架构判断都重要：在给"理"和"派"加功能之前，
 要先看"收"和"判"是不是真的在省时间。如果它连"记住该做什么"这件事都没做到，

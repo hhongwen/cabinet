@@ -1,8 +1,9 @@
 # Cabinet Session 与 Agent 协作实施规划
 
-> **状态：仅规划，尚未实现。** 2026-11-23 立，2026-11-24 边界复核。
-> 细化 [ROADMAP.md](../ROADMAP.md) 的阶段 1A / 1B / 1C / 2；本文不是功能已上线的声明。
-> 现有问题由 [ISSUES.md](../task-inbox/ISSUES.md) 维护，本次不修改问题清单。
+> **状态：1A 已实现（OpenCode，2026-11-24）；1B / 1C / 2 仍为规划。**
+> 1A 的实施与验收见 [docs/plans/2026-11-24-session-1a-implementation.md](plans/2026-11-24-session-1a-implementation.md)。
+> 本文继续细化 [ROADMAP.md](../ROADMAP.md) 的阶段 1A / 1B / 1C / 2；1B / 1C 部分不是上线声明。
+> 现有问题由 [ISSUES.md](../task-inbox/ISSUES.md) 维护。
 >
 > **2026-11-24 这次复核补了什么**：三层职责边界（§十）、`brief` / `TaskContext` / `Handoff`
 > 三者的时间性分工（§二）、`Artifact` 对象（§四）、Project 的边界与规划也是派活（§二、§十）、

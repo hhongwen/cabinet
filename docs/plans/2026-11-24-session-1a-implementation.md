@@ -1,6 +1,11 @@
 # Cabinet 阶段 1A：持久 Agent Session 实施计划
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+>
+> **状态：已实现并验收（2026-11-24，分支 `feat/session-1a`）。**
+> 验收证据：真实 OpenCode 两轮复用同一 Session；重启后未完成 Turn 变 `unknown`；
+> `test-sqlite` 400 / `test-agent` 54 / `test-agent-http` 32 / `test-parsers` 86，
+> `style-audit` 0 error。实施记录见 `task-inbox/ISSUES.md` 第九批。
 
 **Goal:** 在任务卡片下挂一个可连续对话的 OpenCode 持久 Session，Cabinet 重启后仍能定位并继续，Turn 的状态、结果和原始事件可追溯。
 

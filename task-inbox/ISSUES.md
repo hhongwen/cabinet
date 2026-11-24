@@ -5,8 +5,8 @@
 >
 > 优先级：**P0** 会丢数据或已经坏掉 / **P1** 明显影响使用 / **P2** 该补但不急 / **P3** 可以不做
 >
-> 对应路线图见 [../ROADMAP.md](../ROADMAP.md)。**阶段 1（Session 协作）之前，
-> 先把这份清单里的 P0 和 P1 处理完。**
+> 对应路线图见 [../ROADMAP.md](../ROADMAP.md)。阶段 1A（持久 Agent Session）
+> 已于 2026-11-24 落地；1B / 1C 之前继续按 P0 / P1 / P2 的顺序处理本清单。
 
 ---
 
@@ -1560,6 +1560,42 @@ limit，没有 `dev_ready` 也没有 `include_archived`。所以你在对话里�
 
   测试    220 → 302（依赖 50 条 + 层级 32 条）→ 362（表格 60 条）
   style-audit 0 error（.rel-x / .tbl-sort 加进按钮豁免并写明理由）
+
+第九批（阶段 1A：持久 Agent Session）  ✅ 2026-11-24
+  schema v9
+    agent_sessions / session_turns（同一会话部分唯一索引只允许一轮未结束）
+    projects.default_agent / default_model / archived_at
+  core
+    createSession / bindExternalSession / startTurn / markTurnRunning / finishTurn
+    recoverOpenTurns（重启把 queued/running 收成 unknown，不冒充完成）
+    setSessionStatus（reconcile 用外部导出的状态，不能从本地 Turn 推导）
+    TASK_SELECT 带 agent_session_count / agent_status；删任务清 sessions/<turn>.jsonl
+  adapter
+    opencode-agent.mjs：run --format json --auto --session、stdin 送 prompt
+    一次 run 可能有多个 step（tool-calls → 新 step）；只认最后一个 step_finish.reason
+    session export 核对 outcome / busy-idle / 每条 message 的 completed
+  runner
+    agent.mjs：同会话串行、30 分钟超时、事件落盘、interrupt、reconcile、recover
+    退出 0 但没有 step_finish → unknown；导出核对不到 → 保持 unknown
+  http
+    /api/agents、/api/tasks/:id/sessions、/api/sessions/:id/turns、reconcile、
+    /api/turns/:id/interrupt；同会话并发发送 409
+  ui
+    抽屉「Agent 会话」区（和 Cabinet 对话分开）、发送/停止/核对、2 秒轮询
+    卡片「Agent 运行中 / Agent 待核对 / Agent N」徽标
+    项目默认 Agent/模型、项目归档/恢复；新会话继承项目配置
+  顺手修
+    resolveCliBin 优先 @opencode/cli 的真身 —— opencode-ai/bin/opencode.exe
+    只有 479 字节，spawn 它会直接 UNKNOWN（真实发送时踩到，已加测试）
+  验收
+    真实 OpenCode 两轮复用同一 ses_...；重启后同一外部 Session 继续可用
+    手工置 running 后重启：Turn/Session 变 unknown，任务状态仍是 todo
+    有活跃任务的项目归档被拒；空项目归档后侧栏消失、设置里可恢复
+  测试
+    test-sqlite 400 / test-agent 54 / test-agent-http 32 / test-parsers 86
+    style-audit 0 error（1 个历史遗留 warning）
+  已知限制
+    只有 OpenCode；Agent 会话不支持图片/文件附件；不做自动选下游和自动交接
 
 第七批（卡片关系第 1 步）  ✅ 2026-11-24 10:25
   规格见 docs/relations-and-table.md —— 合并 / 拆分 / 层级 / 依赖 是四种语义，
