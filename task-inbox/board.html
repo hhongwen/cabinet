@@ -1047,6 +1047,15 @@ body select.sel-native{
 
 /* .board 是 grid，表格要整块铺开 */
 .board--table{display:block}
+/* 表格模式下滚动容器的顶部内边距必须是 0。
+   原因：表头是 `position:sticky; top:0`，它相对**滚动容器的 padding box**
+   吸顶 —— 只要容器有 padding-top，表头就会停在那条 padding 里，
+   而 padding 区**不参与裁剪**，滚过去的行就从表头上方那条缝里露出来
+   （实测缝宽正好等于 padding-top，画在表头上方的红框就是它）。
+   视觉上的那点间距改用 margin 给：margin 属于内容，滚过去会被裁掉。
+   这个类由 render() 按 viewMode 切换，别手写。 */
+.board-scroll.has-table{padding-top:0}
+.board--table > .tbl-wrap{margin-top:6px}
 /* 外框靠 box-shadow 画，**不加 overflow:hidden** —— 任何 overflow 都会让
    这个 div 变成滚动容器，里面的 sticky 表头就改成相对它定位（它和内容一样高），
    于是表头永远不粘。圆角靠表头单元格自己圆，不靠裁剪。 */
@@ -3100,6 +3109,9 @@ function render(){
   // 表格视图：整块换成一张表，但**数据源和过滤完全一样**
   // （可见行仍然来自 visibleTasks()，点行仍然开 drOpen）
   board.classList.toggle('board--table', viewMode === 'table');
+  // 滚动容器的顶部内边距只在表格模式下归零 —— 表头 sticky 会停在那条
+  // padding 里，padding 区不裁剪，滚过去的行就从表头上方露出来（见 CSS 注释）
+  board.closest('.board-scroll')?.classList.toggle('has-table', viewMode === 'table');
 
   if (viewMode === 'table') {
     board.innerHTML = tableHTML();
@@ -4567,7 +4579,14 @@ function drRenderHead(t){
   selSync();
 
   $('#drPri').onchange = () => drQuick({ priority: $('#drPri').value });
-  $('#drProj').onchange = () => drQuick({ project: $('#drProj').value });
+  // 换项目要**名字和 id 一起发**。只发名字时后端得自己按名字找项目，
+  // 早先那个版本会拿旧 project_id 把名字又套回去（200 但值没变）。
+  // 前端本来就手握着 store.projects 里的 id，没有理由让它多猜一次。
+  $('#drProj').onchange = () => {
+    const name = $('#drProj').value;
+    const p = (store.projects || []).find(x => x.name === name);
+    drQuick(p ? { project: name, project_id: p.id } : { project: name });
+  };
   $('#drStatus').onchange = () => drQuick({ status: $('#drStatus').value });
 
   // 「未判断 · 重试」按钮
