@@ -1317,6 +1317,11 @@ dialog::backdrop{background:rgba(30,40,45,.34); backdrop-filter:blur(3px)}
 .proj-row .pn{font-size:12.5px;font-weight:600}
 .proj-row .pc{margin-left:auto;font:10px var(--font-mono);color:var(--text-3)}
 .proj-row .dirs{font:10.5px var(--font-mono);color:var(--text-3);margin-top:2px}
+/* 归档项目只出现在设置的管理视图里：淡下去，但保留「恢复」这个明确动作 */
+.proj-row.archived{opacity:.72;cursor:default}
+.proj-row.archived:hover{background:transparent}
+.proj-arch-toggle{display:flex;align-items:center;gap:6px;cursor:pointer;border-top:1px dashed var(--hair);background:var(--silver-00)}
+.proj-arch-toggle input{margin:0}
 /* 上移/下移：手机上 HTML5 拖拽不工作，这两个按钮是那边唯一能改顺序的入口。
    桌面端也留着 —— 挪一位比拖拽更准，不会插错行。 */
 .proj-step{
@@ -2021,12 +2026,27 @@ body.solo #collapseBtn{display:none}
     </div>
 
     <div class="field">
+      <label>默认 Agent（新会话没指定时用这个）</label>
+      <select id="p-agent" class="sel-native" data-sel="field">
+        <option value="">不指定</option>
+        <option value="opencode">OpenCode</option>
+        <option value="codex" disabled>Codex（1C 再接）</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label>默认模型（留空 = 用 Agent 默认）</label>
+      <input id="p-model" placeholder="provider/model" autocomplete="off">
+    </div>
+
+    <div class="field">
       <label>源目录</label>
       <div class="dir-list" id="dirList"></div>
       <button type="button" class="mini" id="addDir">+ 添加目录</button>
     </div>
 
     <div class="dlg-foot">
+      <button type="button" id="projArchive" style="display:none">归档项目</button>
       <button type="button" id="projDelete" class="btn--danger" style="margin-right:auto">删除</button>
       <button type="button" id="projCancel">取消</button>
       <button type="submit" class="primary">保存</button>
@@ -3944,6 +3964,19 @@ $('#go').addEventListener('click', submit);
 /* ---------------- 设置面板 ---------------- */
 
 let backendStatus = null;
+// 归档项目只在设置弹窗里出现，侧栏继续用 store.projects（默认排除归档）。
+// 两者故意分开：侧栏是日常视图，设置是管理视图。
+let archivedProjects = [];
+let showArchivedProjects = false;
+
+async function loadArchivedProjects(){
+  try {
+    const r = await api('GET', '/api/projects?include_archived=1');
+    archivedProjects = (r.projects || []).filter(p => p.archived_at);
+  } catch {
+    archivedProjects = [];
+  }
+}
 
 async function openSettings(){
   try {
@@ -3982,6 +4015,7 @@ async function openSettings(){
   }
   closeModelMenu();
 
+  await loadArchivedProjects();
   renderProjList();
   $('#cfg').showModal();
 }
@@ -5763,18 +5797,32 @@ let editingProjectId = null;
 function renderProjList(){
   const host = $('#projList');
   if (!host) return;
-  const list = store.projects || [];
-  host.innerHTML = list.map((p, i) => {
+  const active = store.projects || [];
+  // 归档项目只在这个管理视图里追加到末尾；侧栏永远只看 store.projects。
+  const list = showArchivedProjects ? active.concat(archivedProjects) : active;
+  const rows = list.map((p, i) => {
     const dirs = (p.dirs || []).map(d => {
       const base = String(d.path || '').split(/[\\/]/).filter(Boolean).pop() || d.path;
       return base + (d.note ? '（' + d.note + '）' : '');
     }).join('、');
+    const isArch = !!p.archived_at;
+    if (isArch) {
+      return `<div class="proj-row archived" data-pid="${p.id}" data-arch="1">
+        <div>
+          <div class="pn">${esc(p.name)}</div>
+          <div class="dirs">已归档${dirs ? ' · ' + esc(dirs) : ''}</div>
+        </div>
+        <span class="pc">${p.taskCount || 0}</span>
+        <button type="button" class="mini-btn" data-restore="${p.id}">恢复</button>
+      </div>`;
+    }
     // 手机上 HTML5 拖拽整个不工作（没有 dragstart/drop），
     // 所以排序不能只靠拖。这两个按钮是触屏上唯一能改顺序的入口，
     // 桌面端也留着 —— 一次挪一位比拖拽更准，不会插错位置。
     const fixed = isInbox(p.name);
     const canUp = !fixed && i > 1;                 // 0 号永远是「默认」，1 号上面就是它
-    const canDown = !fixed && i < list.length - 1;
+    // 只和活跃项目比，别让最后一条活跃项目「下移」到归档区里
+    const canDown = !fixed && i < active.length - 1;
     return `<div class="proj-row" data-pid="${p.id}" data-idx="${i}">
       <div>
         <div class="pn">${esc(p.name)}</div>
@@ -5788,10 +5836,17 @@ function renderProjList(){
     </div>`;
   }).join('') || '<div class="proj-row"><div class="pn" style="color:var(--text-3)">还没有项目</div></div>';
 
+  // 归档开关常驻在最下面，0 条也显示 —— 否则用户不知道还能恢复
+  const foot = `<label class="proj-row proj-arch-toggle">
+    <input type="checkbox" id="projShowArchived" ${showArchivedProjects ? 'checked' : ''}>
+    <span class="pn">显示已归档（${archivedProjects.length}）</span>
+  </label>`;
+  host.innerHTML = rows + foot;
+
   host.querySelectorAll('.proj-row[data-pid]').forEach(row => {
     row.addEventListener('click', (e) => {
-      // 上下移按钮有自己的行为，别让它顺手把项目编辑器也打开
-      if (e.target.closest('.proj-step')) return;
+      // 上下移 / 恢复按钮有自己的行为，别让它顺手把项目编辑器也打开
+      if (e.target.closest('.proj-step') || e.target.closest('[data-restore]')) return;
       openProjectEditor(row.dataset.pid);
     });
   });
@@ -5801,6 +5856,19 @@ function renderProjList(){
       await moveProjectStep(btn.dataset.pid, Number(btn.dataset.step));
     });
   });
+  host.querySelectorAll('[data-restore]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await restoreProject(btn.dataset.restore);
+    });
+  });
+  const toggle = $('#projShowArchived');
+  if (toggle) {
+    toggle.addEventListener('change', () => {
+      showArchivedProjects = toggle.checked;
+      renderProjList();
+    });
+  }
 }
 
 /* 把项目往上/下挪一位。和拖拽走同一个接口，只是用「相邻交换」算目标顺序 —
@@ -5825,6 +5893,18 @@ async function moveProjectStep(id, step){
     toast('排序没存上：' + err.message);
     await refresh();
     renderProjList();
+  }
+}
+
+async function restoreProject(id){
+  try {
+    await api('PATCH', '/api/projects/' + encodeURIComponent(id), { archived_at: null });
+    await refresh();
+    await loadArchivedProjects();
+    renderProjList();
+    toast('项目已恢复');
+  } catch (err) {
+    toast('恢复失败：' + err.message);
   }
 }
 
@@ -5887,18 +5967,32 @@ function dirRow(d = {}){
 
 function openProjectEditor(id){
   editingProjectId = id || null;
-  const p = id ? (store.projects || []).find(x => x.id === id) : null;
+  // 归档项目不在 store.projects 里，但设置里点它也要能打开编辑器
+  const p = id
+    ? (store.projects || []).find(x => x.id === id)
+      || archivedProjects.find(x => x.id === id)
+    : null;
 
   $('#projTitle').textContent = p ? '编辑项目' : '新建项目';
   $('#p-name').value = p?.name || '';
   $('#p-aliases').value = (p?.aliases || []).join(', ');
-  $('#projDelete').style.display = p ? '' : 'none';
+  $('#p-agent').value = p?.default_agent || '';
+  $('#p-model').value = p?.default_model || '';
+  $('#projDelete').style.display = p && !p.archived_at ? '' : 'none';
+  const canArchive = !!p && p.name !== '默认';
+  $('#projArchive').style.display = canArchive ? '' : 'none';
+  $('#projArchive').textContent = p?.archived_at ? '恢复项目' : '归档项目';
 
   const list = $('#dirList');
   list.innerHTML = '';
   const dirs = (p?.dirs || []);
   if (dirs.length) dirs.forEach(d => list.appendChild(dirRow(d)));
   else list.appendChild(dirRow({}));
+
+  // #p-agent 是静态 select，页面初始化时可能已经套过壳；这里再调一次是幂等的，
+  // 但 selSync 必须跟 —— 直接改 value 不会更新自定义下拉的显示。
+  buildSels($('#projForm'));
+  selSync();
 
   $('#projDlg').showModal();
   setTimeout(() => $('#p-name').focus(), 40);
@@ -5922,13 +6016,27 @@ $('#projForm')?.addEventListener('submit', async e => {
     note: row.querySelector('.dn').value.trim(),
     primary: row.querySelector('select.dm').value === '1'
   })).filter(d => d.path);
+  const defaultAgent = $('#p-agent').value || null;
+  const defaultModel = $('#p-model').value.trim() || null;
 
   try {
-    if (editingProjectId) await api('PATCH', '/api/projects/' + encodeURIComponent(editingProjectId), { name, aliases, dirs });
-    else await api('POST', '/api/projects', { name, aliases, dirs });
+    if (editingProjectId) {
+      await api('PATCH', '/api/projects/' + encodeURIComponent(editingProjectId), {
+        name, aliases, dirs, default_agent: defaultAgent, default_model: defaultModel
+      });
+    } else {
+      const saved = await api('POST', '/api/projects', { name, aliases, dirs });
+      // 新建接口只认名字/别名/目录；默认 Agent 和模型补一次 PATCH
+      if (defaultAgent || defaultModel) {
+        await api('PATCH', '/api/projects/' + encodeURIComponent(saved.id), {
+          default_agent: defaultAgent, default_model: defaultModel
+        });
+      }
+    }
 
     $('#projDlg').close();
     await refresh();
+    await loadArchivedProjects();
     renderProjList();
     toast('项目已保存');
   } catch (err) {
@@ -5943,10 +6051,34 @@ $('#projDelete')?.addEventListener('click', async () => {
     await api('DELETE', '/api/projects/' + encodeURIComponent(editingProjectId));
     $('#projDlg').close();
     await refresh();
+    await loadArchivedProjects();
     renderProjList();
     toast('已删除');
   } catch (err) {
     toast('删除失败：' + err.message);
+  }
+});
+
+// 归档 / 恢复：归档不是删除，任务和目录都留着，只是侧栏不再显示。
+// 有活跃任务时后端会拒绝 —— 前端不重复判断，原样把条数提示出来。
+$('#projArchive')?.addEventListener('click', async () => {
+  if (!editingProjectId) return;
+  const p = (store.projects || []).find(x => x.id === editingProjectId)
+    || archivedProjects.find(x => x.id === editingProjectId);
+  if (!p) return;
+  const restoring = !!p.archived_at;
+  if (!restoring && !confirm('归档后侧栏不再显示这个项目。项目里还有未归档任务时会被拒绝。')) return;
+  try {
+    await api('PATCH', '/api/projects/' + encodeURIComponent(editingProjectId), {
+      archived_at: restoring ? null : new Date().toISOString()
+    });
+    $('#projDlg').close();
+    await refresh();
+    await loadArchivedProjects();
+    renderProjList();
+    toast(restoring ? '项目已恢复' : '项目已归档');
+  } catch (err) {
+    toast((restoring ? '恢复' : '归档') + '失败：' + err.message);
   }
 });
 
