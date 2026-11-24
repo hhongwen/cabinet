@@ -171,6 +171,12 @@ export function createAgentRunner(opts = {}) {
       } else if (result && result.aborted) {
         status = 'interrupted';
         error = '已手动停止';
+      } else if (result && result.stdinError) {
+        // CLI 在读到消息前就退出了。这不是「执行成功但没有事件」，
+        // 而是消息根本没送进去，必须落 failed 并说清 EPIPE / EOF。
+        status = 'failed';
+        error = 'Agent 没有读到消息：' + result.stdinError
+          + (result.stderr ? '；' + tail(result.stderr) : '');
       } else if (!result || result.exitCode === null || result.exitCode === undefined) {
         status = 'failed';
         error = 'Agent 没有正常退出' + (stderrText ? '：' + tail(stderrText) : '');
@@ -246,24 +252,40 @@ export function createAgentRunner(opts = {}) {
     let changed = null;
     // 从最近一轮往前找：一次只核对最近一条 unknown，避免把更早的历史
     // 按导出结果批量改写（导出没有「第几轮」的概念，只能靠 messageID）。
-    const turns = core.listTurns(sessionId, 50).slice().reverse();
+    const allTurns = core.listTurns(sessionId, 50);
+    const turns = allTurns.slice().reverse();
     for (const t of turns) {
       if (t.status !== 'unknown' || !t.external_ref) continue;
       const msg = (sum.messages || []).find((m) => m.id === t.external_ref);
-      if (msg && msg.completed) {
-        changed = core.finishTurn(t.id, { status: 'completed', resultText: msg.text });
+      // 没对上这一轮的 messageID，就不能拿「会话级 outcome」判它失败 ——
+      // 那可能是更早一轮的失败。保持 unknown，等下一次核对。
+      if (!msg) continue;
+      if (msg.completed) {
+        changed = core.finishTurn(t.id, {
+          status: 'completed',
+          // 导出可能拿不到正文；不要用空串覆盖重启前保留的半截结果
+          resultText: msg.text || t.result_text
+        });
         break;
       }
       if (sum.outcome && sum.outcome !== 'succeeded' && sum.status !== 'busy') {
         changed = core.finishTurn(t.id, {
-          status: 'failed', error: '外部会话结果：' + sum.outcome
+          status: 'failed',
+          error: '外部会话结果：' + sum.outcome,
+          resultText: t.result_text
         });
         break;
       }
     }
 
-    if (!changed && ['idle', 'busy', 'unavailable', 'unknown'].includes(sum.status)) {
-      core.setSessionStatus(sessionId, sum.status);
+    if (!changed) {
+      const latest = allTurns[allTurns.length - 1];
+      if (latest && latest.status === 'unknown') {
+        // 导出没证明这一轮结束：Session 也保持 unknown，别让徽标看起来正常
+        core.refreshSessionStatus(sessionId);
+      } else if (['idle', 'busy', 'unavailable', 'unknown'].includes(sum.status)) {
+        core.setSessionStatus(sessionId, sum.status);
+      }
     }
     return { session: core.getSession(sessionId), turn: changed };
   }

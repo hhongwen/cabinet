@@ -640,10 +640,11 @@ export function createCore(dataDir) {
 
     ensureDefaultProject();
     const revived = reviveStuckPending();
-    // 上次进程退出时没跑完的 Turn：先标 unknown，等 agent runner 去核对。
-    // 放在 init 里而不是服务层，是为了 CLI、测试、服务三种入口行为一致。
-    const recoveredTurns = recoverOpenTurns();
-    return { dbFile, migration, revived, recoveredTurns };
+    // 注意：Turn 恢复**不在这里做**。core.init() 也会被 `cli.mjs init` 调用，
+    // 如果 CLI 在服务还在跑时执行 init，会把别人正在跑的 Turn 全标成 unknown，
+    // 释放唯一索引后还能再插一轮，两个 Turn 就抢同一个外部 Session。
+    // 恢复只由 server 的 agent runner 在自己的启动路径里做。
+    return { dbFile, migration, revived };
   }
 
   // 分类进行到一半进程被杀（重启/崩溃/断电），任务会永远停在「判断中…」，
@@ -1848,9 +1849,52 @@ export function createCore(dataDir) {
     return out;
   }
 
+  /**
+   * 这张任务下面还没结束的 Turn。删除任务前必须为空 —— 否则外部 Agent
+   * 还在 --auto 跑命令，而卡已经从界面上消失了，用户既看不到也停不了。
+   */
+  function openTurnsForTask(taskId) {
+    return conn().all(
+      `SELECT t.* FROM session_turns t
+         JOIN agent_sessions s ON s.id = t.session_id
+        WHERE s.task_id = ? AND t.status IN ('queued', 'running')`,
+      [taskId]
+    ).map(rowToTurn);
+  }
+
+  /**
+   * 删除 dataDir/sessions/ 下的事件文件。只认这个目录下的相对路径：
+   * 库字段不该变成能删任意文件的入口，手工改库塞 ../ 或绝对路径的直接跳过。
+   */
+  function removeEventFiles(files) {
+    const sessionsDir = path.join(dataDir, 'sessions');
+    let removed = 0;
+    for (const rel of files) {
+      const full = path.resolve(dataDir, rel);
+      if (full !== sessionsDir && !full.startsWith(sessionsDir + path.sep)) {
+        console.warn('[task-inbox] 事件文件路径不在 sessions/ 下，跳过 ' + rel);
+        continue;
+      }
+      try {
+        fs.unlinkSync(full);
+        removed++;
+      } catch (e) {
+        if (e.code !== 'ENOENT') {
+          console.warn('[task-inbox] 事件文件没删掉 ' + rel + '：' + e.message);
+        }
+      }
+    }
+    return removed;
+  }
+
   function remove(id) {
     const d = conn();
     const t = requireTask(id);
+
+    // 运行中的外部 Agent 不受 CASCADE 管。先拒绝删除，让用户停止后再删；
+    // 强行删库只会留下一个还在改文件、但没有任何入口能停的进程。
+    const open = openTurnsForTask(id);
+    if (open.length) throw new Error('还有 Agent 正在执行，先停止再删除');
 
     // 先把要清的文件列出来，删库之后 payload 和 messages 就都没了。
     // 对话里的附件也算：只清 tasks.payload 的话，删任务会在 images/ 里留一堆垃圾
@@ -1914,26 +1958,7 @@ export function createCore(dataDir) {
       }
     }
 
-    // 事件文件只认 dataDir/sessions/ 下面的相对路径。库是唯一真相，
-    // 但「库里一个路径字段」不该变成能删任意文件的入口 —— 手工改库
-    // 塞 ../ 或绝对路径的，这里直接跳过。
-    const sessionsDir = path.join(dataDir, 'sessions');
-    let removedTurnFiles = 0;
-    for (const rel of turnFiles) {
-      const full = path.resolve(dataDir, rel);
-      if (full !== sessionsDir && !full.startsWith(sessionsDir + path.sep)) {
-        console.warn('[task-inbox] 事件文件路径不在 sessions/ 下，跳过 ' + rel);
-        continue;
-      }
-      try {
-        fs.unlinkSync(full);
-        removedTurnFiles++;
-      } catch (e) {
-        if (e.code !== 'ENOENT') {
-          console.warn('[task-inbox] 事件文件没删掉 ' + rel + '：' + e.message);
-        }
-      }
-    }
+    const removedTurnFiles = removeEventFiles(turnFiles);
 
     return { ...t, removedFiles: removed, removedTurnFiles };
   }
@@ -2082,6 +2107,11 @@ export function createCore(dataDir) {
 
     const workingDirectory = String(input.workingDirectory || '').trim();
     if (!workingDirectory) throw new Error('工作目录不能为空');
+    // 必须是绝对路径：相对路径会相对「服务器进程当前目录」解析，换个地方
+    // 启动服务，同一个 Session 就跑到另一个目录去了。
+    if (!path.isAbsolute(workingDirectory)) {
+      throw new Error('工作目录必须是绝对路径: ' + workingDirectory);
+    }
     try {
       if (!fs.statSync(workingDirectory).isDirectory()) throw new Error('不是目录');
     } catch {
@@ -2128,6 +2158,7 @@ export function createCore(dataDir) {
     if (fields.working_directory !== undefined) {
       const dir = String(fields.working_directory || '').trim();
       if (!dir) throw new Error('工作目录不能为空');
+      if (!path.isAbsolute(dir)) throw new Error('工作目录必须是绝对路径: ' + dir);
       try {
         if (!fs.statSync(dir).isDirectory()) throw new Error('不是目录');
       } catch {
@@ -2168,6 +2199,22 @@ export function createCore(dataDir) {
         [ext, nowIso(), sessionId]);
     }
     return getSession(sessionId);
+  }
+
+  /**
+   * 删一个会话。运行中的先拒绝；历史 Turn 和事件文件跟着清掉。
+   * 删除后可以重新挂一个（同一角色/Agent 的旧会话已经没了，不会再被复用）。
+   */
+  function deleteSession(id) {
+    const d = conn();
+    const s = requireSession(id);
+    if (openTurn(id)) throw new Error('这个会话还有一轮没执行完，先停止');
+    const files = d.all(
+      'SELECT events_file FROM session_turns WHERE session_id = ? AND events_file IS NOT NULL',
+      [id]
+    ).map((r) => r.events_file).filter(Boolean);
+    d.run('DELETE FROM agent_sessions WHERE id = ?', [id]);   // turns 走 CASCADE
+    return { removed: s, removedTurnFiles: removeEventFiles(files) };
   }
 
   function startTurn(sessionId, userText) {
@@ -2653,9 +2700,9 @@ export function createCore(dataDir) {
     childrenOf, childCount, subtreeStats, recomputeStatus, deriveStatus, MAX_DEPTH,
     mergeTasks, splitTask, revertMerge,
     // 阶段 1A：持久 Agent Session / Turn
-    createSession, listSessions, getSession, updateSession, bindExternalSession,
+    createSession, listSessions, getSession, updateSession, bindExternalSession, deleteSession,
     startTurn, markTurnRunning, finishTurn, getTurn, listTurns, openTurn,
-    recoverOpenTurns, refreshSessionStatus, setSessionStatus,
+    recoverOpenTurns, refreshSessionStatus, setSessionStatus, openTurnsForTask,
     pushMessage, listMessages, recentMessages, clearMessages, setBrief,
     listProjects, getProject, addProject, updateProject, deleteProject, findProject, ensureProject,
     reorderProjects,

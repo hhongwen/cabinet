@@ -107,6 +107,13 @@ const busyExport = { info: { outcome: 'running', time: { busy: 30, idle: 20 } },
 eq('busy > idle 判为 busy', summarizeExport(busyExport).status, 'busy');
 eq('导出失败结果给 unknown', summarizeExport({ info: { outcome: 'failed', time: {} } }).status, 'unknown');
 
+// 固化一份脱敏的真实导出形状，防止以后只按假数据改解析
+const realExport = JSON.parse(fs.readFileSync(
+  path.join(HERE, 'test-fixtures', 'opencode-export.json'), 'utf8'));
+eq('真实导出 fixture outcome', summarizeExport(realExport).outcome, 'succeeded');
+eq('真实导出 fixture 助手 message id', summarizeExport(realExport).messages[1].id, 'msg_assistant_1');
+eq('真实导出 fixture 助手正文', summarizeExport(realExport).lastText, '收到');
+
 console.log('\n=== 3. 运行器：正常完成 ===');
 {
   const sess = newSession('dev');
@@ -307,6 +314,162 @@ console.log('\n=== 12. CLI 解析：优先 @opencode/cli 的真身 ===');
   } finally {
     if (old === undefined) delete process.env.NPM_GLOBAL_DIR;
     else process.env.NPM_GLOBAL_DIR = old;
+  }
+}
+
+console.log('\n=== 13. CLI 早退：stdin EPIPE 不能杀进程 ===');
+{
+  const adapter = createOpenCodeAdapter({
+    command: process.execPath,
+    args: [FIXTURE],
+    env: { ...process.env, FAKE_OPENCODE_MODE: 'early-exit' }
+  });
+  const r = await adapter.runTurn({
+    session: { working_directory: tmp, external_session_id: 'ses_x', model: null },
+    text: 'x'.repeat(6 * 1024 * 1024),
+    onEvent: () => {},
+    signal: new AbortController().signal
+  });
+  ok('子进程早退后主进程还活着', true);
+  ok('stdin 错误被记录，或子进程正常退出', !!r.stdinError || r.exitCode === 0,
+    JSON.stringify({ stdin: r.stdinError, exit: r.exitCode }));
+
+  const sess = newSession('test');
+  const fake = {
+    ...fakeAdapter('ok'),
+    async runTurn() {
+      return { stdinError: 'write EOF', exitCode: 0, resultText: '', finalReason: null };
+    }
+  };
+  const runner = createAgentRunner({ core, dataDir: tmp, adapters: [fake], timeoutMs: 2000 });
+  const { turn, done } = runner.start({ sessionId: sess.id, text: 'x' });
+  await done;
+  eq('stdin 错误落 failed', core.getTurn(turn.id).status, 'failed');
+  ok('错误说清没读到消息', /没有读到消息/.test(core.getTurn(turn.id).error));
+  runner.close();
+}
+
+console.log('\n=== 14. 工作目录：删除后拒绝 / 相对路径拒绝 ===');
+{
+  const d = path.join(tmp, 'will-delete');
+  fs.mkdirSync(d, { recursive: true });
+  const s = core.createSession({
+    taskId: task.id, role: 'dev', agent: 'opencode', workingDirectory: d
+  });
+  fs.rmSync(d, { recursive: true, force: true });
+  const runner = createAgentRunner({
+    core, dataDir: tmp, adapters: [fakeAdapter('ok')], timeoutMs: 2000
+  });
+  let threw = false;
+  try { runner.start({ sessionId: s.id, text: 'x' }); } catch (e) {
+    threw = /工作目录不存在/.test(e.message);
+  }
+  ok('工作目录没了时拒绝发送', threw);
+  eq('会话仍是 idle', core.getSession(s.id).status, 'idle');
+
+  let rel = false;
+  try {
+    core.createSession({ taskId: task.id, role: 'dev', agent: 'opencode', workingDirectory: '.' });
+  } catch (e) { rel = /绝对路径/.test(e.message); }
+  ok('相对路径被拒', rel);
+  runner.close();
+}
+
+console.log('\n=== 15. 结果超 200 KB 截断 ===');
+{
+  const sess = newSession('plan');
+  const big = 'x'.repeat(210 * 1024);
+  const fake = {
+    ...fakeAdapter('ok'),
+    async runTurn({ onEvent }) {
+      onEvent({ type: 'text', text: big });
+      return { externalRef: 'msg_big', resultText: big, exitCode: 0, finalReason: 'stop' };
+    }
+  };
+  const runner = createAgentRunner({ core, dataDir: tmp, adapters: [fake], timeoutMs: 2000 });
+  const { turn, done } = runner.start({ sessionId: sess.id, text: 'big' });
+  await done;
+  const t = core.getTurn(turn.id);
+  ok('结果截到 200 KB 以内', t.result_text.length < 210 * 1024, String(t.result_text.length));
+  ok('带截断标记', /超过 200 KB/.test(t.result_text));
+  runner.close();
+}
+
+console.log('\n=== 16. 导出没对上 messageID：不误判、不清结果 ===');
+{
+  const sess = newSession('review');
+  const turn = core.startTurn(sess.id, 'no match');
+  core.markTurnRunning(turn.id, {
+    externalRef: 'msg_real', eventsFile: 'sessions/' + turn.id + '.jsonl'
+  });
+  core.recoverOpenTurns();
+  const evAbs = path.join(tmp, 'sessions', turn.id + '.jsonl');
+  fs.mkdirSync(path.dirname(evAbs), { recursive: true });
+  fs.writeFileSync(evAbs, '{"keep":true}\n');
+  core.conn().run('UPDATE session_turns SET result_text = ? WHERE id = ?', ['半截', turn.id]);
+
+  const runner = createAgentRunner({
+    core, dataDir: tmp,
+    adapters: [fakeAdapter('ok', {
+      outcome: 'failed', status: 'unknown', lastText: '', messageCount: 0, messages: []
+    })],
+    timeoutMs: 2000
+  });
+  await runner.reconcile(sess.id);
+  eq('Turn 仍是 unknown', core.getTurn(turn.id).status, 'unknown');
+  eq('Session 仍是 unknown', core.getSession(sess.id).status, 'unknown');
+  eq('半截结果没被清空', core.getTurn(turn.id).result_text, '半截');
+  eq('事件文件没被动', fs.readFileSync(evAbs, 'utf8'), '{"keep":true}\n');
+  runner.close();
+}
+
+console.log('\n=== 17. 导出坏 JSON / 非零 / 超时 ===');
+{
+  const s = { working_directory: tmp, external_session_id: 'ses_fixture', model: null };
+  const bad = createOpenCodeAdapter({
+    command: process.execPath, args: [FIXTURE],
+    env: { ...process.env, FAKE_OPENCODE_MODE: 'bad-export' }
+  });
+  let badErr = null;
+  try { await bad.exportSession({ session: s }); } catch (e) { badErr = e.message; }
+  ok('坏 JSON 导出抛错', /不是 JSON/.test(badErr || ''), badErr);
+
+  const fail = createOpenCodeAdapter({
+    command: process.execPath, args: [FIXTURE],
+    env: { ...process.env, FAKE_OPENCODE_MODE: 'fail-export' }
+  });
+  let failErr = null;
+  try { await fail.exportSession({ session: s }); } catch (e) { failErr = e.message; }
+  ok('非零退出导出抛错', /导出失败/.test(failErr || ''), failErr);
+
+  const hang = createOpenCodeAdapter({
+    command: process.execPath, args: [FIXTURE],
+    env: { ...process.env, FAKE_OPENCODE_MODE: 'hang-export' },
+    exportTimeoutMs: 100
+  });
+  let hangErr = null;
+  try { await hang.exportSession({ session: s }); } catch (e) { hangErr = e.message; }
+  ok('导出超时抛错', /导出失败/.test(hangErr || ''), hangErr);
+}
+
+console.log('\n=== 18. PATH 上的裸 opencode 命令 ===');
+{
+  const bin = path.join(tmp, 'fakebin');
+  fs.mkdirSync(bin, { recursive: true });
+  const file = process.platform === 'win32'
+    ? path.join(bin, 'opencode.cmd')
+    : path.join(bin, 'opencode');
+  fs.writeFileSync(file, process.platform === 'win32'
+    ? '@echo off\r\necho 1.0.0\r\n'
+    : '#!/bin/sh\necho 1.0.0\n');
+  if (process.platform !== 'win32') fs.chmodSync(file, 0o755);
+  const old = process.env.PATH;
+  process.env.PATH = bin + path.delimiter + old;
+  try {
+    const a = createOpenCodeAdapter({ command: 'opencode' });
+    ok('PATH 上的命令可用', await a.available());
+  } finally {
+    process.env.PATH = old;
   }
 }
 

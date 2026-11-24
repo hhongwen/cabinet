@@ -4097,6 +4097,13 @@ async function drLoad(){
     drRenderDetail(t);
     drRenderThread(r.messages || []);
     drDocRender();          // 预览栏开着就跟着换文档；关着时这里是空操作
+
+    // 抽屉可能是在一轮执行中重新打开的。轮询不能只由「发送」启动，
+    // 否则关掉再打开后界面会永远停在「执行中」，结果不会自己出现。
+    const active = drSessions.sessions.find(s => s.id === drActiveSessionId);
+    const busy = active && (active.status === 'busy' || active.running
+      || (active.last_turn && ['queued', 'running'].includes(active.last_turn.status)));
+    if (busy) pollAgentSession(active.id);
   } catch (e) {
     body.innerHTML = '<div class="dr-empty">读不到任务：' + esc(e.message) + '</div>';
   }
@@ -4617,6 +4624,9 @@ function agentActiveHTML(s) {
     out.push('<button type="button" class="primary" data-agent-send="' + esc(s.id) + '">发送</button>');
   }
   out.push('<button type="button" class="mini-btn" data-agent-reconcile="' + esc(s.id) + '">核对状态</button>');
+  if (!busy) {
+    out.push('<button type="button" class="mini-btn" data-agent-del="' + esc(s.id) + '">删除会话</button>');
+  }
   out.push('</div>');
   out.push('<div class="agent-hint">Agent 会在 <code>' + esc(s.working_directory || '') + '</code> '
     + '直接执行命令（自动批准权限）。会话建立后工作目录不能改。</div>');
@@ -4692,6 +4702,21 @@ function bindAgentEvents(t) {
       drReconcileAgent(rec.dataset.agentReconcile);
     });
   }
+  const del = host.querySelector('[data-agent-del]');
+  if (del) {
+    del.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('删除这个 Agent 会话？它的历史轮次和事件文件会一起清掉。')) return;
+      try {
+        await api('DELETE', '/api/sessions/' + encodeURIComponent(del.dataset.agentDel));
+        drActiveSessionId = null;
+        await drLoad();
+        toast('会话已删除');
+      } catch (err) {
+        toast('删除失败：' + err.message);
+      }
+    });
+  }
 }
 
 async function drSendAgent(sessionId, text) {
@@ -4730,9 +4755,18 @@ async function drStopAgent(turnId) {
 async function drReconcileAgent(sessionId) {
   try {
     const r = await api('POST', '/api/sessions/' + encodeURIComponent(sessionId) + '/reconcile');
-    applySessionState({ session: r.session, running: null });
+    const last = r.session && r.session.last_turn;
+    const busy = !!(r.session && (r.session.status === 'busy'
+      || (r.turn && ['queued', 'running'].includes(r.turn.status))
+      || (last && ['queued', 'running'].includes(last.status))));
+    applySessionState({ session: r.session, running: busy ? (r.turn || last) : null });
     drRenderAgent();
-    toast(r.error ? '核对失败：' + r.error : '已核对');
+    if (r.error) toast('核对失败：' + r.error);
+    else if (busy) {
+      // 核对完还在跑：不能停轮询，否则结果又不会自己出现
+      pollAgentSession(sessionId);
+      toast('仍在执行，继续刷新');
+    } else toast('已核对');
   } catch (e) {
     toast('核对失败：' + e.message);
   }
@@ -5044,8 +5078,15 @@ function drRenderHead(t){
   $('#drUnarchive')?.addEventListener('click', () => drUnarchive(t));
   $('#drUnmerge')?.addEventListener('click', () => drUnmerge(t));
 
-  // 快速改字段。项目条目后面带任务数 —— 重名时靠这个才分得清
-  const opts = (store.projects || []).map(p => {
+  // 快速改字段。项目条目后面带任务数 —— 重名时靠这个才分得清。
+  // 任务所属项目已经归档时，store.projects 里没有它；补一个 selected + disabled
+  // 的选项，否则下拉会默认落到第一项「默认」，看起来像任务被挪进了收件筐。
+  const knownProject = (store.projects || []).some(p => p.name === t.project);
+  const archivedOpt = (!knownProject && t.project)
+    ? '<option value="' + esc(t.project) + '" selected disabled>'
+      + esc(t.project) + '（已归档）</option>'
+    : '';
+  const opts = archivedOpt + (store.projects || []).map(p => {
     const n = Number(p.taskCount || 0);
     const label = isInbox(p.name) ? '未分配（' + n + '）' : p.name + '（' + n + '）';
     return '<option value="' + esc(p.name) + '"' + (p.name === t.project ? ' selected' : '') + '>'

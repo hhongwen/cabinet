@@ -10,7 +10,7 @@
 // 形状变了，只需要改这一个文件。
 
 import fs from 'node:fs';
-import { spawn, execFile } from 'node:child_process';
+import { spawn, spawnSync, execFile } from 'node:child_process';
 
 import { resolveCliBin } from './backend.mjs';
 
@@ -115,10 +115,21 @@ function baseCommand(opts = {}) {
 export function createOpenCodeAdapter(opts = {}) {
   const base = baseCommand(opts);
   const env = opts.env || process.env;
+  const exportTimeoutMs = Number(opts.exportTimeoutMs) > 0 ? Number(opts.exportTimeoutMs) : 15000;
 
   async function available() {
     try {
-      if (base.command === 'opencode') return false;
+      // resolveCliBin 找不到已知 npm 全局目录时退回裸命令名。Homebrew、
+      // ~/.bun/bin、自定义 npm prefix 都在 PATH 上，不能因为不在已知目录
+      // 就直接判「不可用」；真探测一次 --version 才准。
+      if (base.command === 'opencode') {
+        const r = spawnSync('opencode', ['--version'], {
+          timeout: 5000,
+          windowsHide: true,
+          shell: process.platform === 'win32'
+        });
+        return !r.error && r.status === 0;
+      }
       if (base.args.length) return fs.existsSync(base.args[0]);
       return fs.existsSync(base.command);
     } catch {
@@ -155,10 +166,21 @@ export function createOpenCodeAdapter(opts = {}) {
 
     let stdoutBuf = '';
     let stderr = '';
+    let stdinError = null;
     let lastMessageID = null;
     let finalReason = null;
     const steps = [];
     let current = [];
+
+    // CLI 可能在读 stdin 之前就退出（错误 session ID / 非法 model / 参数不支持）。
+    // 这时 child.stdin.end() 会异步抛 EPIPE / write EOF；没有监听器就是
+    // 未捕获异常，整个 Cabinet 进程会被带走。大 prompt 很容易触发。
+    child.stdin.on('error', (e) => {
+      stdinError = e;
+      const line = 'stdin: ' + e.message;
+      stderr += line + '\n';
+      if (typeof onEvent === 'function') onEvent({ type: 'stderr', text: line });
+    });
 
     const flushLine = (line) => {
       const parsed = parseEventLine(line);
@@ -219,11 +241,16 @@ export function createOpenCodeAdapter(opts = {}) {
           exitCode: code === null ? null : Number(code),
           finalReason,
           stderr,
+          stdinError: stdinError ? stdinError.message : null,
           aborted
         });
       });
       // prompt 走 stdin：Windows 命令行有长度上限，中文/换行也容易被转义坏。
-      child.stdin.end(String(text || ''), 'utf8');
+      try {
+        child.stdin.end(String(text || ''), 'utf8');
+      } catch (e) {
+        stdinError = e;
+      }
     });
 
     if (signal) signal.removeEventListener('abort', onAbort);
@@ -241,7 +268,8 @@ export function createOpenCodeAdapter(opts = {}) {
         env,
         windowsHide: true,
         maxBuffer: 32 * 1024 * 1024,
-        timeout: 15000
+        timeout: exportTimeoutMs,
+        killSignal: 'SIGKILL'
       }, (err, stdout, stderr) => {
         if (err) {
           reject(new Error('导出失败：' + String(stderr || err.message || err).slice(0, 300)));

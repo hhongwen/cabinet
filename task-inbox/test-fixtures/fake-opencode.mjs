@@ -9,18 +9,32 @@ const mode = process.env.FAKE_OPENCODE_MODE || 'ok';
 const args = process.argv.slice(2);
 
 if (args.includes('export')) {
-  process.stdout.write(JSON.stringify({
-    info: { outcome: 'succeeded', time: { busy: 10, idle: 20 } },
-    messages: [
-      {
-        id: 'msg_1', type: 'assistant', time: { completed: 15 },
-        content: [{ type: 'text', text: '收到' }]
-      },
-      { type: 'idle', outcome: 'succeeded' }
-    ]
-  }) + '\n');
-  process.exit(0);
+  if (mode === 'bad-export') {
+    process.stdout.write('not json\n');
+    process.exit(0);
+  } else if (mode === 'fail-export') {
+    process.stderr.write('export boom\n');
+    process.exit(1);
+  } else if (mode === 'hang-export') {
+    setInterval(() => {}, 1000);
+    await new Promise(() => {});
+  } else {
+    process.stdout.write(JSON.stringify({
+      info: { outcome: 'succeeded', time: { busy: 10, idle: 20 } },
+      messages: [
+        {
+          id: 'msg_1', type: 'assistant', time: { completed: 15 },
+          content: [{ type: 'text', text: '收到' }]
+        },
+        { type: 'idle', outcome: 'succeeded' }
+      ]
+    }) + '\n');
+    process.exit(0);
+  }
 }
+
+// 模拟 CLI 在读 stdin 前就退出（错误 session / 非法 model 等）
+if (mode === 'early-exit') process.exit(0);
 
 let input = '';
 process.stdin.setEncoding('utf8');

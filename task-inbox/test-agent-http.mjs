@@ -8,7 +8,7 @@ import http from 'node:http';
 
 import { createCore } from './core.mjs';
 import { createAgentRunner } from './agent.mjs';
-import { createHandler } from './server.mjs';
+import { createHandler, acquireDataLock } from './server.mjs';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ti-agent-http-'));
 let pass = 0, fail = 0;
@@ -154,7 +154,46 @@ console.log('\n=== 5. 项目归档参数 ===');
   ok('默认列表不含归档项目', !without.data.projects.some((p) => p.id === spare.id));
 }
 
-console.log('\n=== 6. 没有 runner 时给明确错误 ===');
+console.log('\n=== 6. 运行中任务 / 会话的删除保护 ===');
+{
+  const host = core.add({ title: '删除保护任务', project: 'HTTP 测试项目' });
+  const sess = core.createSession({
+    taskId: host.id, role: 'dev', agent: 'opencode', workingDirectory: tmp
+  });
+  const turn = core.startTurn(sess.id, '运行中');
+  core.markTurnRunning(turn.id, {
+    externalRef: 'msg_guard', eventsFile: 'sessions/' + turn.id + '.jsonl'
+  });
+
+  const delTask = await call('DELETE', '/api/tasks/' + host.id);
+  eq('运行中任务删除 409', delTask.status, 409);
+
+  const delSess = await call('DELETE', '/api/sessions/' + sess.id);
+  eq('运行中会话删除 409', delSess.status, 409);
+
+  core.finishTurn(turn.id, { status: 'interrupted', error: '测试' });
+  const okSess = await call('DELETE', '/api/sessions/' + sess.id);
+  eq('结束后会话删除 200', okSess.status, 200);
+  const gone = await call('GET', '/api/sessions/' + sess.id);
+  eq('会话已不存在', gone.status, 404);
+  const okTask = await call('DELETE', '/api/tasks/' + host.id);
+  eq('结束后任务删除 200', okTask.status, 200);
+}
+
+console.log('\n=== 7. 同一数据目录单实例锁 ===');
+{
+  const lockDir = path.join(tmp, 'lockdir');
+  const first = acquireDataLock(lockDir);
+  let blocked = false;
+  try { acquireDataLock(lockDir); } catch (e) { blocked = /已经有一个 Cabinet/.test(e.message); }
+  ok('第二个实例被拒', blocked);
+  first.release();
+  const again = acquireDataLock(lockDir);
+  ok('释放后能重新加锁', !!again.file);
+  again.release();
+}
+
+console.log('\n=== 8. 没有 runner 时给明确错误 ===');
 {
   const noRunner = createHandler(core, { queue: null });
   const s2 = http.createServer((req, res) => noRunner(req, res).catch(() => {}));

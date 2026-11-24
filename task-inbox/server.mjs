@@ -93,6 +93,53 @@ function json(res, code, obj) {
   res.end(JSON.stringify(obj));
 }
 
+// ---------- 单实例锁 ----------
+//
+// 端口只是「第一个进程占了 46001」的信号；第二份代码在 46002 起来时，
+// 两个实例共享同一个 tasks.db，一个实例的启动恢复会把另一个正在跑的
+// Turn 标成 unknown，随后同一个外部 Session 就可能被两条 Turn 同时用。
+// 锁按数据目录而不是端口：不同数据目录可以并行，同一目录只允许一个服务。
+
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    // EPERM 说明进程还在，只是没权限发信号；ESRCH 才是真没了
+    return e && e.code === 'EPERM';
+  }
+}
+
+export function acquireDataLock(dataDir) {
+  fs.mkdirSync(dataDir, { recursive: true });
+  const file = path.join(dataDir, 'server.lock');
+  try {
+    const info = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (info && info.pid && pidAlive(info.pid)) {
+      const err = new Error('这个数据目录已经有一个 Cabinet 在跑（pid ' + info.pid + '）');
+      err.code = 'ELOCKED';
+      throw err;
+    }
+  } catch (e) {
+    if (e.code === 'ELOCKED') throw e;
+    // 锁文件坏了 / 进程已经没了：当作过期锁，下面覆盖
+  }
+
+  fs.writeFileSync(file, JSON.stringify({
+    pid: process.pid,
+    started_at: new Date().toISOString()
+  }) + '\n');
+  let released = false;
+  return {
+    file,
+    release() {
+      if (released) return;
+      released = true;
+      try { fs.unlinkSync(file); } catch { /* 已经没了 */ }
+    }
+  };
+}
+
 // 请求体上限。要跟 core.mjs 里 saveFile 的 25MB 对得上：
 // 附件是 base64 传的，膨胀 4/3，25MB 二进制 = 33.3MB 文本，再留点 JSON 包装的余量 → 40MB。
 const MAX_BODY_BYTES = 40 * 1024 * 1024;
@@ -837,10 +884,24 @@ export function createHandler(core, opts = {}) {
       {
         const sm = p.match(/^\/api\/sessions\/([^/]+)$/);
         if (sm) {
-          if (req.method !== 'GET') return json(res, 405, { error: '用 GET' });
-          const st = needRunner().state(decodeURIComponent(sm[1]));
-          if (!st) return json(res, 404, { error: '会话不存在' });
-          return json(res, 200, st);
+          const sessionId = decodeURIComponent(sm[1]);
+          if (req.method === 'GET') {
+            const st = needRunner().state(sessionId);
+            if (!st) return json(res, 404, { error: '会话不存在' });
+            return json(res, 200, st);
+          }
+          if (req.method === 'DELETE') {
+            if (!core.getSession(sessionId)) return json(res, 404, { error: '会话不存在' });
+            try {
+              return json(res, 200, core.deleteSession(sessionId));
+            } catch (e) {
+              if (/还有一轮/.test(String(e.message || ''))) {
+                throw new HttpError(409, e.message);
+              }
+              throw e;
+            }
+          }
+          return json(res, 405, { error: '用 GET 或 DELETE' });
         }
       }
 
@@ -1068,9 +1129,18 @@ export function createHandler(core, opts = {}) {
         }
 
         if (req.method === 'DELETE') {
-          const t = core.remove(id);
-          // 顺手清掉的附件个数返回给前端，好显示「已删除，同时清掉 2 个附件」
-          return json(res, 200, { ...t, attachments_removed: (t.removedFiles || []).length });
+          try {
+            const t = core.remove(id);
+            // 顺手清掉的附件个数返回给前端，好显示「已删除，同时清掉 2 个附件」
+            return json(res, 200, { ...t, attachments_removed: (t.removedFiles || []).length });
+          } catch (e) {
+            // 运行中的 Agent 还拿着这个任务的工作目录和外部 Session。
+            // 删库不会杀它，只会让用户失去停止入口 —— 明确拒绝。
+            if (/还有 Agent 正在执行/.test(String(e.message || ''))) {
+              throw new HttpError(409, e.message);
+            }
+            throw e;
+          }
         }
       }
 
@@ -1127,6 +1197,20 @@ if (isMain) {
   })();
 
   const dataDir = process.env.TASK_INBOX_DATA || DEFAULT_DATA_DIR;
+  // 同一数据目录只允许一个服务实例。端口回退会让第二份代码占到 46002，
+  // 两个实例共享 WAL 时，一个实例的启动恢复会把另一个正在跑的 Turn 标 unknown。
+  let dataLock;
+  try {
+    dataLock = acquireDataLock(dataDir);
+  } catch (e) {
+    console.error('[task-inbox] ' + e.message);
+    process.exit(1);
+  }
+  const releaseLock = () => {
+    try { dataLock.release(); } catch { /* 已经没了 */ }
+  };
+  process.on('exit', releaseLock);
+
   const core = createCore(dataDir);
 
   // 建库建表；目录里如果有老的 tasks.json，顺手迁进来
@@ -1151,6 +1235,8 @@ if (isMain) {
 
   const started = await start(core, { port: argPort });
   if (!started) {
+    // 端口都被占了：锁也要放掉，否则下一次启动会被自己的过期锁挡住
+    releaseLock();
     console.error('[task-inbox] 端口都被占用了：' + [argPort, ...FALLBACK_PORTS].join(', '));
     process.exit(1);
   }
@@ -1171,6 +1257,7 @@ if (isMain) {
     try { await started.runner.close(); } catch {}
     // 关库时把 WAL 收回去，不留一个几 MB 的 -wal 文件在目录里
     try { core.close(); } catch {}
+    releaseLock();
     process.exit(0);
   };
   process.on('SIGINT', stop);

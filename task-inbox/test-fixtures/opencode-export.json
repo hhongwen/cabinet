@@ -1,0 +1,31 @@
+{
+  "info": {
+    "id": "ses_fixture_export",
+    "outcome": "succeeded",
+    "time": {
+      "created": 1795526665980,
+      "updated": 1795526814586,
+      "busy": 1795526666552,
+      "idle": 1795526801606
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_user_1",
+      "type": "user",
+      "text": "只回复两个字：收到"
+    },
+    {
+      "id": "msg_assistant_1",
+      "type": "assistant",
+      "time": { "created": 1795526801000, "completed": 1795526801450 },
+      "content": [
+        { "type": "text", "text": "收到" }
+      ]
+    },
+    {
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}

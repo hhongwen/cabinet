@@ -1312,8 +1312,48 @@ console.log('\n=== 22. Agent Session（v9） ===');
   eq('会话跟着任务删掉', core.getSession(sess.id), null);
 }
 
+console.log('\n=== 23. 删除会话 / 运行中任务保护 ===');
+{
+  const host = core.add({ title: '删除保护', project: 'Cabinet' });
+  const s = core.createSession({
+    taskId: host.id, role: 'dev', agent: 'opencode', workingDirectory: tmp
+  });
+  let relUpdate = false;
+  try { core.updateSession(s.id, { working_directory: '.' }); } catch (e) {
+    relUpdate = /绝对路径/.test(e.message);
+  }
+  ok('updateSession 相对路径被拒', relUpdate);
+
+  const turn = core.startTurn(s.id, '运行中');
+  core.markTurnRunning(turn.id, {
+    externalRef: 'msg_guard', eventsFile: 'sessions/' + turn.id + '.jsonl'
+  });
+
+  let taskBlocked = false;
+  try { core.remove(host.id); } catch (e) {
+    taskBlocked = /还有 Agent 正在执行/.test(e.message);
+  }
+  ok('运行中任务不能删', taskBlocked);
+
+  let sessionBlocked = false;
+  try { core.deleteSession(s.id); } catch (e) {
+    sessionBlocked = /还有一轮/.test(e.message);
+  }
+  ok('运行中会话不能删', sessionBlocked);
+
+  core.finishTurn(turn.id, { status: 'interrupted', error: '测试' });
+  const ev = path.join(tmp, 'sessions', turn.id + '.jsonl');
+  fs.mkdirSync(path.dirname(ev), { recursive: true });
+  fs.writeFileSync(ev, '{"keep":true}\n');
+  const del = core.deleteSession(s.id);
+  ok('删除会话清事件文件', !fs.existsSync(ev));
+  eq('删除会话返回 removed', del.removed.id, s.id);
+  eq('会话已不存在', core.getSession(s.id), null);
+  core.remove(host.id);
+}
+
 // Windows 上 SQLite 文件被打开时 rmSync 会 EPERM。第 1 节建的 core
-// 一直用到第 22 节，最后统一关掉再删临时目录。
+// 一直用到第 23 节，最后统一关掉再删临时目录。
 core.close();
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log('\n────────────────────────');
