@@ -1056,14 +1056,13 @@ body select.sel-native{
    这个类由 render() 按 viewMode 切换，别手写。 */
 .board-scroll.has-table{padding-top:0}
 .board--table > .tbl-wrap{margin-top:6px}
-/* 外框的圆角必须**真的裁**，不能只画个圆角背景就完事：
-   `.tbl-wrap` 的尺寸跟表格一样，而表格的每一行都是实色方形，
-   会直接盖在外框的圆角上 —— 表头自己圆了，下面滚上来的行却是直角，
-   两个上角就各露出一个小方角。
-   用 `overflow:clip` 而不是 `hidden`：clip 只裁剪绘制，**不建立滚动容器**，
-   所以 sticky 表头仍然相对 .board-scroll 定位（这是它和 hidden 的关键区别）。 */
+/* 外框**不铺底色**：白底放在 tr 上（见下面 .tbl tbody tr）。
+   为什么：表头的上圆角归它自己画，外框如果也有底色，弧外侧那块就会
+   露出外框的白 —— 一条月牙形白边。底色挪走后，弧外露出的是页面背景。
+   `overflow:clip` 留着裁横向溢出的列；它裁不到 sticky 表头（表头的包含块
+   是 .board-scroll 而不是这里），所以上角不能指望它。 */
 .tbl-wrap{
-  border-radius:14px; background:var(--table-bg);
+  border-radius:14px; background:transparent;
   overflow:clip;
   /* 宽度必须跟着表格走，不能写 width:100%。
      表格有 11 列、每格 nowrap，最小内容宽度可能超过容器；写死 100% 时
@@ -1087,22 +1086,32 @@ body select.sel-native{
   padding:0;text-align:left;font-weight:600;color:var(--text-2);
   white-space:nowrap;
 }
-/* 表头的圆弧半径必须**和外框完全一样**（14px）。以前是 13px —— 比外框小 1px。
-   滚动时行是方的，由外框按 14 裁；表头按 13 圆，两个弧之间就留下一条 1px 的
-   月牙，露出下面那行的白角。文字上根本看不出差 1px，接缝上那两个小三角却一眼能看到。
-   别写 `inherit`：th 的父元素是 <tr>，那上面是 0。 */
+/* 表头的上圆角**只在没滚动时存在**。
+   它是 sticky：一旦滚动，它就贴在滚动容器顶部，而它圆掉的两个角会露出
+   后面滚过去的白色行 —— 放大看就是两个白色小三角（实测：有圆角时角落
+   3 个纯白像素，圆角归 0 后 0 个）。
+   没滚动时表头还在原来的位置，圆角跟外框对齐，该圆就圆。
+   由 .board-scroll 的滚动事件切 .is-scrolled（见 bindTableScroll）。 */
 .tbl thead th:first-child{border-top-left-radius:14px}
 .tbl thead th:last-child{border-top-right-radius:14px}
+.board-scroll.is-scrolled .tbl thead th:first-child{border-top-left-radius:0}
+.board-scroll.is-scrolled .tbl thead th:last-child{border-top-right-radius:0}
+/* 滚动后内外两侧的圆角一起归零：
+   外框（.tbl-wrap）那 14px 的上角也留着，而表头已经贴顶跑掉了 ——
+   白底在 `.tbl-wrap` 上，于是圆弧外侧露出一块外框白底（左图那道白弧）。
+   滚动时表头自己铺满，上圆角交给"没有"处理，两条边都是直角，
+   一滚就对齐；滚回顶部时再恢复。 */
+.board-scroll.is-scrolled .tbl-wrap{border-top-left-radius:0;border-top-right-radius:0}
 /* 不可排序的表头（关系列）自己补内边距：可排序那几格的内边距在 .tbl-sort 上，
    th 本体统一 padding:0，否则两处相加会高出一截 */
 .tbl th.tbl-th{padding:8px 9px}
+.tbl tbody tr{background:var(--table-bg);cursor:pointer}   /* 白底在行上，不在外框上 */
 .tbl tbody td{
   padding:6px 9px;border-bottom:1px solid var(--hair);
   vertical-align:middle;white-space:nowrap;
 }
 .tbl tbody tr:last-child td{border-bottom:none}
 .tbl tbody tr:hover{background:var(--table-row-hi)}
-.tbl tbody tr{cursor:pointer}
 /* 表头排序触发器：整格是点击区。刻意不长成瓷底按钮 —— 一排白按钮会把
    表头撑高 6px 并且比表格内容还抢眼（已进 style-audit 的豁免集合）。 */
 .tbl-sort{
@@ -3528,6 +3537,17 @@ $('#viewSwitch')?.addEventListener('click', (e) => {
   if (b) setViewMode(b.dataset.view);
 });
 
+/* 表格滚动时切 .is-scrolled：表头的上圆角只在贴顶时收起来
+   （否则它圆掉的角会露出后面滚过去的白行，见 CSS 里那段说明）。
+   整段只绑一次 —— .board-scroll 不在 render 里重建。 */
+(function bindTableScroll(){
+  const sc = document.querySelector('.board-scroll');
+  if (!sc || bindTableScroll.done) return;
+  bindTableScroll.done = true;
+  const sync = () => sc.classList.toggle('is-scrolled', sc.scrollTop > 0);
+  sc.addEventListener('scroll', sync, { passive: true });
+})();
+
 /* 表格里的事件都用委托：整张表每次 render 都重建，
    逐行绑监听会漏、也会越绑越多（看板那边是逐卡绑的，但它一次只有几十张卡）。 */
 $('#board').addEventListener('click', (e) => {
@@ -5758,5 +5778,7 @@ document.addEventListener('visibilitychange', () => {
 
 boot().finally(startPolling);
 </script>
+
+
 </body>
 </html>
