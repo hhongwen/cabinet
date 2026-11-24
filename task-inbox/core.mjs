@@ -2276,6 +2276,19 @@ export function createCore(dataDir) {
     ));
   }
 
+  /**
+   * 显式设置会话状态。只有 Adapter 的导出核对会用到它 —— 那个状态来自
+   * 外部 CLI，不是从本地 Turn 推导出来的，refreshSessionStatus 算不出来。
+   */
+  function setSessionStatus(sessionId, status) {
+    if (!SESSION_STATUSES.includes(status)) throw new Error('非法会话状态: ' + status);
+    const d = conn();
+    requireSession(sessionId);
+    d.run('UPDATE agent_sessions SET status = ?, updated_at = ? WHERE id = ?',
+      [status, nowIso(), sessionId]);
+    return getSession(sessionId);
+  }
+
   function refreshSessionStatus(sessionId) {
     const d = conn();
     const cur = requireSession(sessionId);
@@ -2642,7 +2655,7 @@ export function createCore(dataDir) {
     // 阶段 1A：持久 Agent Session / Turn
     createSession, listSessions, getSession, updateSession, bindExternalSession,
     startTurn, markTurnRunning, finishTurn, getTurn, listTurns, openTurn,
-    recoverOpenTurns, refreshSessionStatus,
+    recoverOpenTurns, refreshSessionStatus, setSessionStatus,
     pushMessage, listMessages, recentMessages, clearMessages, setBrief,
     listProjects, getProject, addProject, updateProject, deleteProject, findProject, ensureProject,
     reorderProjects,

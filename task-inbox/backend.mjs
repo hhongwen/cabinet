@@ -100,7 +100,7 @@ function npmGlobalDirs() {
   return dirs;
 }
 
-function resolveCliBin(name) {
+export function resolveCliBin(name) {
   const win = process.platform === 'win32';
   // 同一份产物在不同平台的上架形式不一样，各自列清楚
   const map = win ? {

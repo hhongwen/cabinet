@@ -312,7 +312,8 @@ git commit -m "task-inbox: schema v9 落 Session 与 Turn 数据层"
 - Consumes: `core` 的 `getSession` / `startTurn` / `markTurnRunning` / `finishTurn` / `getTurn` / `openTurn` / `listSessions` / `refreshSessionStatus`。
 - Produces:
   - `parseEventLine(line) -> { type, sessionID?, messageID?, text?, finishReason? } | null`
-  - `summarizeExport(json) -> { outcome, status, lastText, messageCount }`
+  - `summarizeExport(json) -> { outcome, status, lastText, messageCount, messages }`
+    （`messages` 是 `[{ id, type, text, completed }]` 的紧凑数组，给 reconcile 按 `external_ref` 对回某一轮用）
   - `createOpenCodeAdapter({ command?, args?, env? }) -> Adapter`
   - `createAgentRunner({ core, dataDir, adapters?, timeoutMs? }) -> Runner`
   - Adapter 形状：
@@ -324,7 +325,7 @@ git commit -m "task-inbox: schema v9 落 Session 与 Turn 数据层"
       async runTurn({ session, text, onEvent, signal }) -> {
         externalRef, resultText, exitCode, finalReason, timedOut
       },
-      async exportSession({ session }) -> { outcome, status, lastText, messageCount }
+      async exportSession({ session }) -> { outcome, status, lastText, messageCount, messages }
     }
     ```
   - Runner 形状：
@@ -402,6 +403,7 @@ Expected: `Cannot find module './opencode-agent.mjs'`。
     - `info.outcome === 'succeeded'` 且不 busy → `status='idle'`
     - 其它 → `status='unknown'`
     - `lastText` 从后往前找 `type==='assistant'` 的第一条，拼接 `content` 里的 `type==='text'`。
+    - `messages`：遍历导出里的消息，保留 `{ id, type, text, completed: !!time.completed }`；只给核对用，不返回完整内容。
 
 - [ ] **Step 4: 实现 `agent.mjs`**
 
