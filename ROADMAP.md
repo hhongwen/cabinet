@@ -366,7 +366,7 @@ context      累积的最新共识（markdown）← 待建（可更新，带来�
 | **会话** | **OpenCode 持久 Session、Turn 记录、停止 / 核对、重启恢复** |
 | **项目** | **默认 Agent / 模型、归档 / 恢复；新会话自动继承** |
 
-测试：`test-sqlite` 400 项、`test-agent` 54 项、`test-agent-http` 32 项、
+测试：`test-sqlite` 406 项、`test-agent` 74 项、`test-agent-http` 39 项、
 `test-parsers` 86 项，全绿；`style-audit` 0 error。
 
 ### 还没开始的
@@ -394,8 +394,10 @@ ui          抽屉「Agent 会话」区、卡片 Agent 徽标、项目默认 Age
 | 重启后仍能定位原 Session | 停服务再起，同一 `external_session_id` 保留；第二、三轮继续在原 Session 上跑 |
 | 未完成 Turn 不误报完成 | 手工把 Turn 置 `running` 后重启：Turn 和 Session 都变 `unknown`；`session export` 核对不到时保持 `unknown`，任务状态仍是 `todo` |
 | 同会话不并行 | 运行中再发返回 `409`；数据库部分唯一索引兜底 |
-| 删除清证据 | 删除任务时 `sessions/<turn>.jsonl` 一起清掉 |
-| 前端可用 | 抽屉里能建会话、发送、停止、核对；卡片显示「Agent 运行中 / Agent N」 |
+| 删除清证据 | 删除任务 / 会话时 `sessions/<turn>.jsonl` 一起清掉；运行中先返回 409 |
+| 单实例 | 同一数据目录写 `server.lock`，第二个实例拒绝启动，不抢正在跑的 Turn |
+| 工作目录 | 必须是绝对路径；目录被删后发送失败，会话保持 idle |
+| 前端可用 | 抽屉里能建会话、发送、停止、核对、删除；重新打开运行中的卡会自动继续轮询；卡片显示「Agent 运行中 / Agent N」 |
 | 项目默认值 | 项目设置保存 Agent / 模型后刷新仍在；新会话继承 Agent、模型占位符和主目录 |
 | 项目归档 | 有活跃任务时拒绝并报条数；空项目归档后侧栏消失，设置里可恢复 |
 

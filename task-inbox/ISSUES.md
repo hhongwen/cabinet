@@ -1584,18 +1584,29 @@ limit，没有 `dev_ready` 也没有 `include_archived`。所以你在对话里�
     抽屉「Agent 会话」区（和 Cabinet 对话分开）、发送/停止/核对、2 秒轮询
     卡片「Agent 运行中 / Agent 待核对 / Agent N」徽标
     项目默认 Agent/模型、项目归档/恢复；新会话继承项目配置
-  顺手修
-    resolveCliBin 优先 @opencode/cli 的真身 —— opencode-ai/bin/opencode.exe
-    只有 479 字节，spawn 它会直接 UNKNOWN（真实发送时踩到，已加测试）
+  复核后修
+    stdin EPIPE：subprocess 提前退出时 child.stdin 的错误会杀主进程；加监听并落 failed
+    运行中删除：任务 / 会话先返回 409，不让外部 Agent 失去停止入口
+    deleteSession：删除会话连同 Turn 和 sessions/<turn>.jsonl；运行中拒绝
+    单实例锁：同一数据目录写 server.lock，第二个实例（含回退端口）拒绝启动
+    恢复归属：Turn 恢复从 core.init 移到 server start，cli init 不再抢正在跑的 Turn
+    reconcile：只有 external_ref 命中才改终态；找不到保持 unknown，不覆盖半截结果
+    工作目录：必须是绝对路径；目录被删后发送失败，会话保持 idle
+    轮询：重新打开运行中的卡会自动继续；核对后仍忙会恢复轮询
+    归档项目：抽屉项目下拉显示「X（已归档）」，不再看起来像「默认」
+    PATH：裸 `opencode` 命令用 spawnSync --version 探测，Homebrew / bun / 自定义 prefix 不再误判不可用
+    顺手修：resolveCliBin 优先 @opencode/cli 的真身（opencode-ai 是 479 字节壳）
   验收
     真实 OpenCode 两轮复用同一 ses_...；重启后同一外部 Session 继续可用
     手工置 running 后重启：Turn/Session 变 unknown，任务状态仍是 todo
+    浏览器实测：重新打开运行中的卡会自动轮询到结果；归档项目下拉显示已归档
     有活跃任务的项目归档被拒；空项目归档后侧栏消失、设置里可恢复
   测试
-    test-sqlite 400 / test-agent 54 / test-agent-http 32 / test-parsers 86
+    test-sqlite 406 / test-agent 74 / test-agent-http 39 / test-parsers 86
     style-audit 0 error（1 个历史遗留 warning）
   已知限制
     只有 OpenCode；Agent 会话不支持图片/文件附件；不做自动选下游和自动交接
+    UI 暂不暴露显式绑定已有 ses_ 和 force:true 新建第二条（API 支持 force）
 
 第七批（卡片关系第 1 步）  ✅ 2026-11-24 10:25
   规格见 docs/relations-and-table.md —— 合并 / 拆分 / 层级 / 依赖 是四种语义，

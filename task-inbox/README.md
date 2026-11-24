@@ -336,6 +336,9 @@ node cli.mjs backup [文件]            热备份成 .db（服务在跑也能备
 - **Turn 完成 ≠ 任务完成**。Cabinet 不会因为 Agent 说完成就把卡片改成已完成。
 - **重启不猜结果**。未完成的 Turn 一律先标 `unknown`；只有导出明确证明完成时才改 `completed`。
 - **Agent 以 `--auto` 运行**，会在工作目录直接执行命令（自动批准权限）。这是非交互模式的必要前提，工作目录要自己选对。
+- **默认 30 分钟超时**，超时会中止并落 `failed`；`AGENT_TURN_TIMEOUT_MS` 可覆盖。
+- **删除会话会清历史**：会话、所有 Turn 和 `sessions/<turn>.jsonl` 一起删；运行中的会话先停止。
+- **同一数据目录只允许一个服务实例**（`server.lock`）。端口回退不会绕过这条 —— 两个实例共享 WAL 会让启动恢复互相抢 Turn。
 
 ### 数据和证据
 
@@ -556,6 +559,10 @@ Alma 插件：插件在 Alma 进程里起同一个 HTTP 服务、开机就抢 46
 代码要重启」等于「退出整个 Alma」。现在那层壳已经拿掉了，改完代码
 `stop.cmd` + `start.cmd` 两步就生效。
 
+同一个数据目录只允许一个服务实例：启动时会在数据目录写 `server.lock`，
+第二个实例（哪怕落到 46002 回退端口）会直接拒绝启动。换数据目录用
+`TASK_INBOX_DATA`，不同目录可以并行。
+
 > 升级注意：数据目录从 `~/.config/alma/task-inbox/` 搬到了 `~/.config/cabinet/`，
 > 旧目录保留没删，确认新的能用了再自己清理。
 
@@ -645,14 +652,15 @@ node style-audit.mjs
 
 **还留着的**：搜索、分页（任务过 100 条再做）；手机端看板卡片的跨列拖拽
 （用抽屉里的状态下拉替代，功能不缺）；1A 只有 OpenCode、Agent 会话不支持图片/文件、
-不做自动交接。详见 [ISSUES.md](ISSUES.md)。
+不做自动交接；UI 暂不暴露「显式绑定已有 `ses_`」和 `force:true` 新建第二条会话
+（API 支持 force；换会话可以删除后重建）。详见 [ISSUES.md](ISSUES.md)。
 
 ### 测试
 
 ```bash
-node test-sqlite.mjs        # 存储层 + schema 迁移 + 卡片关系 + 层级 + 表格 + 会话，400 项
-node test-agent.mjs         # 事件解析 / 导出核对 / Turn 运行器 / CLI 解析，54 项
-node test-agent-http.mjs    # Session / Turn HTTP 路由 + 409，32 项
+node test-sqlite.mjs        # 存储层 + schema 迁移 + 卡片关系 + 层级 + 表格 + 会话，406 项
+node test-agent.mjs         # 事件解析 / Turn 运行器 / CLI 解析 / 导出核对 / 超时，74 项
+node test-agent-http.mjs    # Session / Turn HTTP 路由 + 409 + 删除保护 + 锁，39 项
 node test-parsers.mjs       # classify / chat 解析层 + 队列路由，86 项，不碰真模型
 node style-audit.mjs        # 界面样式规范
 ```

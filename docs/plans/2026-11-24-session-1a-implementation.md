@@ -4,8 +4,13 @@
 >
 > **状态：已实现并验收（2026-11-24，分支 `feat/session-1a`）。**
 > 验收证据：真实 OpenCode 两轮复用同一 Session；重启后未完成 Turn 变 `unknown`；
-> `test-sqlite` 400 / `test-agent` 54 / `test-agent-http` 32 / `test-parsers` 86，
+> `test-sqlite` 406 / `test-agent` 74 / `test-agent-http` 39 / `test-parsers` 86，
 > `style-audit` 0 error。实施记录见 `task-inbox/ISSUES.md` 第九批。
+>
+> **复核后的实施偏差：** Turn 恢复从 `core.init()` 移到 server 启动路径，并加
+> 数据目录单实例锁（避免 `cli init` 或第二个实例抢跑正在执行的 Turn）；
+> 新增 `deleteSession` / `DELETE /api/sessions/:id`（运行中返回 409）；
+> `force:true` 与显式绑定已有 `ses_` 目前只在 API 层，UI 暂不暴露。
 
 **Goal:** 在任务卡片下挂一个可连续对话的 OpenCode 持久 Session，Cabinet 重启后仍能定位并继续，Turn 的状态、结果和原始事件可追溯。
 
