@@ -600,7 +600,13 @@ export function createCore(dataDir) {
     const d = conn();
     // 顺序 = 用户拖出来的 sort_order；同值（老库刚升上来）时退回创建时间，保证稳定
     const rows = d.all(
-      `SELECT p.*, (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id) AS taskCount
+      // taskCount 和侧栏/看板用同一个口径：归档的、被合并的、待澄清的都不算。
+      // 否则「诺华(13)」和侧栏「诺华 7」同屏出现，用户又要问哪个是真的。
+      `SELECT p.*, (SELECT COUNT(*) FROM tasks t
+                      WHERE t.project_id = p.id
+                        AND t.archived_at IS NULL
+                        AND t.merged_into IS NULL
+                        AND COALESCE(t.dev_ready, 1) = 1) AS taskCount
          FROM projects p
         ORDER BY p.sort_order, p.created_at`
     );
@@ -1924,18 +1930,34 @@ export function createCore(dataDir) {
       d.all(TASK_SELECT + w.sql + ` ORDER BY ${PRIORITY_ORDER_SQL}, t.created_at DESC`).map(rowToTask)
     );
 
-    // 计数单独查一遍，只看未归档 —— 已归档的「已完成」不该还挂在侧栏上。
-    // 键固定 todo/doing/done 三个，不加 draft/archived：那是视图，不是列。
+    // 计数必须和**看板上真正画出来的卡片**逐条对齐，否则侧栏写 9、
+    // 列头写 2，用户只会认为筛选坏了（真实反馈：「点击菜单筛选的结果也不对」）。
     //
-    // 被合并的卡（merged_into 非空）也不计：它们在看板上不占位（见 board.html
-    // 的 inView），算进计数就会出现「侧栏写 3、列里只有 1 条」这种对不上的账。
+    // 和 board.html 的 inView() 一一对应，一个都不能少：
+    //   archived_at IS NULL      归档只在归档视图
+    //   merged_into IS NULL      被合并的卡不占位
+    //   dev_ready = 1            待澄清的归「待澄清」页签，不进看板三列
+    //   project <> 未分配        收件筐里的只在点「默认」时才出现
+    //
+    // 以前只过滤了前两条，于是 9 条「未开始」里 6 条其实是待澄清、
+    // 1 条在收件筐 —— 列里只剩 2 条，账对不上。
     const counts = { todo: 0, doing: 0, done: 0 };
     for (const r of d.all(
-      'SELECT status, COUNT(*) AS c FROM tasks WHERE archived_at IS NULL AND merged_into IS NULL GROUP BY status'
+      `SELECT t.status, COUNT(*) AS c FROM tasks t
+        WHERE t.archived_at IS NULL
+          AND t.merged_into IS NULL
+          AND COALESCE(t.dev_ready, 1) = 1
+          AND t.project <> ?
+          AND t.project_id NOT IN (SELECT id FROM projects WHERE name = ?)
+        GROUP BY t.status`,
+      [DEFAULT_PROJECT_NAME, DEFAULT_PROJECT_NAME]
     )) {
       if (counts[r.status] !== undefined) counts[r.status] = Number(r.c || 0);
     }
-    return { projects: listProjects(), tasks, counts, total: tasks.length };
+    // ▼ 总数 = 三列之和。以前是 tasks.length（全库条数），所以「全部任务 32」
+    //   和标题「23 条」同屏打架。两个数字都有出处，但没有人解释过差在哪。
+    const total = counts.todo + counts.doing + counts.done;
+    return { projects: listProjects(), tasks, counts, total };
   }
 
   function count() {

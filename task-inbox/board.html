@@ -2197,10 +2197,11 @@ function renderSidebar(){
   set('cntTodo', c.todo || 0);
   set('cntDoing', c.doing || 0);
   set('cntDone', c.done || 0);
-  // 待澄清：未归档且未确认开工。始终显示（0 也显示）—— 它的存在本身就是提示
-  set('cntDraft', tasks.filter(t => !t.archived_at && t.dev_ready === false).length);
+  // 待澄清：未归档、未合并、未确认开工。始终显示（0 也显示）——
+  // 它的存在本身就是提示。口径和「待澄清」页签一致（inView 先排归档再排合并）。
+  set('cntDraft', tasks.filter(t => !t.archived_at && !t.merged_into && t.dev_ready === false).length);
   // 归档条数：已完成之后的那一档，单独数
-  set('cntArchNum', tasks.filter(t => !!t.archived_at).length);
+  set('cntArchNum', tasks.filter(t => !!t.archived_at && !t.merged_into).length);
 
   // 状态高亮
   document.querySelectorAll('#navMenu .nav-link').forEach(el => {
@@ -2217,9 +2218,11 @@ function renderSidebar(){
   const projects = store.projects || [];
   host.innerHTML = projects.map(p => {
     const inbox = isInbox(p.name);
-    // 「默认」的计数只算已确认开工的：待澄清的在它自己的页签里数（DEF-1）
+    // 计数 = 点进这个项目**能看到几张卡**，和 inView() 同一套口径：
+    // 归档的、被合并的、待澄清的（它们归「待澄清」页签）都不算。
+    // 以前非「默认」项目把待澄清也算进去，于是侧栏写 13、点进去只有 6。
     const n = tasks.filter(t => (t.project_id === p.id || t.project === p.name)
-      && !t.archived_at && (inbox ? t.dev_ready !== false : true)).length;
+      && !t.archived_at && !t.merged_into && t.dev_ready !== false).length;
     const active = navProject === p.name ? ' active' : '';
     const initial = (p.name || '?').trim().slice(0, 1).toUpperCase();
     // 「默认」用收件筐图标，不用文件夹 —— 它不是一个装文件的目录

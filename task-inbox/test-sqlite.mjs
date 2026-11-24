@@ -196,9 +196,12 @@ eq('删后无任务', core.getTask(dt.id), null);
 eq('删后消息级联清空', Number(core.conn().get('SELECT COUNT(*) AS c FROM messages WHERE task_id = ?', [dt.id]).c), 0);
 
 console.log('\n=== 7. init 幂等 ===');
+const countBeforeInit = core.count();
 const r2 = core.init();
 ok('第二次 init 不重复迁移', r2.migration.migrated === false);
-eq('任务数不变', core.count(), core.state().total);
+// 基准必须是 init 之前的 count()：state().total 是**看板可见数**
+// （不含归档 / 待澄清 / 未分配筐），和 count() 本来就不是一回事。
+eq('任务数不变', core.count(), countBeforeInit);
 
 console.log('\n=== 8. 排序与过滤 ===');
 const ORDER = { p0: 0, p1: 1, p2: 2, p3: 3, p4: 4 };
@@ -1174,6 +1177,40 @@ console.log('\n=== 21. 表格字段（v8：seq_no / plan_* / owner / *_hours） 
   ok('导出里没有派生的 no（由 seq_no 推得出来）', dumped.no === undefined);
 
   tt.close();
+}
+
+
+/* 侧栏计数必须等于看板画出来的卡片数。
+   真实反馈：「点击菜单筛选的结果也不对」——侧栏写 9 待办，列头写 2。
+   原因是 counts 只排了归档，没排待澄清和未分配筐。这条断言把这个口径钉死。 */
+{
+  console.log('');
+  console.log('=== 21. 侧栏计数 = 看板可见数 ===');
+  const b = createCore(tmp);
+  // 这个库里已经有前面各节留下的任务，所以只能比**增量**，不能比绝对值
+  const before = b.state({ include_archived: true }).counts;
+
+  const visible = b.add({ title: '看板可见', status: 'todo', dev_ready: true, project: '计数测试项目' });
+  const draft = b.add({ title: '待澄清的', status: 'todo', dev_ready: false, project: '计数测试项目' });
+  const inboxTask = b.add({ title: '筐里的', status: 'todo', project: '默认' });
+  const arch = b.add({ title: '归档的', status: 'done', project: '计数测试项目' });
+  b.patch(arch.id, { archived_at: '2026-01-01T00:00:00.000Z' });
+
+  const after = b.state({ include_archived: true }).counts;
+  eq('counts.todo 只 +1（待澄清和收件筐都不算）', after.todo - before.todo, 1);
+  eq('counts.done 不 +（归档的不算）', after.done - before.done, 0);
+
+  const st = b.state({ include_archived: true });
+  const boardVisible = st.tasks.filter((t) => !t.archived_at && !t.merged_into
+    && t.dev_ready !== false && t.project !== '默认');
+  eq('counts.todo 等于看板可见的 todo 条数',
+    st.counts.todo, boardVisible.filter((t) => t.status === 'todo').length);
+  eq('counts.done 等于看板可见的 done 条数',
+    st.counts.done, boardVisible.filter((t) => t.status === 'done').length);
+  eq('total = 三列之和', st.total, st.counts.todo + st.counts.doing + st.counts.done);
+
+  for (const t of [visible, draft, inboxTask, arch]) b.remove(t.id);
+  b.close();
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });
