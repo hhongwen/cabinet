@@ -53,6 +53,14 @@
   --draft-ink:#6d5d86; --draft-bg:rgba(120,104,158,.15); --draft-edge:rgba(120,104,158,.34);
   /* 「默认」= 未分配收件筐：中性灰，比橙弱一档 —— 它是提示，不是待办 */
   --neutral-ink:#5b6b71; --neutral-bg:rgba(120,136,142,.16);
+  /* 卡片关系（【合】/【拆】）：两种都是"历史事实"，不是流程状态，
+     所以刻意避开橙(要做)/绿(做完)/紫(待澄清)，用冷色 —— 看板上不抢注意力 */
+  --merge-ink:#3d6480; --merge-bg:rgba(61,100,128,.14); --merge-edge:rgba(61,100,128,.34);
+  --split-ink:#4c4585; --split-bg:rgba(76,69,133,.14); --split-edge:rgba(76,69,133,.34);
+  /* 关系徽章的「当前色」：默认取中性灰，.merge / .split 各自覆盖这三个。
+     放在 :root 是为了让 var() 有声明落点 —— 只写在修饰类里的话，
+     style-audit 会判 missing-token（它不认 var() 的 fallback 参数）。 */
+  --rel-ink:var(--neutral-ink); --rel-bg:var(--neutral-bg); --rel-edge:rgba(120,136,142,.30);
   /* 深色面（抽屉里"我说的"气泡、toast）上的文字 */
   --on-dark:#eef3f4;
 
@@ -452,7 +460,7 @@ h1{
    ========================================================================== */
 .dock textarea, .dr-foot textarea,
 .dlg select, .dlg input[type=text], .dlg input:not([type]), .dlg textarea,
-.pick-bar input, .dir-row input, .dr-title-in, .sect-edit, .picker-in {
+.pick-bar input, .dir-row input, .dr-title-in, .sect-edit, .picker-in, .rel-split {
   color:var(--ink);
   background:var(--ctl-inset);
   border:1px solid rgba(120,136,142,.26);
@@ -464,7 +472,7 @@ h1{
 .dock textarea:focus, .dr-foot textarea:focus,
 .dlg select:focus, .dlg input:focus, .dlg textarea:focus,
 .pick-bar input:focus, .dir-row input:focus, .dr-title-in:focus, .sect-edit:focus,
-.picker-in:focus {
+.picker-in:focus, .rel-split:focus {
   background:#fff;
   border-color:var(--orange);
   box-shadow:var(--ctl-inset-shadow), var(--ctl-focus-ring);
@@ -615,6 +623,79 @@ body select.sel-native{
 .picker .picker-in{width:100%;height:30px;font-size:12px;padding:0 9px;margin-bottom:4px;flex:0 0 auto}
 .picker .picker-list{overflow:auto;min-height:0;flex:1}
 .picker-new > span{color:var(--accent-text)}
+
+/* ---------- 关系浮层（【合】/【拆】徽章点开的那块）----------
+   材质和层级完全复用 .picker：它也是从卡片上弹出来的、也要盖住抽屉，
+   所以 body 上挂、z-index 72、.sel-menu 的玻璃底。这里只写差量：
+   比项目浮层宽一点（标题长），不需要搜索框。 */
+.links-pick{
+  position:fixed;left:0;top:0;z-index:72;
+  width:min(330px,88vw);max-height:360px;display:flex;flex-direction:column;
+  opacity:1;transform:none;pointer-events:auto;
+  /* 同 .picker：position:fixed 下 min-width:max(100%,…) 会解析成视口宽度 */
+  min-width:0;max-width:min(330px,88vw);
+}
+.links-pick .link-list{overflow:auto;min-height:0;flex:1}
+/* 分组标题：合并来源 / 拆出去的。它只是分隔，不做成可点的行 */
+.link-cap{
+  padding:7px 9px 3px;font:10px var(--font-mono);letter-spacing:.5px;
+  color:var(--text-3);text-transform:uppercase;
+}
+.link-cap:first-child{padding-top:3px}
+/* 关系行：复用 .sel-opt 的排版，只把状态挪到右侧小字 */
+.links-pick .sel-opt .sub{color:var(--text-4)}
+
+/* 抽屉里的「关系」区：内容层，实底，逐条列。
+   用 div+role=button 而不是 <button>：这些行没有独立瓷底，
+   硬挂按钮总则会在 .sect-b 里长出一排白方块（.tag-retry 同一个理由）。 */
+.rel-list{display:flex;flex-direction:column;gap:4px}
+.rel-row{
+  display:flex;align-items:center;gap:7px;width:100%;
+  padding:6px 9px;border-radius:8px;cursor:pointer;
+  border:1px solid var(--ctl-edge);background:var(--ctl-inset);
+  font-size:12px;color:var(--text-1);text-align:left;
+  white-space:nowrap;overflow:hidden;
+  transition:border-color .16s, background .16s;
+}
+.rel-row > span:first-child{overflow:hidden;text-overflow:ellipsis}
+.rel-row .sub{margin-left:auto;flex:0 0 auto;font:10px var(--font-mono);color:var(--text-4)}
+.rel-row:hover{border-color:var(--ctl-edge-hi);background:#fff}
+.rel-row:focus-visible{outline:none;box-shadow:var(--ctl-focus-ring)}
+.rel-cap{font:10px var(--font-mono);color:var(--text-3);letter-spacing:.4px;margin:7px 0 2px}
+.rel-cap:first-child{margin-top:0}
+.rel-act{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+/* 关系区空态：一行极小的说明。它不是错误，也不该抢注意力 */
+.rel-empty{font:11px/1.6 var(--font-mono);color:var(--text-4)}
+/* 合并 / 拆分的输入浮层：加在 .links-pick 上的差量。
+   它要摆一个勾选列表或一段 textarea，所以比关系浮层高一点、铺满宽。 */
+.rel-dlg{padding:11px 11px 10px;gap:8px}
+.rel-dlg-h{font-size:12.5px;font-weight:700;color:var(--text-1)}
+.rel-dlg-hint{font:10.5px/1.6 var(--font-mono);color:var(--text-3)}
+/* 勾选列表：内容层，实底，逐条 —— 不能是玻璃，字要贴在稳定底色上 */
+.rel-picks{
+  display:flex;flex-direction:column;gap:3px;
+  max-height:190px;overflow:auto;padding:3px 0;
+}
+.rel-pick{
+  display:flex;align-items:center;gap:7px;cursor:pointer;
+  padding:5px 7px;border-radius:8px;border:1px solid transparent;
+  font-size:12px;color:var(--text-1);
+  white-space:nowrap;overflow:hidden;
+  transition:background .16s, border-color .16s;
+}
+.rel-pick:hover{background:#fff;border-color:var(--ctl-edge)}
+.rel-pick > span:first-of-type{overflow:hidden;text-overflow:ellipsis}
+.rel-pick .sub{margin-left:auto;flex:0 0 auto;font:10px var(--font-mono);color:var(--text-4)}
+.rel-pick input{flex:0 0 auto;margin:0}
+/* 拆分输入：内凹材质走「输入框总则」，这里只写尺寸 */
+.rel-split{
+  width:100%;min-height:96px;resize:vertical;font-size:12.5px;
+  padding:7px 9px;border-radius:10px;
+}
+/* 被合并的卡：头部一行灰字，说清"为什么改不动"。只读闸门在后端，
+   这行只是让人别白点 —— 灰字而不是报错色，它不是错误。 */
+.dr-lock{font:11px/1.55 var(--font-mono);color:var(--text-3);margin-top:6px}
+.dr-lock:empty{display:none}
 
 /* ---------- 可搜索组合框（模型选择用） ---------- */
 .combo{position:relative;width:100%}
@@ -803,6 +884,25 @@ body select.sel-native{
 .badge-default:hover{color:var(--ink);border-color:var(--ctl-edge-hi)}
 /* 「待澄清」标签：淡紫，和橙/绿区分开。它表示"卡住了等人"，不是待办也不是完成 */
 .tag.draft{color:var(--draft-ink);background:var(--draft-bg);box-shadow:inset 0 0 0 1px var(--draft-edge)}
+/* 关系徽章【合】/【拆】：能点，点开是关系浮层。
+   刻意不做成按钮总则里的瓷底按钮 —— 它贴在 tag 行上，长成按钮会把
+   12px 的 meta 行撑乱（和 .tag-retry 同一个理由，见 style-audit 白名单）。
+   两种关系都是「历史事实」，用冷色；橙/绿/紫分别已经被"要做/做完/待澄清"占了。 */
+.tag.rel{
+  cursor:pointer;color:var(--rel-ink,var(--text-2));
+  background:var(--rel-bg,var(--neutral-bg));
+  box-shadow:inset 0 0 0 1px var(--rel-edge,var(--ctl-edge));
+  transition:background-color .16s, box-shadow .16s;
+}
+.tag.rel:hover{box-shadow:inset 0 0 0 1px var(--rel-ink,var(--ctl-edge))}
+.tag.rel:focus-visible{outline:none;box-shadow:var(--ctl-focus-ring)}
+.tag.rel.open{box-shadow:inset 0 0 0 1px var(--rel-ink,var(--ctl-edge))}
+.tag.rel.merge{--rel-ink:var(--merge-ink);--rel-bg:var(--merge-bg);--rel-edge:var(--merge-edge)}
+.tag.rel.split{--rel-ink:var(--split-ink);--rel-bg:var(--split-bg);--rel-edge:var(--split-edge)}
+/* 被合并的卡：整体淡下去、不可拖。它是历史记录 ——
+   正常视图里根本不会渲染它（inView 排掉），attr 是给"临时带着看"的场合兜底 */
+.card.merged{opacity:.55;cursor:default}
+.card.merged:hover{transform:none}
 /* 归档卡片：整体淡下去，但仍可读（不是 disabled，取回按钮还能点） */
 .card.archived{opacity:.68;cursor:default}
 .card.archived:hover{transform:none}
@@ -1630,6 +1730,8 @@ body.solo #collapseBtn{display:none}
       <div class="ttl">
         <b id="drTitle" title="点一下改标题"></b>
         <div class="dr-meta" id="drMeta"></div>
+        <!-- 被合并的卡在这里说明「为什么改不动」。空的时候不占位 -->
+        <div class="dr-lock" id="drLock"></div>
         <div class="dr-cta" id="drCta"></div>
       </div>
       <button class="icon-btn" id="drDelete" title="删除这条任务">删</button>
@@ -1807,8 +1909,12 @@ const INBOX = '默认';          // 收件筐的项目名（后端 core.mjs 同�
 function isInbox(p){ return p === INBOX; }
 
 /* 按流水线判定一条任务属于哪个视图。顺序即优先级，命中即停：
-   归档 → 待澄清 → 未分配 → 看板列。 */
+   归档 → 待澄清 → 未分配 → 看板列。
+   被合并的卡（merged_into 非空）在最前面就排掉：它已经是历史记录，
+   不删不归档，但绝不占看板 —— 否则合并完旧卡还杵在那儿，等于没合并。
+   唯一的入口是【合】徽章的浮层（relPicker）。 */
 function inView(t){
+  if (t.merged_into) return false;                       // 被合并的：只看得到，不占位
   if (navView === 'archived') return !!t.archived_at;
   if (t.archived_at) return false;                       // 归档的只在归档视图出现
   if (navView === 'clarify') return t.dev_ready === false;
@@ -2126,6 +2232,94 @@ function projectPicker(taskId, anchor){
   wrap.style.top = (below + wrap.offsetHeight > window.innerHeight - 8
     ? Math.max(8, r.top - wrap.offsetHeight - 6) : below) + 'px';
   input.focus();
+}
+
+/* ---------------- 关系浮层（【合】/【拆】徽章）----------------
+   合并完的旧卡在看板上不占位（inView 排掉了），所以这块浮层是它们唯一的入口 ——
+   它是「历史记录的入口」，不是导航。材质和层级复用 .picker：
+   都是挂在 body 上的玻璃层、都要盖住抽屉。
+   分组按「我从哪来 / 我拆出了什么」：合并卡看到的是 asFrom 的 merge_parent，
+   被拆的原卡看到的是 asFrom 的 split_of；反方向的边（谁合并了我）不列，
+   因为它只出现在旧卡上，而旧卡不进看板。 */
+let relEl = null;
+
+function closeRel(){
+  if (relEl) { relEl.remove(); relEl = null; }
+  document.querySelectorAll('.tag.rel.open').forEach(el => el.classList.remove('open'));
+}
+
+const REL_KIND_LABEL = { merge_parent: '合并来源', split_of: '拆出去的', parent: '子项', depends_on: '依赖' };
+
+/* side: 'from' = 我指向的那一端（看 to），'to' = 指向我的那一端（看 from）。
+   不传 side 就按「另一端是谁」自己判断 —— 两边都列的时候不用调用方操心。 */
+function relRowsHTML(links, selfId){
+  // 同一个 kind 归一组；组间保持后端返回的顺序（created_at）——
+  // 那正好是「先合并的先列出」，读起来是时间顺序
+  const byKind = new Map();
+  for (const l of links) {
+    if (!byKind.has(l.kind)) byKind.set(l.kind, []);
+    byKind.get(l.kind).push(l);
+  }
+  const out = [];
+  for (const [kind, list] of byKind) {
+    out.push('<div class="link-cap">' + esc(REL_KIND_LABEL[kind] || kind) + ' ' + list.length + '</div>');
+    for (const l of list) {
+      // 对端 = 两端里不是自己的那一个
+      const other = (l.from_id === selfId ? l.to : l.from) || {};
+      out.push('<div class="sel-opt" role="option" tabindex="0" data-goto="' + esc(other.id) + '">'
+        + '<span>' + esc(other.title || other.id) + '</span>'
+        + '<span class="sub">' + esc(STATUS_LABEL[other.status] || other.status || '') + '</span></div>');
+    }
+  }
+  return out.join('');
+}
+
+async function relPicker(taskId, anchor){
+  closeRel();
+  closePicker();
+  const wrap = document.createElement('div');
+  wrap.className = 'sel-menu links-pick';
+  wrap.innerHTML = '<div class="link-list"><div class="sel-empty">读取中…</div></div>';
+  document.body.appendChild(wrap);
+  relEl = wrap;
+  anchor.classList.add('open');
+
+  let data;
+  try {
+    data = await api('GET', '/api/tasks/' + encodeURIComponent(taskId) + '/links');
+  } catch (e) {
+    wrap.querySelector('.link-list').innerHTML = '<div class="sel-empty">读不到：' + esc(e.message) + '</div>';
+    return;
+  }
+
+  // asFrom 是「我指向谁」——合并卡看旧卡、被拆的原卡看子卡；
+  // asTo 是「谁指向我」，也一并列出（比如一张卡既是合并产物又被拆过）
+  const list = wrap.querySelector('.link-list');
+  const html = relRowsHTML(data.asFrom || [], taskId) + relRowsHTML(data.asTo || [], taskId);
+  list.innerHTML = html || '<div class="sel-empty">没有关系记录</div>';
+
+  list.addEventListener('click', e => {
+    const row = e.target.closest('[data-goto]');
+    if (!row) return;
+    closeRel();
+    drOpen(row.dataset.goto);
+  });
+  list.addEventListener('keydown', e => {
+    const row = e.target.closest('[data-goto]');
+    if (!row) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      closeRel();
+      drOpen(row.dataset.goto);
+    }
+  });
+
+  // 贴着徽章放，留在视口里 —— 和 .picker 同一套算法
+  const r = anchor.getBoundingClientRect();
+  wrap.style.left = Math.max(8, Math.min(r.left, window.innerWidth - wrap.offsetWidth - 8)) + 'px';
+  const below = r.bottom + 6;
+  wrap.style.top = (below + wrap.offsetHeight > window.innerHeight - 8
+    ? Math.max(8, r.top - wrap.offsetHeight - 6) : below) + 'px';
 }
 
 /* 导航点击：视图切换是纯本地操作，不打服务端 */
@@ -2517,6 +2711,14 @@ function cardHTML(t){
   if (t.kind && t.kind !== 'text') meta.push(`<span class="kind">${KIND_LABEL[t.kind] || ''}</span>`);
   // 待澄清：淡紫标签。它表示"卡住了等人"，不是待办也不是完成
   if (isDraft) meta.push('<span class="tag draft">待澄清</span>');
+  // 关系徽章：能点，点开是关系浮层（合并来源 / 拆出去的子卡）。
+  // 这两个都是「历史事实」，可读不可改 —— 所以是标签而不是按钮。
+  const nMerge = Number(t.link_counts?.merge_parent || 0);
+  const nSplit = Number(t.link_counts?.split_of || 0);
+  if (t.has_merge) meta.push('<span class="tag rel merge" role="button" tabindex="0"'
+    + ' data-rel="' + esc(t.id) + '" title="合并自 ' + nMerge + ' 张卡，点开看原始记录">【合】</span>');
+  if (t.has_split) meta.push('<span class="tag rel split" role="button" tabindex="0"'
+    + ' data-rel="' + esc(t.id) + '" title="拆出 ' + nSplit + ' 条，点开看子卡">【拆】</span>');
   const shots = (t.payload && t.payload.images && t.payload.images.length)
     ? '<div class="shots">' + t.payload.images.slice(0, 4).map(src => `<img src="${esc(imgUrl(src))}" alt="" loading="lazy">`).join('') + '</div>'
     : '';
@@ -2546,10 +2748,13 @@ function cardHTML(t){
   const gap = (isDraft && t.dev_gaps && t.dev_gaps.length)
     ? `<div class="card-gap" title="${esc(t.dev_gaps.join('；'))}">还缺：${esc(t.dev_gaps[0])}${t.dev_gaps.length > 1 ? ' …' : ''}</div>`
     : '';
-  const klass = ['card', t.status === 'done' ? 'done' : '', isArch ? 'archived' : '']
+  const klass = ['card', t.status === 'done' ? 'done' : '', isArch ? 'archived' : '',
+    t.merged_into ? 'merged' : '']
     .filter(Boolean).join(' ');
+  // 归档 / 被合并的卡都不可拖：它们已经出了流水线，要回去得显式操作
+  const draggable = (isArch || t.merged_into) ? 'false' : 'true';
   return `
-    <div class="${klass}" draggable="${isArch ? 'false' : 'true'}" data-id="${esc(t.id)}"
+    <div class="${klass}" draggable="${draggable}" data-id="${esc(t.id)}"
          style="--bar:${PRI_COLOR[t.priority] || 'var(--p3)'}">
       <div class="t">${esc(t.title)}</div>
       ${gap}
@@ -2610,10 +2815,11 @@ function emptyHint(){
 
 function bindDrag(){
   document.querySelectorAll('.card').forEach(el => {
-    // 归档的卡片不可拖：它已经出了流水线，拖回去要显式「取回」
+    // 归档 / 被合并的卡片不可拖：它们已经出了流水线，回去要显式操作
     if (el.getAttribute('draggable') === 'false') {
       el.addEventListener('click', (e) => {
-        if (e.target.closest('.shots img') || e.target.closest('[data-unarchive]')) return;
+        if (e.target.closest('.shots img') || e.target.closest('[data-unarchive]')
+          || e.target.closest('[data-rel]')) return;
         drOpen(el.dataset.id);
       });
       return;
@@ -2625,9 +2831,9 @@ function bindDrag(){
     });
     el.addEventListener('dragend', () => { el.style.opacity = ''; });
     el.addEventListener('click', (e) => {
-      // 缩略图、徽章、取回按钮有自己的行为，别抢
+      // 缩略图、徽章（选项目 / 合 / 拆）、取回按钮有自己的行为，别抢
       if (e.target.closest('.shots img') || e.target.closest('[data-assign]')
-        || e.target.closest('[data-unarchive]')) return;
+        || e.target.closest('[data-unarchive]') || e.target.closest('[data-rel]')) return;
       drOpen(el.dataset.id);
     });
   });
@@ -2918,9 +3124,13 @@ async function openSettings(){
 
 let drTaskId = null;
 let drBusy = false;
+// 当前抽屉里这张卡的关系。和 /api/tasks/:id 分两次拉：
+// 只读卡片（没人点开）不该为关系多付一次查询，而关系区的数据要能单独刷新。
+let drLinks = { asFrom: [], asTo: [] };
 
 function drOpen(id){
   drTaskId = id;
+  drLinks = { asFrom: [], asTo: [] };
   $('#drMask').classList.add('on');
   $('#drawer').classList.add('on');
   drLoad();
@@ -2928,6 +3138,7 @@ function drOpen(id){
 
 function drClose(){
   drTaskId = null;
+  drLinks = { asFrom: [], asTo: [] };
   drDocClose();               // 预览栏的宽度状态不能跟着留下来，下次打开会莫名其妙变宽
   $('#drMask').classList.remove('on');
   $('#drawer').classList.remove('on');
@@ -2936,8 +3147,13 @@ function drClose(){
 async function drLoad(){
   if (!drTaskId) return;
   const body = $('#drBody');
+  const id = drTaskId;
   try {
-    const r = await api('GET', '/api/tasks/' + encodeURIComponent(drTaskId));
+    const r = await api('GET', '/api/tasks/' + encodeURIComponent(id));
+    // 关系并行拉：失败不该让整张卡打不开，退化成「没有关系」
+    drLinks = await api('GET', '/api/tasks/' + encodeURIComponent(id) + '/links')
+      .catch(() => ({ asFrom: [], asTo: [] }));
+    if (drTaskId !== id) return;         // 期间换了卡，这份结果作废
     const t = r.task || r;
     drRenderHead(t);
     drRenderDetail(t);
@@ -3210,7 +3426,14 @@ function buildSections(t){
     secs.push({ key: 'files', title: '附件 ' + t.payload.files.length, body: '<div class="files">' + links + '</div>' });
   }
 
-  // 4. 需求说明
+  // 4. 关系（合并 / 拆分）：只在真的有关系时出现。
+  //    合并出来的卡看「合并来源」，被拆过的原卡看「拆出去的」。
+  //    两个动作按钮也挂在这儿 —— 它们是「这张卡和其他卡的关系」这件事的一部分，
+  //    塞进头部主按钮区会和「确认可以开工」抢位置。
+  const rel = relSection(t);
+  if (rel) secs.push(rel);
+
+  // 5. 需求说明
   secs.push({
     key: 'brief',
     title: '整理后的需求',
@@ -3223,6 +3446,55 @@ function buildSections(t){
   });
 
   return secs;
+}
+
+/* 关系区：列这张卡的所有关系，并给「合并到别的卡 / 拆成几条」两个入口。
+   数据来自 drLinks（drLoad 时一并拉取），和卡片徽章的浮层读的是同一个接口 ——
+   两处显示的必须永远一致，所以不各查一套。 */
+function relSection(t){
+  const asFrom = drLinks.asFrom || [];
+  const asTo = drLinks.asTo || [];
+  // 没有任何关系也要出这一区 —— 「合并到别的卡 / 拆成几条」两个入口就在这里，
+  // 一张新卡恰恰最需要它们。之前这里 `if (!rows.length) return null`，
+  // 结果没关系的卡永远看不到入口，第一次合并根本无从下手。
+  const empty = !asFrom.length && !asTo.length;
+
+  const rows = [];
+  const group = (list, label) => {
+    if (!list.length) return;
+    rows.push('<div class="rel-cap">' + esc(label) + '</div>');
+    for (const l of list) {
+      const other = (l.from_id === t.id ? l.to : l.from) || {};
+      rows.push('<div class="rel-row" role="button" tabindex="0" data-goto="' + esc(other.id) + '">'
+        + '<span>' + esc(other.title || other.id) + '</span>'
+        + '<span class="sub">' + esc(STATUS_LABEL[other.status] || other.status || '') + '</span></div>');
+    }
+  };
+  group(asFrom.filter(l => l.kind === 'merge_parent'), '合并来源');
+  group(asFrom.filter(l => l.kind === 'split_of'), '拆出去的');
+  group(asFrom.filter(l => l.kind !== 'merge_parent' && l.kind !== 'split_of'), '子项 / 关联');
+  group(asTo.filter(l => l.kind === 'merge_parent'), '被合并进');
+  group(asTo.filter(l => l.kind === 'split_of'), '来自拆分');
+  group(asTo.filter(l => l.kind !== 'merge_parent' && l.kind !== 'split_of'), '上级 / 被依赖');
+
+  // 两个动作。被合并的卡只读：不给任何改动入口（撤销在头部单独给，
+  // 因为撤销合并是对「新卡」的操作，不是对旧卡）。
+  const acts = t.merged_into ? '' :
+    '<div class="rel-act">'
+    + '<button type="button" class="mini-btn" data-merge="1" title="把这张卡和别的卡合并成一张新卡">合并到别的卡</button>'
+    + '<button type="button" class="mini-btn" data-split="1" title="把这张卡拆成几条（原卡会标成已完成）">拆成几条</button>'
+    + '</div>';
+
+  const body = empty
+    ? '<span class="rel-empty">还没有关系和这张卡关联。'
+      + (t.merged_into ? '' : '可以把它和别的卡合并，或者拆成几条。') + '</span>'
+    : '<div class="rel-list">' + rows.join('') + '</div>';
+
+  return {
+    key: 'rel',
+    title: empty ? '关系' : '关系 ' + (asFrom.length + asTo.length),
+    body: body + acts
+  };
 }
 
 /* 「还缺这些」：只有待澄清、且初判真的说了缺什么时才出现。
@@ -3278,6 +3550,26 @@ function drRenderDetail(t){
   const rawBtn = host.querySelector('[data-raw-edit]');
   if (rawBtn) rawBtn.addEventListener('click', (e) => { e.stopPropagation(); drEditRaw(); });
 
+  // 关系区的两个动作。挂在这里而不是 document 委托，因为它们只在这一屏幕里存在，
+  // 而且要拿 drTask（当前这张卡的完整数据）去拼请求。
+  const mergeBtn = host.querySelector('[data-merge]');
+  if (mergeBtn) {
+    mergeBtn.addEventListener('click', (e) => { e.stopPropagation(); drStartMerge(drTask); });
+  }
+  const splitBtn = host.querySelector('[data-split]');
+  if (splitBtn) {
+    splitBtn.addEventListener('click', (e) => { e.stopPropagation(); drStartSplit(drTask); });
+  }
+  // 关系行：点一下跳到对端那张卡。卡片徽章的浮层里有这套绑定了，
+  // 抽屉里这份是另一处 DOM，不绑就点不动（第一版漏了，点上去像没反应）。
+  host.querySelectorAll('.rel-row[data-goto]').forEach(row => {
+    const go = (e) => { e.stopPropagation(); drOpen(row.dataset.goto); };
+    row.addEventListener('click', go);
+    row.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(e); }
+    });
+  });
+
   // 生成 / 重新生成
   const btn = host.querySelector('[data-brief]');
   if (btn) {
@@ -3305,12 +3597,21 @@ function drRenderDetail(t){
 }
 
 function drRenderHead(t){
+  const locked = !!t.merged_into;         // 被合并的卡：历史记录，只读
+  const into = locked ? (store.tasks || []).find(x => x.id === t.merged_into) : null;
   const titleEl = $('#drTitle');
   titleEl.textContent = t.title || '（无标题）';
   // 点标题进编辑态：只换 input，不用 contenteditable（那东西会把换行、
   // 粘贴富文本、IME 组合一堆行为一起放进来，收不住）
-  titleEl.dataset.edit = '1';
-  titleEl.onclick = () => drEditTitle(t);
+  // 被合并的卡不给这个入口 —— 后端也会拒，这里只是别让人白点一次。
+  if (locked) {
+    titleEl.dataset.edit = '';
+    titleEl.style.cursor = 'default';
+    titleEl.onclick = null;
+  } else {
+    titleEl.dataset.edit = '1';
+    titleEl.onclick = () => drEditTitle(t);
+  }
 
   const tags = [];
   tags.push('<span class="tag" style="color:' + (PRI_COLOR[t.priority] || 'var(--text-3)')
@@ -3338,19 +3639,35 @@ function drRenderHead(t){
   }
   $('#drMeta').innerHTML = tags.join('');
 
-  // 头部主按钮：待澄清时是「确认可以开工」，归档时是「取回」。
-  // 这两个都是「这一步唯一该做的事」，所以放头部而不是塞进字段行。
+  // 被合并的卡：一行灰字说明归属。这里用「已被合并进「xxx」，只读」这个说法 ——
+  // 用户在卡片上看到的是【合】，点进来得能对上那句话。
+  const lockEl = $('#drLock');
+  if (lockEl) {
+    lockEl.textContent = locked
+      ? '已被合并进「' + (into?.title || t.merged_into) + '」，只读'
+      : '';
+  }
+
+  // 头部主按钮：待澄清时是「确认可以开工」，归档时是「取回」，
+  // 合并出来的卡是「撤销合并」。
+  // 这三个都是「这一步唯一该做的事」，所以放头部而不是塞进字段行。
   const cta = [];
-  if (t.dev_ready === false) {
+  if (t.dev_ready === false && !locked) {
     cta.push('<button type="button" class="primary" id="drReady">确认可以开工</button>');
   }
   if (t.archived_at) {
     cta.push('<button type="button" id="drUnarchive">取回</button>');
   }
+  // 撤销合并只在这一屏出现一次：只有「合并出来的那张卡」才有 merge_parent 出边。
+  // 用默认样式而不是 .primary —— 一屏只能有一个主动作（这里是「确认可以开工」/「取回」）。
+  if (t.has_merge && !locked) {
+    cta.push('<button type="button" id="drUnmerge" title="删掉合并关系，把原始卡片放回来">撤销合并</button>');
+  }
   const ctaHost = $('#drCta');
   if (ctaHost) ctaHost.innerHTML = cta.join('');
   $('#drReady')?.addEventListener('click', () => drConfirmReady(t));
   $('#drUnarchive')?.addEventListener('click', () => drUnarchive(t));
+  $('#drUnmerge')?.addEventListener('click', () => drUnmerge(t));
 
   // 快速改字段。项目条目后面带任务数 —— 重名时靠这个才分得清
   const opts = (store.projects || []).map(p => {
@@ -3365,8 +3682,10 @@ function drRenderHead(t){
           '<option value="' + k + '"' + (k === t.priority ? ' selected' : '') + '>'
           + PRI_LABEL[k] + '</option>').join('')
     + '</select>'
-    + '<select id="drProj" class="sel-native" data-sel="inline">' + opts + '</select>'
-    + '<select id="drStatus" class="sel-native" data-sel="inline">'
+    + '<select id="drProj" class="sel-native" data-sel="inline"' + (locked ? ' disabled' : '') + '>'
+      + opts + '</select>'
+    // 状态下拉：被合并的卡禁用（它已经是历史，改状态等于改历史 —— 后端也会拒）
+    + '<select id="drStatus" class="sel-native" data-sel="inline"' + (locked ? ' disabled' : '') + '>'
       + [['todo','未开始'],['doing','进行中'],['done','已完成']].map(([k,l]) =>
           '<option value="' + k + '"' + (k === t.status ? ' selected' : '') + '>' + l + '</option>').join('')
     + '</select>';
@@ -3690,6 +4009,113 @@ async function drUnarchive(t){
     drClose();
     toast('已取回，回到已完成列');
   } catch (e) { toast('取回失败：' + e.message); }
+}
+
+/* ---------------- 合并 / 拆分 ----------------
+   两个动作都要「先选/先填，再提交」，而抽屉里没有富余空间摆一个多选列表。
+   所以用一个小浮层（复用 .picker 的材质和 72 层的层级）承载输入，
+   提交成功后关浮层 → 刷新 → 关抽屉（当前这张卡的状态已经变了，留在原地看着更糊涂）。
+
+   为什么合并要先选「被合并掉的卡」而不是「合并进哪张」：
+   合并的产物永远是一张**新卡**（见 docs/relations-and-table.md 1.1），
+   不存在「合并进某张已有的卡」。 */
+
+function relDialog({ title, hint, submitLabel, bodyHTML, onSubmit }){
+  closeRel();
+  closePicker();
+  const wrap = document.createElement('div');
+  wrap.className = 'sel-menu links-pick rel-dlg';
+  wrap.innerHTML = '<div class="rel-dlg-h">' + esc(title) + '</div>'
+    + (hint ? '<div class="rel-dlg-hint">' + esc(hint) + '</div>' : '')
+    + bodyHTML
+    + '<div class="rel-act"><button type="button" class="mini-btn" data-cancel="1">取消</button>'
+    + '<button type="button" class="primary" data-ok="1">' + esc(submitLabel) + '</button></div>';
+  document.body.appendChild(wrap);
+  relEl = wrap;
+
+  const ok = wrap.querySelector('[data-ok]');
+  const cancel = wrap.querySelector('[data-cancel]');
+  cancel.addEventListener('click', () => closeRel());
+  ok.addEventListener('click', async () => {
+    ok.disabled = true;
+    const old = ok.textContent;
+    ok.textContent = '提交中…';
+    try {
+      await onSubmit();
+      closeRel();
+    } catch (e) {
+      toast('失败：' + e.message);
+      ok.disabled = false;
+      ok.textContent = old;
+    }
+  });
+  // 浮层贴在屏幕中间偏上：它是"需要你做决定"的，不该跟着某个按钮漂
+  wrap.style.left = Math.max(8, (window.innerWidth - wrap.offsetWidth) / 2) + 'px';
+  wrap.style.top = Math.max(8, window.innerHeight * 0.22) + 'px';
+  return wrap;
+}
+
+/* 合并：从「最近 20 张」里勾选要被合并掉的卡 —— 不让人手敲 id。
+   当前这张卡自己不出现在候选里（自己不能和自己合并）。 */
+async function drStartMerge(t){
+  if (!t) return;
+  const pool = (store.tasks || [])
+    .filter(x => x.id !== t.id && !x.merged_into && !x.archived_at)
+    .slice(0, 20);
+  if (!pool.length) { toast('没有可以合并的卡'); return; }
+
+  const rows = pool.map(x =>
+    '<label class="rel-pick"><input type="checkbox" value="' + esc(x.id) + '">'
+    + '<span>' + esc(x.title) + '</span>'
+    + '<span class="sub">' + esc(x.project || '') + '</span></label>').join('');
+
+  relDialog({
+    title: '合并成一张新卡',
+    hint: '勾选要和「' + t.title + '」合并的卡（至少 1 张）。会新建一张卡，原卡全部保留并标为只读。',
+    submitLabel: '合并',
+    bodyHTML: '<div class="rel-picks">' + rows + '</div>',
+    onSubmit: async () => {
+      const picked = [...relEl.querySelectorAll('input[type=checkbox]:checked')].map(el => el.value);
+      if (!picked.length) throw new Error('至少要选一张');
+      const r = await api('POST', '/api/tasks/merge', { targetIds: [t.id, ...picked] });
+      await refresh();
+      drClose();
+      toast('已合并成「' + (r.task?.title || '新卡') + '」');
+    }
+  });
+}
+
+/* 拆分：一行一条，最傻瓜的输入方式。
+   原卡会被标成已完成（已定决策：不引入 split 状态），备注里记子项。 */
+async function drStartSplit(t){
+  if (!t) return;
+  relDialog({
+    title: '拆成几条',
+    hint: '一行一条。原卡会标成「已完成」，备注里记下拆出了哪几条。',
+    submitLabel: '拆分',
+    bodyHTML: '<textarea class="rel-split" rows="6" placeholder="第一件事&#10;第二件事&#10;第三件事"></textarea>',
+    onSubmit: async () => {
+      const raw = relEl.querySelector('.rel-split').value;
+      const parts = raw.split('\n').map(s => s.trim()).filter(Boolean);
+      if (parts.length < 2) throw new Error('至少写两条（一行一条）');
+      const r = await api('POST', '/api/tasks/' + encodeURIComponent(t.id) + '/split',
+        { parts: parts.map(title => ({ title })) });
+      await refresh();
+      drClose();
+      toast('已拆成 ' + (r.children?.length || parts.length) + ' 条');
+    }
+  });
+}
+
+async function drUnmerge(t){
+  if (!t) return;
+  if (!confirm('撤销这次合并？\n\n原始卡片的只读状态会解除，合并出来的这张会被归档留档。')) return;
+  try {
+    const r = await api('POST', '/api/tasks/' + encodeURIComponent(t.id) + '/unmerge');
+    await refresh();
+    drClose();
+    toast('已撤销合并，' + (r.restored?.length || 0) + ' 张原始卡恢复可编辑');
+  } catch (e) { toast('撤销失败：' + e.message); }
 }
 
 $('#drClose')?.addEventListener('click', drClose);
@@ -4067,8 +4493,18 @@ document.addEventListener('click', async e => {
     return;
   }
 
+  // 【合】/【拆】徽章：被合并的旧卡在看板上不占位，这块浮层是它们唯一的入口
+  const rel = e.target.closest('[data-rel]');
+  if (rel) {
+    e.stopPropagation();
+    if (relEl) { closeRel(); return; }        // 再点一次收起
+    relPicker(rel.dataset.rel, rel);
+    return;
+  }
+
   // 点浮层外面收起
   if (pickerEl && !pickerEl.contains(e.target)) closePicker();
+  if (relEl && !relEl.contains(e.target)) closeRel();
 
   const unarchive = e.target.closest('[data-unarchive]');
   if (unarchive) {
@@ -4118,6 +4554,7 @@ document.addEventListener('keydown', e => {
 
   if (e.key === 'Escape') {
     $('#lightbox').classList.remove('on');
+    if (relEl) { closeRel(); return; }
     if (docDrag) { docDrag = null; $('#drSplit')?.classList.remove('hot'); return; }
     // 一层一层退：先收预览栏，再关抽屉
     if ($('#drawer')?.classList.contains('doc-on')) { drDocClose(); return; }

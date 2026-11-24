@@ -352,6 +352,57 @@ Task Inbox 要的是「问一句拿个 JSON」，属于**调模型**不是**派 
 
 ---
 
+## 两张卡可以是同一件事（合并 / 拆分）
+
+随手记的时候经常这样：先说「筛选条挪位置」，过一会儿又记「减少纵向空间」——
+其实是同一件事。或者反过来，一条卡里塞了四件不相干的事。
+
+**合并不删东西。** 这是硬规则。
+
+### 合并
+
+抽屉 →「关系」→「合并到别的卡」→ 勾选要并进来的卡 → 提交。
+
+```
+合并前    A（筛选条挪位置）        B（减少纵向空间）
+              ↓ 合并
+合并后    C【合】筛选条挪到标题行右侧
+            ├── merge_parent → A
+            └── merge_parent → B
+```
+
+- 产物是一张**新卡**，不是把 B 塞进 A —— 塞进去的话 A 既是「原来的 A」
+  又是「合并后的」，三个月后看它的创建时间会想不通
+- A、B **不删、不归档**，只是标成 `merged_into = C`，**变成只读**
+- A、B 的**对话和附件原地不动**，不搬
+- A、B 不再出现在看板任何一列，唯一的入口是 C 上的【合】徽章（点开能看到原始卡）
+
+**撤销合并**：C 的抽屉头部有按钮。旧卡全部解锁，C 自己被归档（不是删除）。
+
+### 拆分
+
+抽屉 →「关系」→「拆成几条」→ 一行一条 → 提交。
+
+- 原卡**内容一个字不动**，状态标成 `done`，备注追加「已拆分为 N 条：【…】」
+  （不引入第五种状态 —— 拆分这个动作确实结束了，一件含糊的事变成了 N 件清楚的）
+- 新建 N 张子卡，原卡用 `split_of` 指向它们
+- 原卡上出现【拆】徽章，点开是子卡清单
+
+### 数据形状
+
+一张 `links` 表装四种关系，`kind` 区分：
+
+| kind | 方向 | 语义 |
+|---|---|---|
+| `merge_parent` | 合并后的卡 → 被合并的卡 | 我从哪来 |
+| `split_of` | 原卡 → 子卡 | 我拆出了谁 |
+| `parent` | 子 → 父 | 我属于谁（**第 3 步，未实现**） |
+| `depends_on` | 卡 → 前置卡 | 我要等谁（**第 2 步，未实现**） |
+
+设计判断见 [../docs/relations-and-table.md](../docs/relations-and-table.md)。
+
+---
+
 ## 数据
 
 ```
@@ -369,17 +420,18 @@ Task Inbox 要的是「问一句拿个 JSON」，属于**调模型**不是**派 
 `serve.command` 起的独立服务可能同时在跑，还可能加上 CLI。JSON 全量重写会互相
 覆盖，WAL + `busy_timeout` 不会。
 
-五张表：
+六张表：
 
 | 表 | 装什么 |
 |---|---|
-| `tasks` | 任务本体。`payload` / `dev_gaps` 是 JSON 字符串；`dev_ready` / `archived_at` 是流水线那两个位 |
+| `tasks` | 任务本体。`payload` / `dev_gaps` 是 JSON 字符串；`dev_ready` / `archived_at` 是流水线那两个位；`merged_into` 指向合并它的那张卡 |
 | `messages` | 卡片抽屉里的对话，`ON DELETE CASCADE`；`attachments` 是 JSON（images / files） |
 | `projects` | 项目，`aliases` / `dirs` 是 JSON，`sort_order` 是侧栏顺序（「默认」永远是 0） |
+| `links` | 卡片之间的关系边：`kind` + `from_id` + `to_id`，`UNIQUE(kind,from,to)`，两端都 `ON DELETE CASCADE` |
 | `settings` | 通道、模型、`archive_after_days` 这类键值 |
 | `meta` | 库版本号，迁移用 |
 
-**schema 版本**：现在 **v4**。加字段时 `SCHEMA_VERSION +1` 并在 `MIGRATIONS` 里补一条，
+**schema 版本**：现在 **v5**。加字段时 `SCHEMA_VERSION +1` 并在 `MIGRATIONS` 里补一条，
 **一次改动只占一个号** —— 分两次加字段时，后落地的那条会被
 `fromVersion < SCHEMA_VERSION` 跳过，字段永远补不上。
 
@@ -387,6 +439,7 @@ Task Inbox 要的是「问一句拿个 JSON」，属于**调模型**不是**派 
 v2  needs_project
 v3  dev_ready / archived_at / messages.attachments / projects.sort_order
 v4  dev_gaps
+v5  links 表 + tasks.merged_into / tasks.split_state
 ```
 
 老数据自动迁移：建库时如果目录里还有 `tasks.json` 而且 `tasks` 表是空的，
@@ -517,7 +570,7 @@ node style-audit.mjs
 ### 测试
 
 ```bash
-node test-sqlite.mjs    # 存储层 + schema 迁移，176 项
+node test-sqlite.mjs    # 存储层 + schema 迁移 + 卡片关系，220 项
 node test-parsers.mjs   # classify / chat 解析层 + 队列路由，86 项，不碰真模型
 node style-audit.mjs    # 界面样式规范
 ```

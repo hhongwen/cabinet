@@ -19,6 +19,12 @@ export const STATUSES = ['todo', 'doing', 'done'];
 export const PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4'];
 export const KINDS = ['text', 'image', 'image_text', 'link', 'file', 'mixed'];
 
+// 卡片关系的种类。一张 links 表装四种边，用 kind 区分 ——
+// 它们的形状一样（有向边 + 两端 + 一句说明），只有约束不同。
+// 本轮（第 1 步）只实现 merge_parent / split_of 的语义，parent / depends_on
+// 只允许建边删边，环检测和派生 status 留给第 2、3 步。
+export const LINK_KINDS = ['merge_parent', 'split_of', 'parent', 'depends_on'];
+
 export const PRIORITY_LABEL = {
   p0: 'P0 阻塞', p1: 'P1 紧急', p2: 'P2 常规', p3: 'P3 低', p4: 'P4 待定'
 };
@@ -171,6 +177,10 @@ export function createCore(dataDir) {
       // 初判说「还缺这些」。存 JSON 数组，读出来就是数组，前端直接渲染成列表
       dev_gaps: normalizeGaps(parseJson(r.dev_gaps, [])),
       archived_at: r.archived_at ?? null,
+      // 被合并进的卡片 id。非空 = 这张卡是历史记录，只读、不进看板
+      merged_into: r.merged_into ?? null,
+      // 预留列：本轮拆分按「done + 备注」处理，这里恒为 null
+      split_state: r.split_state ?? null,
       created_at: r.created_at,
       updated_at: r.updated_at,
       doing_at: r.doing_at,
@@ -197,6 +207,58 @@ export function createCore(dataDir) {
   const TASK_SELECT = `
     SELECT t.*, (SELECT COUNT(*) FROM messages m WHERE m.task_id = t.id) AS message_count
       FROM tasks t`;
+
+  // ---------- 关系派生字段 ----------
+  //
+  // 列表里每张卡要带 has_merge / has_split / link_counts。这三个都是派生的，
+  // 不能存在 tasks 上（否则「改了层级，合并历史也跟着变」那种事就会出现）。
+  //
+  // 一次把 links 全捞出来在内存里归并：这张表很小（一条边两行数据），
+  // 一次全表扫比「每张卡再查一次」便宜一个数量级 —— 后者 2000 条任务
+  // 就是 2000 次 SQL，而 /api/state 每 3 秒被轮询一次。
+  function linkStats(ids) {
+    const stat = new Map();
+    if (!ids.size) return stat;
+    for (const r of conn().all('SELECT kind, from_id, to_id FROM links')) {
+      if (ids.has(r.from_id)) {
+        let s = stat.get(r.from_id);
+        if (!s) { s = { from: {}, to: {} }; stat.set(r.from_id, s); }
+        s.from[r.kind] = (s.from[r.kind] || 0) + 1;
+      }
+      if (ids.has(r.to_id)) {
+        let s = stat.get(r.to_id);
+        if (!s) { s = { from: {}, to: {} }; stat.set(r.to_id, s); }
+        s.to[r.kind] = (s.to[r.kind] || 0) + 1;
+      }
+    }
+    return stat;
+  }
+
+  /**
+   * 给一批任务挂上关系派生字段。原地改，返回同一个数组。
+   *
+   *   has_merge    这张卡有 merge_parent 边指向旧卡（= 它是合并出来的新卡）
+   *   has_split    这张卡有 split_of 边指向子卡（= 它被拆过）
+   *   link_counts  两个方向都算：这张卡身上一共有多少条边，按 kind 分
+   *
+   * 方向的选择是刻意的：has_merge / has_split 只看「我指向谁」，
+   * 因为徽章是入口 —— 点开看的是「我从哪来 / 我拆出了什么」。
+   * 反方向的边（谁合并了我 / 我是谁拆出来的）在 link_counts 和抽屉的
+   * 「关系」区里都能看到，不占卡片上那点位置。
+   */
+  function decorateLinks(tasks) {
+    const ids = new Set(tasks.map((t) => t.id));
+    const stat = linkStats(ids);
+    for (const t of tasks) {
+      const s = stat.get(t.id) || { from: {}, to: {} };
+      t.has_merge = (s.from.merge_parent || 0) > 0;
+      t.has_split = (s.from.split_of || 0) > 0;
+      const counts = {};
+      for (const k of LINK_KINDS) counts[k] = (s.from[k] || 0) + (s.to[k] || 0);
+      t.link_counts = counts;
+    }
+    return tasks;
+  }
 
   // ---------- 初始化 / 迁移 ----------
 
@@ -471,6 +533,8 @@ export function createCore(dataDir) {
       dev_ready: input.dev_ready === undefined ? true : !!input.dev_ready,
       dev_gaps: normalizeGaps(input.dev_gaps),
       archived_at: null,
+      merged_into: null,      // 合并时才写；这里是新卡的出生状态
+      split_state: null,      // 预留列，本轮恒 null
       created_at: now,
       updated_at: now,
       doing_at: null,
@@ -507,7 +571,21 @@ export function createCore(dataDir) {
 
   function getTask(id) {
     if (!id) return null;
-    return rowToTask(conn().get(TASK_SELECT + ' WHERE t.id = ?', [id]));
+    const t = rowToTask(conn().get(TASK_SELECT + ' WHERE t.id = ?', [id]));
+    // 单条也要带 has_merge / has_split / link_counts：抽屉的「关系」区
+    // 和卡片上的徽章读的是同一份数据，分两套就一定会有一处忘了更新。
+    return t ? decorateOne(t) : null;
+  }
+
+  function decorateOne(t) {
+    const stat = linkStats(new Set([t.id]));
+    const s = stat.get(t.id) || { from: {}, to: {} };
+    t.has_merge = (s.from.merge_parent || 0) > 0;
+    t.has_split = (s.from.split_of || 0) > 0;
+    const counts = {};
+    for (const k of LINK_KINDS) counts[k] = (s.from[k] || 0) + (s.to[k] || 0);
+    t.link_counts = counts;
+    return t;
   }
 
   function requireTask(id) {
@@ -543,6 +621,17 @@ export function createCore(dataDir) {
     let nextProject = t.project;
     let nextProjectId = t.project_id;
 
+    // 被合并的卡是历史记录，只读。
+    // 唯一的例外是 merged_into 本身 —— 撤销合并（revertMerge）要靠它把卡放回来，
+    // 而那时库里这张卡还带着 merged_into。
+    if (t.merged_into) {
+      const others = Object.keys(fields).filter((k) => fields[k] !== undefined && k !== 'merged_into');
+      if (others.length) {
+        const into = getTask(t.merged_into);
+        throw new Error('这条已被合并进「' + (into?.title || t.merged_into) + '」，是历史记录，不能改');
+      }
+    }
+
     for (const k of PATCHABLE) {
       if (fields[k] === undefined) continue;
       sets.push(k + ' = ?');
@@ -576,6 +665,17 @@ export function createCore(dataDir) {
     if (fields.archived_at !== undefined) {
       sets.push('archived_at = ?');
       args.push(fields.archived_at === null ? null : String(fields.archived_at));
+    }
+    // merged_into 只能是 null 或一个真实存在的任务 id。
+    // 它同时是「只读闸门」的开关，所以这里也要校验 —— 前端不该能写任意值进来。
+    if (fields.merged_into !== undefined) {
+      const target = fields.merged_into === null ? null : String(fields.merged_into);
+      if (target !== null) {
+        if (target === id) throw new Error('不能合并到自己身上');
+        if (!getTask(target)) throw new Error('要合并进的卡片不存在: ' + target);
+      }
+      sets.push('merged_into = ?');
+      args.push(target);
     }
 
     if (fields.payload && typeof fields.payload === 'object') {
@@ -615,6 +715,334 @@ export function createCore(dataDir) {
 
   function move(id, status) { return patch(id, { status }); }
 
+  // ---------- 卡片关系（links） ----------
+  //
+  // 一张表装四种边，用 kind 区分。语义差别不在数据结构上，在约束上：
+  //   merge_parent  新卡 → 旧卡（合并产出，历史事实，不可改，可撤销）
+  //   split_of      原卡 → 子卡（拆分产出，历史事实，不可改）
+  //   parent        层级（第 3 步；本轮只允许建边删边）
+  //   depends_on    依赖（第 2 步；本轮只允许建边删边）
+  //
+  // 为什么合并要新建一张卡而不是「把 B 塞进 A」：A 的身份会变成
+  // 「既是原来的 A，又是合并后的 A」—— 三个月后看到 A 的 created_at 是
+  // 第一次记下的时间，内容却是后来并的。新建 C 最干净：C 的出生时间就是
+  // 这次合并的时间，A、B 原样留作历史。
+
+  function rowToLink(r) {
+    if (!r) return null;
+    return {
+      id: r.id,
+      kind: r.kind,
+      from_id: r.from_id,
+      to_id: r.to_id,
+      note: r.note || '',
+      created_at: r.created_at
+    };
+  }
+
+  // 一条边两端各带一份任务摘要。只用摘要而不是整条任务：
+  // 浮层里要显示的就是「标题 + 状态」，整条任务（含 payload / brief）
+  // 在 links 视图里是噪音，而且会让返回体翻几倍。
+  const LINK_TASK_FIELDS = 'id, title, status, project, priority, category, archived_at, merged_into';
+
+  function taskBrief(id) {
+    const r = conn().get('SELECT ' + LINK_TASK_FIELDS + ' FROM tasks WHERE id = ?', [id]);
+    if (!r) return null;
+    return {
+      id: r.id,
+      title: r.title,
+      status: r.status,
+      project: r.project,
+      priority: r.priority,
+      category: r.category,
+      archived_at: r.archived_at ?? null,
+      merged_into: r.merged_into ?? null
+    };
+  }
+
+  /**
+   * 建一条边。
+   * - kind 必须是四种之一
+   * - 两端都得真实存在
+   * - 不能自己连自己
+   * - 重复不报错（返回已有的那条）—— 合并/拆分是幂等的，
+   *   重试一次请求不该变成一个错误
+   * - merge_parent 专门查一次环：合并关系理论上不该成环，
+   *   但一旦成环，「点【合】徽章」那个入口就会无限套娃
+   */
+  function linkTasks(fromId, toId, kind, note, opts = {}) {
+    const d = conn();
+    if (!LINK_KINDS.includes(kind)) throw new Error('未知关系类型: ' + kind);
+    const from = String(fromId || '');
+    const to = String(toId || '');
+    if (!from || !to) throw new Error('两端都要给');
+    if (from === to) throw new Error('不能自己连自己');
+    if (!getTask(from)) throw new Error('任务不存在: ' + from);
+    if (!getTask(to)) throw new Error('任务不存在: ' + to);
+
+    const exist = d.get('SELECT * FROM links WHERE kind = ? AND from_id = ? AND to_id = ?', [kind, from, to]);
+    if (exist) return rowToLink(exist);
+
+    if (kind === 'merge_parent') {
+      // 环检测：从 to 往上爬它已有的 merge_parent 祖先，撞到 from 就是环。
+      // 用迭代 + 访问集合兜底 —— 就算库里已经存着一个环，也不会死循环。
+      const seen = new Set();
+      let cur = to;
+      while (cur && !seen.has(cur)) {
+        if (cur === from) throw new Error('合并关系会成环：' + from + ' 已经在 ' + to + ' 的合并链上');
+        seen.add(cur);
+        const up = d.get("SELECT to_id FROM links WHERE kind = 'merge_parent' AND from_id = ? LIMIT 1", [cur]);
+        cur = up?.to_id || null;
+      }
+    }
+
+    const row = {
+      id: shortId('l_'),
+      kind,
+      from_id: from,
+      to_id: to,
+      note: String(note || '').slice(0, 500),
+      created_at: nowIso()
+    };
+    d.run(
+      'INSERT INTO links (id, kind, from_id, to_id, note, created_at) VALUES (?,?,?,?,?,?)',
+      [row.id, row.kind, row.from_id, row.to_id, row.note, row.created_at]
+    );
+    // 关系变了也是「这张卡变了」：列表里的 has_merge / has_split 要跟着刷。
+    // 批量建边（合并/拆分）时调用方传 touch:false —— 外层一次事务里已经统一刷过了。
+    if (opts.touch !== false) {
+      const now = nowIso();
+      d.run('UPDATE tasks SET updated_at = ? WHERE id IN (?, ?)', [now, from, to]);
+    }
+    return row;
+  }
+
+  function unlinkTasks(fromId, toId, kind) {
+    const d = conn();
+    if (!LINK_KINDS.includes(kind)) throw new Error('未知关系类型: ' + kind);
+    const r = d.run('DELETE FROM links WHERE kind = ? AND from_id = ? AND to_id = ?',
+      [kind, String(fromId || ''), String(toId || '')]);
+    return { removed: Number(r.changes || 0) };
+  }
+
+  function deleteLink(id) {
+    const d = conn();
+    const r = d.run('DELETE FROM links WHERE id = ?', [String(id || '')]);
+    if (!Number(r.changes || 0)) throw new Error('关系不存在: ' + id);
+    return { removed: 1 };
+  }
+
+  /**
+   * 这张卡身上的所有关系。
+   *   asFrom —— 我指向谁（我合并了谁 / 我拆出了谁）
+   *   asTo   —— 谁指向我（我被谁合并 / 我从哪拆出来）
+   * 每条都带两端任务的摘要，前端不用再逐条查任务。
+   */
+  function listLinks(taskId) {
+    const d = conn();
+    const id = String(taskId || '');
+    if (!id) throw new Error('缺 taskId');
+    const rows = d.all(
+      'SELECT * FROM links WHERE from_id = ? OR to_id = ? ORDER BY created_at, rowid',
+      [id, id]
+    );
+    const cache = new Map();
+    const brief = (tid) => {
+      if (!cache.has(tid)) cache.set(tid, taskBrief(tid));
+      return cache.get(tid);
+    };
+    const asFrom = [];
+    const asTo = [];
+    for (const r of rows) {
+      const one = {
+        ...rowToLink(r),
+        from: brief(r.from_id),
+        to: brief(r.to_id)
+      };
+      // 两栏是「我指向别人 / 别人指向我」——一条边只会进其中一栏，
+      // 不会两边都算（否则同一个关系会出现两次）
+      if (r.from_id === id) asFrom.push(one);
+      else asTo.push(one);
+    }
+    return { asFrom, asTo };
+  }
+
+  function linksOf(taskId, kind) {
+    return conn().all(
+      'SELECT * FROM links WHERE from_id = ? AND kind = ? ORDER BY created_at, rowid',
+      [String(taskId || ''), kind]
+    ).map(rowToLink);
+  }
+
+  /**
+   * 合并：把 N 张旧卡并成一张新卡。
+   *
+   * 严格按 docs/relations-and-table.md 第 1.1 条：
+   * - **新建一张卡**，不把内容塞进某张旧卡（否则那张卡的 created_at 会撒谎）
+   * - 每张旧卡 merged_into = 新卡 id，status 保持不变，**不删、不归档**
+   * - 建 N 条 merge_parent：from = 新卡，to = 旧卡
+   * - 旧卡的对话和附件**不搬走**，留在原来那张卡上 —— 搬走就等于删了
+   * - 全部在一个事务里
+   *
+   * @param {string[]} targetIds 要被合并掉的旧卡（至少 2 张，去重后）
+   * @param {{title?:string,text?:string,project?:string,category?:string,priority?:string}} opts
+   * @returns 新卡
+   */
+  function mergeTasks(targetIds, opts = {}) {
+    const d = conn();
+    // 去重 + 去空：同一张卡传两遍是前端拼参数的常见手滑，不该算两次
+    const ids = [...new Set((Array.isArray(targetIds) ? targetIds : [])
+      .map((x) => String(x || '').trim()).filter(Boolean))];
+    if (ids.length < 2) throw new Error('合并至少要 2 张卡（现在 ' + ids.length + ' 张）');
+
+    const olds = ids.map((id) => requireTask(id));
+    for (const t of olds) {
+      if (t.merged_into) {
+        throw new Error('「' + t.title + '」已经被合并过了，不能重复合并');
+      }
+    }
+
+    // 默认标题：把旧卡标题并起来，长的优先露出来。
+    // 这是给人一个能改的起点，不是「智能摘要」—— 摘要该由模型给（第 5 节：
+    // 「模型给建议 + 用户确认」），这里只保证不留一张没名字的卡。
+    const fallbackTitle = olds.map((t) => t.title).join(' / ').slice(0, 200);
+    const title = String(opts.title || '').trim() || fallbackTitle;
+    // 正文默认把每张旧卡的原文并起来，前面标上它的出处 ——
+    // 「原始记录」是唯一的事实来源，合并时不能只剩标题
+    const fallbackText = olds.map((t) => {
+      const body = String(t.payload?.text || '').trim();
+      return body ? '【' + t.title + '】\n' + body : '【' + t.title + '】';
+    }).join('\n\n');
+    const text = opts.text === undefined ? fallbackText : opts.text;
+
+    // 合并后的卡先落哪个项目：opts 优先，其次第一张旧卡的（它们通常同项目）
+    const head = olds[0];
+
+    return d.tx(() => {
+      const created = add({
+        title,
+        text,
+        project: opts.project ?? head.project,
+        project_id: opts.project ? null : head.project_id,
+        category: opts.category ?? head.category,
+        priority: PRIORITIES.includes(opts.priority) ? opts.priority : head.priority,
+        kind: head.kind,
+        source: 'merge',
+        // 合并出来的卡是「人做的决定」，不是模型初判 —— 直接可开工
+        dev_ready: true
+      });
+
+      const now = nowIso();
+      for (const t of olds) {
+        d.run('UPDATE tasks SET merged_into = ?, updated_at = ? WHERE id = ?', [created.id, now, t.id]);
+        linkTasks(created.id, t.id, 'merge_parent', '', { touch: false });
+      }
+      d.run('UPDATE tasks SET updated_at = ? WHERE id = ?', [now, created.id]);
+      return getTask(created.id);
+    });
+  }
+
+  /**
+   * 撤销合并。
+   *
+   * 按文档第 1.1 条第 3 点：撤销 = 删掉新卡的 merge_parent 边 + 让旧卡回来。
+   * 新卡本身**归档**（archived_at = now）而不是删除 —— 撤销的语义是
+   * 「回到合并前」，那张新卡是合并的产物，留档但不占看板。
+   * 直接删会把人手写进合并卡的标题/正文一起删掉，那是真丢东西。
+   */
+  function revertMerge(newId) {
+    const d = conn();
+    const id = String(newId || '');
+    const t = requireTask(id);
+    const edges = linksOf(id, 'merge_parent');
+    if (!edges.length) throw new Error('这张卡没有合并记录，无法撤销');
+
+    return d.tx(() => {
+      const now = nowIso();
+      const restored = [];
+      for (const e of edges) {
+        d.run("DELETE FROM links WHERE id = ?", [e.id]);
+        // 只清指向这张卡的引用：万一某张旧卡后来又被合并进别的卡，
+        // 无条件清空会把它后来的关系一起擦掉
+        d.run('UPDATE tasks SET merged_into = NULL, updated_at = ? WHERE id = ? AND merged_into = ?',
+          [now, e.to_id, id]);
+        const back = getTask(e.to_id);
+        if (back) restored.push(back.id);
+      }
+      d.run('UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ? AND archived_at IS NULL',
+        [now, now, id]);
+      return { task: getTask(id), restored };
+    });
+  }
+
+  /**
+   * 拆分：一张卡拆成 N 张子卡。
+   *
+   * 方向按文档第 1.2 条：**原卡 → 子卡**（split_of）。
+   * 原卡自己：内容一个字不动，状态改成 done + 备注追加一行「已拆分为 N 条」。
+   * 这是已经拍过的决策 —— 不引入第四种 `split` 状态（多一个状态要改 7 处）。
+   * 拆分这个动作确实结束了：一件含糊的事变成了四件清楚的事。
+   *
+   * `split_state` 列本轮只占位不写。
+   *
+   * @param {string} sourceId
+   * @param {Array<{title:string,text?:string,priority?:string,category?:string,project?:string}>} parts
+   * @returns {{source:object, children:object[]}}
+   */
+  function splitTask(sourceId, parts, opts = {}) {
+    const d = conn();
+    const source = requireTask(sourceId);
+    if (source.merged_into) throw new Error('这条已被合并进别的卡，是历史记录，不能再拆');
+
+    const list = (Array.isArray(parts) ? parts : [])
+      .map((p) => (typeof p === 'string' ? { title: p } : p))
+      .filter((p) => p && String(p.title || '').trim());
+    if (!list.length) throw new Error('拆分至少要有 1 条（每行一条）');
+
+    return d.tx(() => {
+      const children = [];
+      for (const p of list) {
+        const child = add({
+          title: String(p.title).trim(),
+          text: p.text ?? null,
+          kind: 'text',
+          // 子卡默认跟原卡同一个项目/类别，除非这一条自己指定了 ——
+          // 从一条卡拆出来的几条，绝大多数是同一个项目里的几件事
+          project: p.project ?? source.project,
+          project_id: p.project ? null : source.project_id,
+          category: p.category ?? source.category,
+          priority: PRIORITIES.includes(p.priority) ? p.priority : source.priority,
+          source: 'split',
+          dev_ready: true
+        });
+        children.push(child);
+        linkTasks(source.id, child.id, 'split_of', '', { touch: false });
+      }
+
+      // 原卡：done + 备注。备注追加而不是覆盖 —— 用户原本写在备注里的东西不能丢
+      const stamp = nowIso();
+      const line = '已拆分为 ' + children.length + ' 条：' + children.map((c) => '「' + c.title + '」').join('、');
+      const note = String(source.note || '').trim();
+      d.run(
+        'UPDATE tasks SET note = ?, updated_at = ? WHERE id = ?',
+        [note ? note + '\n' + line : line, stamp, source.id]
+      );
+      // status 走 applyStatus 那条路，doing_at / done_at 才会按现有规则落
+      const done = applyStatus(source, 'done');
+      if (done.changed) {
+        const sets = Object.entries(done.fields).map(([k]) => k + ' = ?');
+        d.run('UPDATE tasks SET ' + sets.join(', ') + ' WHERE id = ?',
+          [...Object.values(done.fields), source.id]);
+      }
+
+      if (opts.note) {
+        d.run('UPDATE tasks SET note = note || ? WHERE id = ?', ['\n' + String(opts.note), source.id]);
+      }
+
+      return { source: getTask(source.id), children: children.map((c) => getTask(c.id)) };
+    });
+  }
+
   // 从 payload 里那堆「可能是字符串、可能是对象」的条目里取出文件名
   function attachmentNames(list, dir) {
     const out = [];
@@ -645,8 +1073,13 @@ export function createCore(dataDir) {
     const imgs = [...imgSet];
     const fls = [...fileSet];
 
-    // messages 靠 ON DELETE CASCADE 一并清掉
-    d.run('DELETE FROM tasks WHERE id = ?', [id]);
+    // messages / links 靠 ON DELETE CASCADE 一并清掉。
+    // 但 merged_into 是个普通 TEXT 列（没有外键），删掉被合并的旧卡之后
+    // 别处指向它的引用会悬空 —— 手工清一遍。
+    d.tx(() => {
+      d.run('UPDATE tasks SET merged_into = NULL WHERE merged_into = ?', [id]);
+      d.run('DELETE FROM tasks WHERE id = ?', [id]);
+    });
 
     // 库删成功才动文件。反过来的话，删文件成功、删库失败，就留下一条指向空文件的任务。
     // 文件删失败只记日志：库里已经没有引用了，留着孤儿文件比回滚更安全。
@@ -769,6 +1202,10 @@ export function createCore(dataDir) {
     const args = [];
     // 归档是「done 之后」的阶段，默认不进任何视图；要看得显式要
     if (!truthy(opts.include_archived)) where.push('t.archived_at IS NULL');
+    // 被合并的卡是历史记录：不删不归档，但也不占看板。
+    // 默认过滤掉，`include_merged=1` 才看得到 —— 它是「点【合】徽章」那扇门后面的东西，
+    // 和归档一样属于「要看就显式要」的那类。
+    if (!truthy(opts.include_merged)) where.push('t.merged_into IS NULL');
     if (opts.project) {
       where.push('(t.project = ? OR t.project_id = ?)');
       args.push(opts.project, opts.project);
@@ -787,24 +1224,36 @@ export function createCore(dataDir) {
     const args = [...w.args];
     if (opts.limit) { sql += ' LIMIT ?'; args.push(Number(opts.limit)); }
 
-    const tasks = d.all(sql, args).map(rowToTask);
+    const tasks = decorateLinks(d.all(sql, args).map(rowToTask));
     // total 是「这个视图里有多少条」，跟 tasks 受同一个归档过滤，
     // 但不吃 project/status/category —— 前端拿它当分母画比例。
+    //
+    // 被合并的卡不算：它们是历史记录，看板上不占位（前端 inView 也会排掉）。
+    // 算进 total 就会出现「侧栏写 12、页脚写 9」这种对不上的账。
     const total = opts.include_archived
-      ? Number(d.get('SELECT COUNT(*) AS c FROM tasks')?.c || 0)
-      : Number(d.get('SELECT COUNT(*) AS c FROM tasks WHERE archived_at IS NULL')?.c || 0);
+      ? Number(d.get('SELECT COUNT(*) AS c FROM tasks WHERE merged_into IS NULL')?.c || 0)
+      : Number(d.get(
+        'SELECT COUNT(*) AS c FROM tasks WHERE archived_at IS NULL AND merged_into IS NULL'
+      )?.c || 0);
     return { projects: listProjects(), tasks, total };
   }
 
   function state(opts = {}) {
     const d = conn();
     const w = buildWhere(opts);
-    const tasks = d.all(TASK_SELECT + w.sql + ` ORDER BY ${PRIORITY_ORDER_SQL}, t.created_at DESC`).map(rowToTask);
+    const tasks = decorateLinks(
+      d.all(TASK_SELECT + w.sql + ` ORDER BY ${PRIORITY_ORDER_SQL}, t.created_at DESC`).map(rowToTask)
+    );
 
     // 计数单独查一遍，只看未归档 —— 已归档的「已完成」不该还挂在侧栏上。
     // 键固定 todo/doing/done 三个，不加 draft/archived：那是视图，不是列。
+    //
+    // 被合并的卡（merged_into 非空）也不计：它们在看板上不占位（见 board.html
+    // 的 inView），算进计数就会出现「侧栏写 3、列里只有 1 条」这种对不上的账。
     const counts = { todo: 0, doing: 0, done: 0 };
-    for (const r of d.all('SELECT status, COUNT(*) AS c FROM tasks WHERE archived_at IS NULL GROUP BY status')) {
+    for (const r of d.all(
+      'SELECT status, COUNT(*) AS c FROM tasks WHERE archived_at IS NULL AND merged_into IS NULL GROUP BY status'
+    )) {
       if (counts[r.status] !== undefined) counts[r.status] = Number(r.c || 0);
     }
     return { projects: listProjects(), tasks, counts, total: tasks.length };
@@ -1023,6 +1472,8 @@ export function createCore(dataDir) {
     imagesDir, filesDir, settingsFile,
     conn, init, close,
     add, getTask, patch, move, remove, list, state, count, revision, archiveStale,
+    linkTasks, unlinkTasks, deleteLink, listLinks, linksOf,
+    mergeTasks, splitTask, revertMerge,
     pushMessage, listMessages, recentMessages, clearMessages, setBrief,
     listProjects, getProject, addProject, updateProject, deleteProject, findProject, ensureProject,
     reorderProjects,

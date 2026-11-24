@@ -154,7 +154,7 @@ export function openSqlite(file) {
 // ---------- schema ----------
 
 // 版本号存在 meta 里。加字段时：把 SCHEMA_VERSION +1，在 MIGRATIONS 里补一条。
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -194,6 +194,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   dev_ready       INTEGER NOT NULL DEFAULT 1,   -- 0 = 需求待澄清，不进看板
   dev_gaps        TEXT NOT NULL DEFAULT '[]',   -- JSON array：初判说「还缺这些」
   archived_at     TEXT,                          -- NULL = 未归档
+  merged_into     TEXT,                          -- 被合并进的卡片 id（NULL = 没被合并）
+  split_state     TEXT,                          -- 预留：拆分状态（本轮不写，恒 NULL）
   created_at      TEXT NOT NULL,
   updated_at      TEXT NOT NULL,
   doing_at        TEXT,
@@ -215,6 +217,22 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_task ON messages(task_id, at);
+
+-- 卡片关系：三种关系（合并 / 拆分 / 层级 / 依赖）共用一张有向边表，用 kind 区分。
+-- 放在一张表里是因为它们的形状完全一样（有向边 + 两端 + 一句说明），
+-- 各自的约束写在 core.mjs 里；分三张表就会出现「同一件事三处同步」。
+-- ON DELETE CASCADE：删任务时它的边跟着走，不会留悬空引用。
+CREATE TABLE IF NOT EXISTS links (
+  id         TEXT PRIMARY KEY,
+  kind       TEXT NOT NULL,        -- 'merge_parent' | 'split_of' | 'parent' | 'depends_on'
+  from_id    TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  to_id      TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  note       TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  UNIQUE(kind, from_id, to_id)
+);
+CREATE INDEX IF NOT EXISTS idx_links_from ON links(kind, from_id);
+CREATE INDEX IF NOT EXISTS idx_links_to   ON links(kind, to_id);
 
 CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
@@ -269,6 +287,35 @@ const MIGRATIONS = {
     if (!cols.includes('dev_gaps')) {
       db.exec("ALTER TABLE tasks ADD COLUMN dev_gaps TEXT NOT NULL DEFAULT '[]'");
     }
+  },
+
+  // v4 → v5：卡片关系（合并 / 拆分）
+  //
+  // links 是新表，SCHEMA 里已经用 CREATE TABLE IF NOT EXISTS 建过一遍，
+  // 这一步对老库是「把表补上」。tasks 只加两个状态列：
+  //   merged_into —— 被合并进的卡片 id，NULL = 正常卡片
+  //   split_state —— 本轮不用（拆分按「done + 备注」处理），先占住列位，
+  //                  免得第 3 步真想上 split 状态时再升一次版本。
+  4: (db) => {
+    db.exec(`
+CREATE TABLE IF NOT EXISTS links (
+  id         TEXT PRIMARY KEY,
+  kind       TEXT NOT NULL,
+  from_id    TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  to_id      TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  note       TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  UNIQUE(kind, from_id, to_id)
+);
+CREATE INDEX IF NOT EXISTS idx_links_from ON links(kind, from_id);
+CREATE INDEX IF NOT EXISTS idx_links_to   ON links(kind, to_id);`);
+
+    const addColumn = (column, ddl) => {
+      const cols = db.all('PRAGMA table_info(tasks)').map((c) => c.name);
+      if (!cols.includes(column)) db.exec('ALTER TABLE tasks ADD COLUMN ' + ddl);
+    };
+    addColumn('merged_into', 'merged_into TEXT');
+    addColumn('split_state', 'split_state TEXT');
   }
 };
 

@@ -1303,6 +1303,25 @@ limit，没有 `dev_ready` 也没有 `include_archived`。所以你在对话里�
   README 的 `⚙` 引用改成「侧栏底部的设置按钮」；📁 的描述补上回退路径
   ROADMAP §7 快照刷新到 17 条任务
 
+第七批（卡片关系第 1 步）  ✅ 2026-11-24 10:25
+  规格见 docs/relations-and-table.md —— 合并 / 拆分 / 层级 / 依赖 是四种语义，
+  但共用一张 links 边表（kind 区分），别建三张。
+  schema  v5：links 表 + tasks.merged_into / tasks.split_state（后者占位）
+  core    linkTasks / unlinkTasks / deleteLink / listLinks
+          mergeTasks（新建一张卡，旧卡标 merged_into，不删不归档，对话附件不搬）
+          splitTask（原卡 done + 备注记子项，不引入第五种状态）
+          revertMerge（删边 + 解锁旧卡 + 新卡归档，不删除）
+          patch() 拦「被合并的卡改字段」；remove() 清悬空 merged_into
+  接口    /api/tasks/:id/links、/api/tasks/merge、/:id/split、/:id/unmerge、
+          /api/links、DELETE /api/links/:id
+  前端    【合】【拆】徽章（可点）+ 关系浮层；抽屉「关系」区 + 合并/拆分入口 + 撤销合并；
+          被合并的卡只读（标题不可改、状态下拉禁用、头部灰字说明）
+  顺手    inView() 排除被合并的卡（否则合并完旧卡还占着列，等于没合并）
+          state counts / list total 同步排除，避免「侧栏写 3、列里 1 条」
+          revision(scope) 带上 include_merged（两种请求返回体不同，不能共用指纹）
+          relSection 空态也渲染 —— 否则新卡看不到「合并」入口，第一次无从下手
+  测试    176 → 220（v4→v5 迁移、合并、拆分、只读、撤销、级联删除）
+
 第六批（落地）      ✅ 2026-11-23 23:55
   数据层  storage.mjs schema v3（dev_ready / archived_at / messages.attachments /
           projects.sort_order）+ v4（dev_gaps）；core 加 archiveStale / reorderProjects，

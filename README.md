@@ -10,6 +10,7 @@
 
 - 路线图与技术判断 → [ROADMAP.md](ROADMAP.md)
 - Session / 交接 / 协作实施规划 → [docs/session-collaboration.md](docs/session-collaboration.md)
+- 卡片关系（合/拆/层级/依赖）与表格视图 → [docs/relations-and-table.md](docs/relations-and-table.md)
 - 待修问题清单 → [task-inbox/ISSUES.md](task-inbox/ISSUES.md)
 - 旧版 Cabinet（事件 → 规则派发 → 无头 Agent）已归档 → [ARCHIVED.md](ARCHIVED.md)
 

@@ -488,7 +488,11 @@ export function createHandler(core, opts = {}) {
         // 否则「指纹按一种理解算、数据按另一种理解查」，短路会命中错的缓存。
         const incArch = url.searchParams.get('include_archived');
         const devReady = url.searchParams.get('dev_ready');
-        const rev = core.revision((incArch || '0') + '|' + (devReady || '-'));
+        // include_merged 也要进 scope：被合并的卡默认不出现在任何视图里，
+        // 但关系浮层要按 id 找到它们。两种请求的返回体不一样，
+        // 共用指纹会让前端把「有旧卡」的那份缓存当成「没有」的用。
+        const incMerged = url.searchParams.get('include_merged');
+        const rev = core.revision((incArch || '0') + '|' + (devReady || '-') + '|' + (incMerged || '0'));
         const since = url.searchParams.get('since');
         const build = buildInfo();
 
@@ -504,7 +508,8 @@ export function createHandler(core, opts = {}) {
         // 「待澄清」页签查 dev_ready=0，归档视图查 include_archived=1
         const st = core.state({
           include_archived: incArch ?? undefined,
-          dev_ready: devReady ?? undefined
+          dev_ready: devReady ?? undefined,
+          include_merged: incMerged ?? undefined
         });
         const cfg = core.loadSettings();
         st.settings = { backend: cfg.backend, model: cfg.model, classify: cfg.classify };
@@ -611,6 +616,57 @@ export function createHandler(core, opts = {}) {
         }
       }
 
+
+      // ---------- 卡片关系（links）----------
+      //
+      // 注意顺序：下面那条 `^\/api\/tasks\/([^/]+)$` 带子路径匹配不上，
+      // 但 `/api/tasks/merge` 会被它当成交付 id="merge" 吃掉 ——
+      // 所以固定路径必须写在前面，带子路径的也要写在单条路由之前。
+      if (p === '/api/tasks/merge' && req.method === 'POST') {
+        const b = await readBody(req);
+        const t = core.mergeTasks(b.targetIds, {
+          title: b.title,
+          text: b.text,
+          project: b.project,
+          category: b.category,
+          priority: b.priority
+        });
+        return json(res, 200, { task: t });
+      }
+      if (p === '/api/links' && req.method === 'POST') {
+        const b = await readBody(req);
+        const link = core.linkTasks(b.fromId, b.toId, b.kind, b.note);
+        return json(res, 200, { link });
+      }
+      {
+        const lm = p.match(/^\/api\/links\/([^/]+)$/);
+        if (lm && req.method === 'DELETE') {
+          return json(res, 200, { ok: true, ...core.deleteLink(decodeURIComponent(lm[1])) });
+        }
+      }
+
+      // /api/tasks/:id/{links,split,unmerge} —— 必须早于单条任务路由
+      {
+        const sm = p.match(/^\/api\/tasks\/([^/]+)\/(links|split|unmerge)$/);
+        if (sm) {
+          const id = decodeURIComponent(sm[1]);
+          const action = sm[2];
+
+          if (action === 'links' && req.method === 'GET') {
+            if (!core.getTask(id)) return json(res, 404, { error: '任务不存在' });
+            return json(res, 200, core.listLinks(id));
+          }
+
+          if (action === 'split' && req.method === 'POST') {
+            const b = await readBody(req);
+            return json(res, 200, core.splitTask(id, b.parts, { note: b.note }));
+          }
+
+          if (action === 'unmerge' && req.method === 'POST') {
+            return json(res, 200, core.revertMerge(id));
+          }
+        }
+      }
 
       // 单条任务 + 它的对话
       {

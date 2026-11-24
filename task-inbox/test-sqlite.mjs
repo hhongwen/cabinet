@@ -567,7 +567,135 @@ console.log('\n=== 15. 导出与备份（P1-4） ===');
   fs.unlinkSync(bak.file);
 }
 
-console.log('\n=== 16. 重开后数据还在 ===');
+console.log('\n=== 16. 卡片关系：v4 → v5 迁移 ===');
+{
+  // 手工降级成 v4：DROP links 表和 merged_into 列，版本写回 4
+  const drop = (table, col) => { try { core.conn().exec('ALTER TABLE ' + table + ' DROP COLUMN ' + col); } catch { /* 已没有 */ } };
+  core.conn().exec('DROP TABLE IF EXISTS links');
+  drop('tasks', 'merged_into');
+  drop('tasks', 'split_state');
+  core.conn().run("UPDATE meta SET value='4' WHERE key='schema_version'");
+
+  const cols = (t) => core.conn().all('PRAGMA table_info(' + t + ')').map((c) => c.name);
+  ok('降级成功（links 表没了）',
+    !core.conn().get("SELECT name FROM sqlite_master WHERE type='table' AND name='links'"));
+  ok('降级成功（merged_into 没了）', !cols('tasks').includes('merged_into'));
+
+  const v5 = createCore(tmp);
+  v5.init();
+  eq('版本升到当前版本', v5.conn().get("SELECT value FROM meta WHERE key='schema_version'").value, String(SCHEMA_VERSION));
+  ok('links 表回来了',
+    !!v5.conn().get("SELECT name FROM sqlite_master WHERE type='table' AND name='links'"));
+  const c5 = v5.conn().all('PRAGMA table_info(tasks)').map((c) => c.name);
+  ok('tasks.merged_into 回来了', c5.includes('merged_into'));
+  ok('tasks.split_state 回来了', c5.includes('split_state'));
+  // 老任务一律「没被合并」
+  ok('老任务 merged_into 全是 null',
+    v5.state({ include_archived: true }).tasks.every((t) => t.merged_into === null));
+  v5.close();
+}
+
+console.log('\n=== 17. 卡片关系：合并 / 拆分 ===');
+{
+  // 三张独立的卡，其中两张要合并
+  const a = core.add({ title: '合并样本A', text: 'A 的原文' });
+  const b = core.add({ title: '合并样本B', text: 'B 的原文' });
+  const c = core.add({ title: '拆分样本', text: 'C 的原文' });
+  core.pushMessage(a.id, { role: 'user', text: 'A 的对话' });
+  core.pushMessage(b.id, { role: 'user', text: 'B 的对话' });
+
+  // ---- 合并 ----
+  const merged = core.mergeTasks([a.id, b.id], { title: '合并后的卡' });
+  ok('合并生成新卡', !!merged && merged.id !== a.id && merged.id !== b.id);
+  eq('新卡标题按 opts', merged.title, '合并后的卡');
+
+  const a2 = core.getTask(a.id);
+  const b2 = core.getTask(b.id);
+  eq('旧卡A 标了 merged_into', a2.merged_into, merged.id);
+  eq('旧卡B 标了 merged_into', b2.merged_into, merged.id);
+  ok('旧卡没被删', !!a2 && !!b2);
+  ok('旧卡没被归档', !a2.archived_at && !b2.archived_at);
+  eq('旧卡A 的对话还在', core.listMessages(a.id).length, 1);
+  eq('旧卡B 的对话还在', core.listMessages(b.id).length, 1);
+  eq('旧卡A 的原文还在', a2.payload.text, 'A 的原文');
+
+  const linksOfMerged = core.listLinks(merged.id);
+  eq('新卡有 2 条 merge_parent 出边', linksOfMerged.asFrom.length, 2);
+  ok('link_counts 反映了合并', merged.link_counts.merge_parent >= 2);
+  ok('新卡 has_merge 为真', merged.has_merge === true);
+
+  // ---- 只读与重复合并 ----
+  let readonly = null;
+  try { core.patch(a.id, { title: '想改历史' }); } catch (e) { readonly = e.message; }
+  ok('被合并的卡不能改字段', readonly !== null);
+  ok('错误话说清了原因', /合并|历史/.test(String(readonly)));
+
+  let dupMerge = null;
+  try { core.mergeTasks([a.id, c.id], {}); } catch (e) { dupMerge = e.message; }
+  ok('已被合并的卡不能再合并', dupMerge !== null);
+
+  let single = null;
+  try { core.mergeTasks([c.id], {}); } catch (e) { single = e.message; }
+  ok('单张卡合并被拒', single !== null);
+
+  // 被合并的卡不进看板
+  const visible = core.state({}).tasks.map((t) => t.id);
+  ok('被合并的卡不出现在看板', !visible.includes(a.id) && !visible.includes(b.id));
+  ok('合并出来的卡在看板上', visible.includes(merged.id));
+
+  // ---- 撤销合并 ----
+  const back = core.revertMerge(merged.id);
+  eq('撤销还原了 2 张', back.restored.length, 2);
+  eq('旧卡A 不再指向任何人', core.getTask(a.id).merged_into, null);
+  eq('旧卡B 不再指向任何人', core.getTask(b.id).merged_into, null);
+  ok('旧卡A 恢复可编辑', (() => {
+    try { core.patch(a.id, { title: '合并样本A（已恢复）' }); return true; } catch { return false; }
+  })());
+  ok('合并出来的卡被归档（不是删除）', !!core.getTask(merged.id).archived_at);
+  eq('撤销后没有 merge_parent 边', core.listLinks(merged.id).asFrom.length, 0);
+
+  // ---- 拆分 ----
+  const split = core.splitTask(c.id, [
+    { title: '子卡1' }, { title: '子卡2' }, { title: '子卡3' }
+  ]);
+  eq('拆出 3 张子卡', split.children.length, 3);
+  eq('原卡变成 done', split.source.status, 'done');
+  ok('原卡备注里记了子项', /已拆分为 3 条/.test(split.source.note));
+  const splitLinks = core.listLinks(c.id);
+  eq('原卡有 3 条 split_of 出边', splitLinks.asFrom.length, 3);
+  ok('原卡 has_split 为真', core.getTask(c.id).has_split === true);
+  ok('子卡都活着', split.children.every((x) => core.getTask(x.id)));
+  eq('子卡继承原卡项目', split.children[0].project, c.project);
+
+  // 拆一条「当前处于被合并状态」的卡要被拒。
+  // 注意不能拿 merged.id 试 —— 撤销之后它只是归档，merged_into 已经空了，
+  // 那种情况该允许（一个人可以拆一张自己归档的卡）。所以另造一组。
+  const e1 = core.add({ title: '只读样本E1' });
+  const e2 = core.add({ title: '只读样本E2' });
+  core.mergeTasks([e1.id, e2.id], { title: '合并E' });
+  let splitMerged = null;
+  try { core.splitTask(e1.id, [{ title: 'x' }, { title: 'y' }]); } catch (e) { splitMerged = e.message; }
+  ok('拆一条已被合并的卡被拒', splitMerged !== null);
+  ok('错误话说清了原因', /合并|历史/.test(String(splitMerged)));
+
+  // ---- 删除：边要级联清，merged_into 不能留悬空 ----
+  const d1 = core.add({ title: '待合并D1' });
+  const d2 = core.add({ title: '待合并D2' });
+  const dm = core.mergeTasks([d1.id, d2.id], { title: '合并D' });
+  core.remove(d1.id);
+  ok('删旧卡后新卡还在', !!core.getTask(dm.id));
+  eq('删旧卡后对应那条边被级联清掉', core.listLinks(dm.id).asFrom.length, 1);
+
+  // 删掉「合并出来的那张卡」：旧卡的 merged_into 必须被清空，
+  // 否则它们永远只读、又没有任何卡能撤销回来 —— 等于永久锁死
+  core.remove(dm.id);
+  eq('删合并卡后旧卡D2 的 merged_into 被清空', core.getTask(d2.id).merged_into, null);
+  ok('旧卡D2 恢复可编辑', (() => {
+    try { core.patch(d2.id, { title: '待合并D2（已解锁）' }); return true; } catch { return false; }
+  })());
+}
+
+console.log('\n=== 18. 重开后数据还在 ===');
 const totalBefore = core.count();
 core.close();
 const core2 = createCore(tmp);
