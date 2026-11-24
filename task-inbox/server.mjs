@@ -19,7 +19,8 @@ import { spawn } from 'node:child_process';
 const RELOAD_TAG = new URL(import.meta.url).search || '';
 const loadLocal = (rel) => import(pathToFileURL(path.join(path.dirname(fileURLToPath(import.meta.url)), rel)).href + RELOAD_TAG);
 
-const { createCore } = await loadLocal('core.mjs');
+const { createCore, AGENT_ROLES } = await loadLocal('core.mjs');
+const { createAgentRunner } = await loadLocal('agent.mjs');
 const { createClassifier } = await loadLocal('classify.mjs');
 const { listRoots, listDir } = await loadLocal('browse.mjs');
 const { createChat } = await loadLocal('chat.mjs');
@@ -428,6 +429,12 @@ async function listModels() {
 export function createHandler(core, opts = {}) {
   const webDir = opts.webDir || HERE;
   const queue = opts.queue || null;
+  const runner = opts.runner || null;
+
+  const needRunner = () => {
+    if (!runner) throw new HttpError(400, 'Agent 未启用');
+    return runner;
+  };
 
   // 归档的两个触发点：进程启动 + 每次收下一条新记录。
   // 刻意不起定时器 —— 单机自用，多一个看不见的循环就多一条故障线。
@@ -515,6 +522,16 @@ export function createHandler(core, opts = {}) {
           queue: { running: queue.runningCount, waiting: queue.pendingCount() }
         });
       }
+      // Agent 能力清单：前端新建会话时用它决定下拉里哪些可用。
+      // 没有 runner 不算错，返回空清单即可（CLI 入口、只读客户端都能跑）。
+      if (p === '/api/agents' && req.method === 'GET') {
+        if (!runner) return json(res, 200, { agents: [], roles: AGENT_ROLES, running: 0 });
+        return json(res, 200, {
+          agents: await runner.listAgents(),
+          roles: AGENT_ROLES,
+          running: runner.runningCount
+        });
+      }
       if (p === '/api/settings' && req.method === 'GET') {
         return json(res, 200, core.loadSettings());
       }
@@ -578,7 +595,12 @@ export function createHandler(core, opts = {}) {
         }
       }
       if (p === '/api/projects' && req.method === 'GET') {
-        return json(res, 200, { projects: core.listProjects() });
+        // 侧栏默认不显示归档项目；设置里的「显示已归档」显式要
+        return json(res, 200, {
+          projects: core.listProjects({
+            include_archived: url.searchParams.get('include_archived')
+          })
+        });
       }
       if (p === '/api/projects' && req.method === 'POST') {
         const b = await readBody(req);
@@ -744,6 +766,130 @@ export function createHandler(core, opts = {}) {
             children: core.childrenOf(id),
             subtree: core.subtreeStats(id)
           });
+        }
+      }
+
+      // ---------- Agent Session / Turn（阶段 1A） ----------
+      //
+      // 这里只做「参数归一 + 转发」。角色 / Agent / 工作目录的约束在 core，
+      // Turn 的串行、超时、恢复在 agent.mjs —— 放在路由层，CLI 就绕过去了。
+      {
+        const sm = p.match(/^\/api\/tasks\/([^/]+)\/sessions$/);
+        if (sm) {
+          const taskId = decodeURIComponent(sm[1]);
+          const t = core.getTask(taskId);
+          if (!t) return json(res, 404, { error: '任务不存在' });
+          // 连只读会话列表也不在没有 runner 时假装空：那会让「Agent 未启用」
+          // 看起来像「这张卡还没挂会话」。
+          needRunner();
+
+          if (req.method === 'GET') {
+            return json(res, 200, { sessions: core.listSessions(taskId) });
+          }
+
+          if (req.method === 'POST') {
+            const b = await readBody(req);
+            const project = t.project_id
+              ? core.getProject(t.project_id)
+              : core.findProject(t.project, { include_archived: true });
+            if (project && project.archived_at) {
+              throw new HttpError(400, '项目已归档，先恢复或换一个项目');
+            }
+
+            const role = String(b.role || 'dev').trim();
+            const agent = String(b.agent || (project && project.default_agent) || 'opencode').trim();
+            const model = b.model === undefined
+              ? ((project && project.default_model) || null)
+              : (b.model ? String(b.model).trim() : null);
+            const dirs = (project && Array.isArray(project.dirs)) ? project.dirs : [];
+            const primary = dirs.find((x) => x.primary) || dirs[0];
+            const workingDirectory = String(b.working_directory || (primary && primary.path) || '').trim();
+            if (!workingDirectory) {
+              throw new HttpError(400, '先给项目配一个工作目录，或者手动选一个');
+            }
+
+            const agents = await runner.listAgents();
+            const hit = agents.find((a) => a.kind === agent);
+            if (!hit) throw new HttpError(400, '这个 Agent 还没有接入: ' + agent);
+            if (!hit.available) {
+              throw new HttpError(400, (agent === 'opencode' ? 'OpenCode' : agent) + ' 不可用，先确认 CLI 装好');
+            }
+
+            // 同一张卡的同一个角色 + Agent，默认复用最近那条会话。
+            // 要故意开第二条（比如上下文满了）时传 force:true。
+            if (b.force !== true) {
+              const existing = core.listSessions(taskId)
+                .filter((s) => s.role === role && s.agent === agent)
+                .sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)))[0];
+              if (existing) return json(res, 200, { session: existing, created: false });
+            }
+
+            const session = core.createSession({
+              taskId, role, agent, workingDirectory, model
+            });
+            return json(res, 200, { session, created: true });
+          }
+
+          return json(res, 405, { error: '用 GET 或 POST' });
+        }
+      }
+
+      {
+        const sm = p.match(/^\/api\/sessions\/([^/]+)$/);
+        if (sm) {
+          if (req.method !== 'GET') return json(res, 405, { error: '用 GET' });
+          const st = needRunner().state(decodeURIComponent(sm[1]));
+          if (!st) return json(res, 404, { error: '会话不存在' });
+          return json(res, 200, st);
+        }
+      }
+
+      {
+        const tm = p.match(/^\/api\/sessions\/([^/]+)\/turns$/);
+        if (tm) {
+          if (req.method !== 'POST') return json(res, 405, { error: '用 POST' });
+          const sessionId = decodeURIComponent(tm[1]);
+          if (!core.getSession(sessionId)) return json(res, 404, { error: '会话不存在' });
+          const b = await readBody(req);
+          const text = String(b.text || '').trim();
+          if (!text) return json(res, 400, { error: '说点什么再发送' });
+          if (core.openTurn(sessionId)) {
+            throw new HttpError(409, '这个会话还有一轮没结束');
+          }
+          let started;
+          try {
+            started = needRunner().start({ sessionId, text });
+          } catch (e) {
+            // 检查与插入之间有窗口：startTurn 的部分唯一索引才是最后一道闸，
+            // 这里把数据库错误翻成 409，别让前端看到「UNIQUE constraint」。
+            if (/还有一轮/.test(String(e.message || ''))) throw new HttpError(409, e.message);
+            throw e;
+          }
+          started.done.catch((e) => {
+            console.warn('[task-inbox] Agent Turn 收尾失败：' + e.message);
+          });
+          return json(res, 202, { turn: started.turn });
+        }
+      }
+
+      {
+        const rm = p.match(/^\/api\/sessions\/([^/]+)\/reconcile$/);
+        if (rm) {
+          if (req.method !== 'POST') return json(res, 405, { error: '用 POST' });
+          const sessionId = decodeURIComponent(rm[1]);
+          if (!core.getSession(sessionId)) return json(res, 404, { error: '会话不存在' });
+          // 导出失败是「核对不了」，不是服务端错误：200 + error 让 UI 原样显示
+          return json(res, 200, await needRunner().reconcile(sessionId));
+        }
+      }
+
+      {
+        const im = p.match(/^\/api\/turns\/([^/]+)\/interrupt$/);
+        if (im) {
+          if (req.method !== 'POST') return json(res, 405, { error: '用 POST' });
+          const turn = needRunner().interrupt(decodeURIComponent(im[1]));
+          if (!turn) return json(res, 404, { error: 'Turn 不存在' });
+          return json(res, 200, { turn });
         }
       }
 
@@ -942,7 +1088,17 @@ export function createHandler(core, opts = {}) {
 export function start(core, opts = {}) {
   const preferred = opts.port || DEFAULT_PORT;
   const queue = opts.queue || createClassifyQueue(core, opts);
-  const handler = createHandler(core, { ...opts, queue });
+  // 服务启动时先把上次没跑完的 Turn 收成 unknown，再后台核对。
+  // 必须在 listen 之前做：先让端口可用、再标状态，会有一段「页面能打开、
+  // 但卡片显示 running」的假运行窗口。
+  const runner = opts.runner || createAgentRunner({
+    core,
+    dataDir: core.dataDir,
+    adapters: opts.adapters,
+    timeoutMs: opts.agentTimeoutMs
+  });
+  const recoveredTurns = runner.recover();
+  const handler = createHandler(core, { ...opts, queue, runner });
   const portQueue = [preferred, ...FALLBACK_PORTS.filter((x) => x !== preferred)];
 
   return new Promise((resolve) => {
@@ -954,7 +1110,7 @@ export function start(core, opts = {}) {
         if (e && e.code === 'EADDRINUSE') return tryNext(i + 1);
         resolve(null);
       });
-      s.listen(p, '127.0.0.1', () => resolve({ server: s, port: p, queue }));
+      s.listen(p, '127.0.0.1', () => resolve({ server: s, port: p, queue, runner, recoveredTurns }));
     };
     tryNext(0);
   });
@@ -1004,9 +1160,15 @@ if (isMain) {
   console.log('  看板：' + base + '/');
   console.log('  随手记：' + base + '/quick');
   console.log('  数据：' + core.dbFile);
+  if (started.recoveredTurns) {
+    console.log('[task-inbox] ' + started.recoveredTurns + ' 轮 Agent 执行被上次退出打断，已标成待核对');
+  }
 
-  const stop = () => {
+  const stop = async () => {
     try { started.server.close(); } catch {}
+    // 先把子进程收掉，再关库：反过来的话，正在跑的 Agent 收尾时会写一个
+    // 已经关掉的连接，日志里全是「database is closed」。
+    try { await started.runner.close(); } catch {}
     // 关库时把 WAL 收回去，不留一个几 MB 的 -wal 文件在目录里
     try { core.close(); } catch {}
     process.exit(0);

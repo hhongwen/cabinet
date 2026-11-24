@@ -41,6 +41,13 @@ export function createAgentRunner(opts = {}) {
     return adapters.find((a) => a.kind === agent) || null;
   }
 
+  async function listAgents() {
+    return Promise.all(adapters.map(async (a) => ({
+      kind: a.kind,
+      available: await a.available()
+    })));
+  }
+
   function ensureDir(dir) {
     try {
       if (!fs.statSync(dir).isDirectory()) throw new Error('不是目录');
@@ -312,6 +319,7 @@ export function createAgentRunner(opts = {}) {
     recover,
     interrupt,
     close,
+    listAgents,
     get runningCount() { return running.size; }
   };
 }
