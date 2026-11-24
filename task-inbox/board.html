@@ -13,8 +13,10 @@
   /* 白字按钮/徽章必须用深橙：#FA4616 配白字只有 3.53:1，不够 AA */
   --orange-cta:#C93610; --orange-cta-hi:#D84414; --orange-cta-deep:#A83209;
   --radius-sm:9px; --radius-lg:25px;
-  /* 抽屉双栏：左栏宽度 / 展开后整条抽屉的期望宽度（JS 会按视口重算后者） */
-  --dr-pane-w:460px; --dr-wide-w:1180px;
+  /* 抽屉宽度：--dr-w 是没开预览栏时那档（左边缘可拖），
+     --dr-wide-w 是开了预览栏之后整条的宽度（JS 按视口重算），
+     --dr-pane-w 是预览栏形态下左栏的宽度。三个各有各的用途，别合并。 */
+  --dr-w:480px; --dr-pane-w:460px; --dr-wide-w:1180px;
 
   /* ---------- 材质层：玻璃 + 拟态 ---------- */
   /* 玻璃只给浮动层（顶栏/底栏/筛选条/看板列/弹窗）；正文卡片保持不透明 */
@@ -1049,12 +1051,17 @@ body select.sel-native{
    这个 div 变成滚动容器，里面的 sticky 表头就改成相对它定位（它和内容一样高），
    于是表头永远不粘。圆角靠表头单元格自己圆，不靠裁剪。 */
 .tbl-wrap{
-  border-radius:14px; background:var(--table-bg); width:100%;
-  min-width:1040px;                       /* 窄屏横向滚动，不把 11 列挤成一团 */
+  border-radius:14px; background:var(--table-bg);
+  /* 宽度必须跟着表格走，不能写 width:100%。
+     表格有 11 列、每格 nowrap，最小内容宽度可能超过容器；写死 100% 时
+     表格会从框里"漏"出去 —— 用户看到的「表头和表格样式冲突」就是
+     右端那一列压在白框外，还各带一条边框。 */
+  width:max-content; min-width:100%;
   box-shadow:0 0 0 1px var(--table-edge), var(--shadow-1);
 }
 .tbl{
   width:100%;
+  min-width:1040px;                       /* 窄屏横向滚动，不把 11 列挤成一团 */
   border-collapse:separate;border-spacing:0;
   font-size:11.5px;color:var(--text-1);
 }
@@ -1251,22 +1258,35 @@ dialog::backdrop{background:rgba(30,40,45,.34); backdrop-filter:blur(3px)}
 }
 .mini:hover{color:var(--ink);border-color:var(--orange);background:rgba(255,255,255,.6);box-shadow:none}
 
-/* 目录行 */
+/* 目录行：两行，不是一行挤五个控件。
+   原来一行里塞了「路径 / 选目录 / 说明 / 主副 / 删除」，总最小宽度超过弹窗
+   可用宽度（实测 430 > 394），于是弹窗底部出现一条横向滚动条。
+   排成两行之后：第一行是路径（要长），第二行是说明 + 主副 + 删除。
+   顺带给输入框统一高度 —— 原来它们只有 25.6px，跟上面两个字段的 38px
+   对不齐，看着像两个不同控件。 */
 .dir-list{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
-.dir-row{display:flex;gap:5px;align-items:center}
-.dir-row input{flex:1;min-width:0}
-.dir-row input.dn{max-width:96px}
+.dir-row{
+  display:flex;flex-direction:column;gap:5px;
+  padding:7px;border:1px solid var(--hair);border-radius:11px;background:var(--silver-00);
+}
+.dir-line{display:flex;gap:5px;align-items:center;min-width:0}
+/* 高度和内边距跟上面两个字段对齐：原来这里是 25.6px，上面是 38px，
+   同一个弹窗里两种输入框高度，看着像坏了一行 */
+.dir-row input{flex:1;min-width:0;height:38px;padding:0 9px;font-size:12.5px}
+.dir-row input.dn{flex:1 1 auto}
 .dir-row .sel--inline{flex:0 0 auto}
 .dir-row .pick{
-  width:30px;height:30px;flex:0 0 auto;padding:0;font-size:12px;
+  width:34px;height:34px;flex:0 0 auto;padding:0;font-size:12px;
 }
-/* 纯图标删除：无底无边，只留字形 */
+/* 纯图标删除：无底无边，只留字形。用垃圾桶图标而不是 ✕ ——
+   ✕ 在这一行里跟「收起菜单」的叉长得一样，指代不清。 */
 .dir-row .rm{
-  width:26px;height:26px;flex:0 0 auto;padding:0;
-  font-size:12px;color:var(--text-3);
+  width:30px;height:30px;flex:0 0 auto;padding:0;
+  color:var(--text-3);
   border:0;background:transparent;box-shadow:none;
 }
-.dir-row .rm:hover{color:var(--orange);background:transparent;box-shadow:none}
+.dir-row .rm svg{width:14px;height:14px;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.dir-row .rm:hover{color:var(--p0);background:transparent;box-shadow:none}
 
 /* 目录浏览 */
 #pickDlg{width:min(520px,94vw)}
@@ -1295,7 +1315,7 @@ dialog::backdrop{background:rgba(30,40,45,.34); backdrop-filter:blur(3px)}
 }
 .drawer-mask.on{opacity:1;pointer-events:auto}
 .drawer{
-  position:fixed;top:0;right:0;bottom:0;width:min(480px,94vw);
+  position:fixed;top:0;right:0;bottom:0;width:min(var(--dr-w,480px),94vw);
   transform:translateX(100%);
   transition:transform .26s cubic-bezier(.2,0,0,1), width .22s cubic-bezier(.2,0,0,1);
   z-index:71;display:flex;overflow:hidden;
@@ -1308,6 +1328,24 @@ dialog::backdrop{background:rgba(30,40,45,.34); backdrop-filter:blur(3px)}
     -24px 0 60px -20px rgba(27,39,43,.35);
 }
 .drawer.on{transform:none}
+/* 左边缘拖拽条：抽屉本身也能拉宽。
+   以前只有「打开文档预览」才能变宽，而且那是靠 .dr-split 分左栏/右栏 ——
+   只想把详情看宽一点的人在界面上找不到任何抓手。 */
+.dr-grip{
+  position:absolute;left:0;top:0;bottom:0;width:9px;
+  cursor:col-resize;z-index:2;touch-action:none;
+}
+.dr-grip::before{
+  content:"";position:absolute;top:0;bottom:0;left:3px;width:1px;
+  background:transparent;transition:background .16s;
+}
+.dr-grip:hover::before,.dr-grip.hot::before{background:rgba(250,70,22,.75);width:2px;left:2px}
+/* 拖拽中：整页不要跟着选中文字，光标全程保持左右箭头。
+   .drawer 的 width 过渡也必须在这期间关掉 —— 留着的话每一帧都在
+   朝"上一帧的目标"追，拖动时抽屉会像橡皮筋一样滞后半拍。 */
+body.col-resizing{cursor:col-resize;user-select:none}
+body.col-resizing *{cursor:col-resize !important}
+body.col-resizing .drawer{transition:none}
 /* 左栏（详情 + 对话）：窄抽屉时独占整个宽度 */
 .dr-pane{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
 
@@ -1753,8 +1791,10 @@ body.solo #collapseBtn{display:none}
         </button>
       </div>
     </div>
+    <!-- 只显示版本号：任务条数在导航行上已经有了，存储类型是实现细节，
+         两样都不该占用户一眼就能看到的位置（版本号倒是排查问题的第一个线索） -->
     <div class="sidebar-foot" id="sideFoot">
-      <div id="sideFootPath">SQLite / WAL</div>
+      <div id="sideFootPath">v—</div>
     </div>
   </aside>
 
@@ -1937,6 +1977,9 @@ body.solo #collapseBtn{display:none}
 
 <div class="drawer-mask" id="drMask"></div>
 <aside class="drawer" id="drawer">
+  <!-- 抽屉左边缘的拖拽把手：没有它，详情区的宽度在界面上无从调整 -->
+  <div class="dr-grip" id="drGrip" role="separator" aria-orientation="vertical"
+       aria-label="拖动调整抽屉宽度" title="拖动调整宽度"></div>
   <div class="dr-pane">
     <div class="dr-head">
       <div class="ttl">
@@ -2077,13 +2120,14 @@ async function refreshSystemBox(){
   const model = String(st.model || '').replace(/^auto\//, '');
   if (sum) sum.title = model ? (backendName + ' · ' + model) : backendName;
 
-  // 底部显示数据规模，比写死一句话有用。
-  // 存储早就从单文件 JSON 搬到 SQLite 了（见 storage.mjs），
-  // 这里以前还写着「本地 JSON」，等于界面在跟用户说假话。
+  // 底部只留版本号。
+  // 以前写的是「26 条任务 / SQLite」：条数在「全部任务」那行已经有同一个数字，
+  // 存储引擎是实现细节 —— 两样都是给开发者看的，不该占用户的位置。
+  // 版本号本身有用：看到 v0.2.0 就知道装的是哪一版，排查时第一个问的就是它。
   const fp = $('#sideFootPath');
   if (fp) {
-    const n = store.total || 0;
-    fp.textContent = n + ' 条任务 / SQLite';
+    const v = String(store.build?.version || '').trim();
+    fp.textContent = v ? 'v' + v : '';
   }
 }
 
@@ -3794,9 +3838,20 @@ let drLinks = { asFrom: [], asTo: [] };
 function drOpen(id){
   drTaskId = id;
   drLinks = { asFrom: [], asTo: [] };
+  drRestoreWidth();
   $('#drMask').classList.add('on');
   $('#drawer').classList.add('on');
   drLoad();
+}
+
+/* 上次拖出来的宽度要留着 —— 每次打开都退回 480px，等于让用户重调一遍。 */
+function drRestoreWidth(){
+  const el = $('#drawer');
+  if (!el) return;
+  const v = Number(localStorage.getItem(LS_DRV));
+  if (Number.isFinite(v) && v >= drWidthMin()) {
+    el.style.setProperty('--dr-w', Math.min(v, drWidthMax()) + 'px');
+  }
 }
 
 function drClose(){
@@ -3835,8 +3890,25 @@ async function drLoad(){
    所以改左栏宽度就等于改预览宽度，不需要第二个变量跟着同步。 */
 
 const LS_DRW = 'ti.drPaneW';
+const LS_DRV = 'ti.drawerW';    // 抽屉本体的宽度（没开预览栏时那档）
 let drDocMode = 'brief';        // brief | raw
 let docDrag = null;
+let drGripDrag = null;
+
+/* 抽屉宽度：没开预览栏时由 --dr-w 决定；开了预览栏由 --dr-wide-w 决定
+   （左栏 + 分隔条 + 预览，见下面的 drDocFit）。两处是不同变量，
+   所以拖左边缘时要先看现在是哪种形态，再去改对应的那个。 */
+function drWidthMin(){ return 380; }
+function drWidthMax(){ return Math.min(1180, Math.round(window.innerWidth * 0.94)); }
+
+function drApplyWidth(w){
+  const el = $('#drawer');
+  if (!el) return;
+  const v = Math.max(drWidthMin(), Math.min(drWidthMax(), Math.round(w)));
+  if (el.classList.contains('doc-on')) el.style.setProperty('--dr-wide-w', v + 'px');
+  else el.style.setProperty('--dr-w', v + 'px');
+  return v;
+}
 
 function drDocPaneW(){
   const v = Number(localStorage.getItem(LS_DRW));
@@ -3952,7 +4024,49 @@ $('#drSplit')?.addEventListener('pointercancel', () => {
   $('#drSplit').classList.remove('hot');
 });
 
-window.addEventListener('resize', drDocFit);
+/* 抽屉左边缘拖宽。方向是反的：鼠标往左走，抽屉变宽。
+   所以算的是「视口右边 − 指针 x」，不是指针的绝对位置。 */
+$('#drGrip')?.addEventListener('pointerdown', (e) => {
+  const el = $('#drawer');
+  if (!el) return;
+  drGripDrag = { right: window.innerWidth, w: el.getBoundingClientRect().width };
+  e.currentTarget.setPointerCapture?.(e.pointerId);
+  e.currentTarget.classList.add('hot');
+  document.body.classList.add('col-resizing');
+  e.preventDefault();
+});
+
+$('#drGrip')?.addEventListener('pointermove', (e) => {
+  if (!drGripDrag) return;
+  drApplyWidth(drGripDrag.right - e.clientX);
+});
+
+$('#drGrip')?.addEventListener('pointerup', (e) => {
+  if (!drGripDrag) return;
+  drGripDrag = null;
+  e.currentTarget.classList.remove('hot');
+  document.body.classList.remove('col-resizing');
+  const el = $('#drawer');
+  const w = Math.round(el.getBoundingClientRect().width);
+  // 开预览栏时宽度归 --dr-wide-w 管，那份已经由 drDocFit 记住；这里只存窄档
+  if (!el.classList.contains('doc-on')) localStorage.setItem(LS_DRV, String(w));
+});
+
+$('#drGrip')?.addEventListener('pointercancel', () => {
+  drGripDrag = null;
+  $('#drGrip')?.classList.remove('hot');
+  document.body.classList.remove('col-resizing');
+});
+
+window.addEventListener('resize', () => {
+  drDocFit();
+  // 窗口变窄之后，之前拖出来的宽度可能比视口还宽
+  const el = $('#drawer');
+  if (el && !el.classList.contains('doc-on')) {
+    const cur = parseFloat(getComputedStyle(el).getPropertyValue('--dr-w')) || 480;
+    if (cur > drWidthMax()) el.style.setProperty('--dr-w', drWidthMax() + 'px');
+  }
+});
 
 // markdown：标题 / 列表 / 粗体 / 行内代码 / 链接 / 引用 / 分隔线 / 围栏代码 / 表格。
 // 不引第三方库 —— 这个页面要能单文件双击打开，加一条 npm 依赖就多一条故障线。
@@ -5228,18 +5342,32 @@ async function moveProjectStep(id, step){
 function dirRow(d = {}){
   const wrap = document.createElement('div');
   wrap.className = 'dir-row';
+  // 两行：路径独占一行（它最长），说明 + 主副 + 删除挤第二行。
+  // 挤成一行时总宽 430 > 弹窗可用宽 394，底部就多一条横向滚动条。
   wrap.innerHTML = `
-    <input class="dp" placeholder="点右边选，或直接粘贴路径" value="${esc(d.path || '')}">
-    <button type="button" class="pick" title="浏览目录">📁</button>
-    <input class="dn" placeholder="说明（可选）" value="${esc(d.note || '')}" style="max-width:110px">
-    <select class="dm sel-native" data-sel="inline">
-      <option value="">副</option>
-      <option value="1" ${d.primary ? 'selected' : ''}>主要</option>
-    </select>
-    <button type="button" class="rm" title="移除">✕</button>
+    <div class="dir-line">
+      <input class="dp" placeholder="点右边选目录，或直接粘贴路径" value="${esc(d.path || '')}">
+      <button type="button" class="pick" title="浏览目录">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      </button>
+    </div>
+    <div class="dir-line">
+      <input class="dn" placeholder="说明（可选）" value="${esc(d.note || '')}">
+      <select class="dm sel-native" data-sel="inline" title="这个目录是不是该项目的主目录">
+        <option value="">副目录</option>
+        <option value="1" ${d.primary ? 'selected' : ''}>主要目录</option>
+      </select>
+      <button type="button" class="rm" title="移除这个目录" aria-label="移除这个目录">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12M10 11v6M14 11v6"/></svg>
+      </button>
+    </div>
   `;
   // 目录行还没插进文档，只能在自己的容器里找（传 document 会找不到）
   buildSels(wrap);
+  // buildSels 只"套壳"，不填菜单内容 —— 不调 selSync 的话这个「副/主要」
+  // 下拉点开是个空菜单（菜单里 0 条），用户看到的就是"点开什么也没有"。
+  // STYLE.md 第八节第 6 条记的就是这个坑。
+  selSync();
   wrap.querySelector('.rm').addEventListener('click', () => wrap.remove());
   wrap.querySelector('.pick').addEventListener('click', async () => {
     const input = wrap.querySelector('.dp');
@@ -5247,8 +5375,9 @@ function dirRow(d = {}){
 
     // 先试系统原生对话框 —— 一次点完，不用逐层走
     const btn = wrap.querySelector('.pick');
+    const ico = btn.innerHTML;          // 图标要还原，不能把 svg 换成文字
     btn.disabled = true;
-    btn.textContent = '…';
+    btn.classList.add('busy');
     try {
       const r = await api('POST', '/api/pickdir', { initial: current });
       if (r.path) { input.value = r.path; return; }
@@ -5258,7 +5387,8 @@ function dirRow(d = {}){
       console.warn('原生对话框不可用，改用页面浏览：', e.message);
     } finally {
       btn.disabled = false;
-      btn.textContent = '📁';
+      btn.classList.remove('busy');
+      btn.innerHTML = ico;
     }
 
     openPicker(current, (chosen) => { input.value = chosen; });

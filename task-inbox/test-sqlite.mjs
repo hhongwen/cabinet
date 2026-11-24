@@ -139,6 +139,21 @@ let badStatus = false;
 try { core.patch(t.id, { status: 'nonsense' }); } catch { badStatus = true; }
 ok('非法状态被拒', badStatus);
 
+/* 只发 project 名字时必须真的换项目。
+   以前这里会悄悄失败：patch 里先写 project='新名'，但 project_id 还是旧值，
+   下面 ensureProject(新名, 旧id) 按 id 命中**原来那个项目**，又把 project
+   改回旧名 —— 请求 200、值没变。界面上的「换项目」下拉就是这么失效的。 */
+{
+  const src = core.add({ title: '换项目样本', project: '项目甲' });
+  const dst = core.add({ title: '另一条', project: '项目乙' });
+  eq('换了项目名', core.patch(src.id, { project: '项目乙' }).project, '项目乙');
+  eq('project_id 跟着换', core.getTask(src.id).project_id,
+    core.getTask(dst.id).project_id);
+  // 只发 id 也要能换（有的调用方知道 id 不知道名字）
+  eq('只发 project_id', core.patch(src.id, { project_id: core.listProjects()[0].id }).project,
+    core.listProjects()[0].name);
+}
+
 const before = core.state().counts;
 core.move(t.id, 'done');
 const after = core.state().counts;

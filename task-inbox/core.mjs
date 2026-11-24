@@ -1045,6 +1045,15 @@ export function createCore(dataDir) {
       if (k === 'project_id') nextProjectId = fields[k];
     }
 
+    // 只给了 project 名字时，必须把旧的 project_id 丢掉。
+    // 否则下面 ensureProject(name, 旧 id) 会按 id 命中**原来那个项目**，
+    // 把刚写进去的新名字原样改回去 —— 表现就是「改项目没反应」：
+    // 请求 200、值却没变。前端下拉只发名字（它不知道新项目 id），
+    // 所以这条必须在这里兜住，不能指望调用方把两个字段一起发。
+    if (fields.project !== undefined && fields.project_id === undefined) {
+      nextProjectId = null;
+    }
+
     // ---- v8：表格行内编辑的四个字段 ----
     // 不走 PATCHABLE 那条循环，因为它们进来的是用户在一个 <input> 里敲的字，
     // 必须归一化后才能落库（'' / 'abc' / -1 一律存 NULL；日期不合法就抛错）。
