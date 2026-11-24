@@ -89,7 +89,12 @@ function magpieBackend() {
 function npmGlobalDirs() {
   const home = os.homedir();
   if (process.platform === 'win32') {
-    return [path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'npm')];
+    // NPM_GLOBAL_DIR 也放在 Windows 第一位 —— 否则测试没法用临时目录
+    // 验「真身优先于壳」这件事，只能依赖本机装了什么。
+    const dirs = [];
+    if (process.env.NPM_GLOBAL_DIR) dirs.push(process.env.NPM_GLOBAL_DIR);
+    dirs.push(path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'npm'));
+    return dirs;
   }
   // Intel mac / Linux：/usr/local/lib/node_modules
   // Apple Silicon（Homebrew）：/opt/homebrew/lib/node_modules
@@ -104,8 +109,11 @@ export function resolveCliBin(name) {
   const win = process.platform === 'win32';
   // 同一份产物在不同平台的上架形式不一样，各自列清楚
   const map = win ? {
-    // opencode 装的是原生 exe，可以直接当命令跑
+    // opencode 装的是原生 exe，可以直接当命令跑。
+    // 新版 npm 包把真二进制放在 @opencode/cli；opencode-ai 里那个
+    // 只有 479 字节，是给旧入口留的壳，spawn 它会直接 UNKNOWN。
     opencode: [
+      { file: ['node_modules', '@opencode', 'cli', 'bin', 'opencode.exe'], asExe: true },
       { file: ['node_modules', 'opencode-ai', 'bin', 'opencode.exe'], asExe: true },
       { file: ['node_modules', 'opencode', 'bin', 'opencode.exe'], asExe: true }
     ],
@@ -114,8 +122,9 @@ export function resolveCliBin(name) {
       { file: ['node_modules', '@openai', 'codex', 'bin', 'codex.js'], asExe: false }
     ]
   } : {
-    // mac 上是无后缀的原生二进制
+    // mac 上是无后缀的原生二进制；同样先找 @opencode/cli 的真身
     opencode: [
+      { file: ['@opencode', 'cli', 'bin', 'opencode'], asExe: true },
       { file: ['opencode-ai', 'bin', 'opencode'], asExe: true },
       { file: ['opencode', 'bin', 'opencode'], asExe: true }
     ],

@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { createCore } from './core.mjs';
 import { createAgentRunner } from './agent.mjs';
 import { createOpenCodeAdapter, parseEventLine, summarizeExport } from './opencode-agent.mjs';
+import { resolveCliBin } from './backend.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.join(HERE, 'test-fixtures', 'fake-opencode.mjs');
@@ -279,6 +280,34 @@ console.log('\n=== 11. 核心：显式设置会话状态 ===');
   let bad = false;
   try { core.setSessionStatus(sess.id, 'nope'); } catch { bad = true; }
   ok('非法状态被拒', bad);
+}
+
+console.log('\n=== 12. CLI 解析：优先 @opencode/cli 的真身 ===');
+{
+  // 真机上踩过：opencode-ai/bin/opencode.exe 只有 479 字节，是壳；
+  // 真正的 278MB 二进制在 @opencode/cli。先命中壳会让 spawn 直接 UNKNOWN。
+  const root = path.join(tmp, 'npm-global');
+  const real = process.platform === 'win32'
+    ? path.join(root, 'node_modules', '@opencode', 'cli', 'bin', 'opencode.exe')
+    : path.join(root, 'node_modules', '@opencode', 'cli', 'bin', 'opencode');
+  const stub = process.platform === 'win32'
+    ? path.join(root, 'node_modules', 'opencode-ai', 'bin', 'opencode.exe')
+    : path.join(root, 'node_modules', 'opencode-ai', 'bin', 'opencode');
+  fs.mkdirSync(path.dirname(real), { recursive: true });
+  fs.mkdirSync(path.dirname(stub), { recursive: true });
+  fs.writeFileSync(real, 'real');
+  fs.writeFileSync(stub, 'stub');
+
+  const old = process.env.NPM_GLOBAL_DIR;
+  process.env.NPM_GLOBAL_DIR = root;
+  try {
+    const bin = resolveCliBin('opencode');
+    eq('命中 @opencode/cli 的真身', bin.command, real);
+    ok('没有落到 479 字节的壳', !bin.command.includes('opencode-ai'));
+  } finally {
+    if (old === undefined) delete process.env.NPM_GLOBAL_DIR;
+    else process.env.NPM_GLOBAL_DIR = old;
+  }
 }
 
 core.close();
