@@ -1056,11 +1056,15 @@ body select.sel-native{
    这个类由 render() 按 viewMode 切换，别手写。 */
 .board-scroll.has-table{padding-top:0}
 .board--table > .tbl-wrap{margin-top:6px}
-/* 外框靠 box-shadow 画，**不加 overflow:hidden** —— 任何 overflow 都会让
-   这个 div 变成滚动容器，里面的 sticky 表头就改成相对它定位（它和内容一样高），
-   于是表头永远不粘。圆角靠表头单元格自己圆，不靠裁剪。 */
+/* 外框的圆角必须**真的裁**，不能只画个圆角背景就完事：
+   `.tbl-wrap` 的尺寸跟表格一样，而表格的每一行都是实色方形，
+   会直接盖在外框的圆角上 —— 表头自己圆了，下面滚上来的行却是直角，
+   两个上角就各露出一个小方角。
+   用 `overflow:clip` 而不是 `hidden`：clip 只裁剪绘制，**不建立滚动容器**，
+   所以 sticky 表头仍然相对 .board-scroll 定位（这是它和 hidden 的关键区别）。 */
 .tbl-wrap{
   border-radius:14px; background:var(--table-bg);
+  overflow:clip;
   /* 宽度必须跟着表格走，不能写 width:100%。
      表格有 11 列、每格 nowrap，最小内容宽度可能超过容器；写死 100% 时
      表格会从框里"漏"出去 —— 用户看到的「表头和表格样式冲突」就是
@@ -1083,8 +1087,12 @@ body select.sel-native{
   padding:0;text-align:left;font-weight:600;color:var(--text-2);
   white-space:nowrap;
 }
-.tbl thead th:first-child{border-top-left-radius:13px}
-.tbl thead th:last-child{border-top-right-radius:13px}
+/* 表头的圆弧半径必须**和外框完全一样**（14px）。以前是 13px —— 比外框小 1px。
+   滚动时行是方的，由外框按 14 裁；表头按 13 圆，两个弧之间就留下一条 1px 的
+   月牙，露出下面那行的白角。文字上根本看不出差 1px，接缝上那两个小三角却一眼能看到。
+   别写 `inherit`：th 的父元素是 <tr>，那上面是 0。 */
+.tbl thead th:first-child{border-top-left-radius:14px}
+.tbl thead th:last-child{border-top-right-radius:14px}
 /* 不可排序的表头（关系列）自己补内边距：可排序那几格的内边距在 .tbl-sort 上，
    th 本体统一 padding:0，否则两处相加会高出一截 */
 .tbl th.tbl-th{padding:8px 9px}
@@ -2209,14 +2217,22 @@ function inView(t, opt){
    选了项目就只数这个项目 —— 否则又是一屏两套账。 */
 function sidebarCounts(){
   const tasks = store.tasks || [];
-  const n = (view, status) => tasks.filter(t => inView(t, { view, project: navProject })
+  const n = (view, status, proj) => tasks.filter(t => inView(t, { view, project: proj })
     && (!status || t.status === status)).length;
   const c = {
-    todo: n('board', 'todo'),
-    doing: n('board', 'doing'),
-    done: n('board', 'done')
+    todo: n('board', 'todo', navProject),
+    doing: n('board', 'doing', navProject),
+    done: n('board', 'done', navProject)
   };
-  return { counts: c, total: c.todo + c.doing + c.done, draft: n('clarify'), archived: n('archived') };
+  // 「待澄清」和「归档」是流水线之外的独立视图，永远是全量：
+  // 点它们会清掉项目筛选（见 bindNavViews），所以数字也必须按全量算，
+  // 否则「侧栏写 2、点进去看到 6」——又是那种对不上的账。
+  return {
+    counts: c,
+    total: c.todo + c.doing + c.done,
+    draft: n('clarify', null, ''),
+    archived: n('archived', null, '')
+  };
 }
 
 function renderSidebar(){
@@ -2234,12 +2250,13 @@ function renderSidebar(){
   set('cntDraft', sc.draft);
   set('cntArchNum', sc.archived);
 
-  // 状态高亮
+  // 状态高亮。以前 `&& !navProject` 让「选了项目就谁都不高亮」——
+  // 项目行自己有一份高亮，状态行不该因为项目被选中就集体熄灭。
   document.querySelectorAll('#navMenu .nav-link').forEach(el => {
     const isView = el.dataset.view === 'clarify';
     el.classList.toggle('active',
       isView ? navView === 'clarify'
-             : navView === 'board' && el.dataset.filter === navFilter && !navProject);
+             : navView === 'board' && el.dataset.filter === navFilter);
   });
   $('#cntArch')?.classList.toggle('active', navView === 'archived');
 
@@ -2914,19 +2931,28 @@ function syncFilterUI(){
     const map = { all: '全部任务', todo: '未开始', doing: '进行中', done: '已完成',
       clarify: '待澄清', archived: '归档' };
     // 「默认」是收件筐，标题不能只写「默认」两个字 —— 那看起来像个普通项目
-    const title = isInbox(navProject) ? '未分配' : navProject;
-    h1.textContent = title || (navView === 'board'
-      ? (map[navFilter] || '全部任务')
-      : (map[navView] || '全部任务'));
+    const projName = isInbox(navProject) ? '未分配' : navProject;
+    // 项目和状态是两个独立的维度，可以叠加。堆着的时候标题必须两个都说，
+    // 否则「诺华 + 未开始」会写成「未开始」，看着像项目筛选丢了。
+    const statusName = navFilter && navFilter !== 'all' ? map[navFilter] : '';
+    h1.textContent = (projName && statusName) ? (projName + ' · ' + statusName)
+      : (projName || (navView === 'board'
+        ? (map[navFilter] || '全部任务')
+        : (map[navView] || '全部任务')));
   }
 }
 
-/* 顶部状态导航（全部 / 未开始 / 进行中 / 已完成）*/
+/* 顶部状态导航（全部 / 未开始 / 进行中 / 已完成）
+   这里以前有 `navProject = ''` —— 点一下「未开始」，刚选的项目就被清掉了，
+   于是「选了项目再点状态」等于两件事互相取消。项目和状态本来可以叠加：
+   留项目、换状态；再点一次当前状态 = 退回「全部」。
+   「全部任务」这一行仍然清空项目（它的语义就是"什么都别筛"）。 */
 document.querySelectorAll('#navMenu .nav-link[data-filter]').forEach(el => {
   el.addEventListener('click', () => {
-    navFilter = el.dataset.filter;
+    const next = el.dataset.filter;
+    navFilter = (next !== 'all' && navFilter === next) ? 'all' : next;
     navView = 'board';
-    navProject = '';
+    if (navFilter === 'all') navProject = '';
     syncFilterUI();
     render();
     renderSidebar();
@@ -3170,7 +3196,7 @@ function render(){
             <span class="col-num">${items.length}</span>
           </div>
           <div class="col-body">
-            ${items.length ? items.map(cardHTML).join('') : '<div class="empty">空</div>'}
+            ${items.length ? items.map(cardHTML).join('') : '<div class="empty">' + emptyHint() + '</div>'}
           </div>
         </section>`;
     }).join('');
@@ -3188,6 +3214,8 @@ function emptyHint(){
   if (navView === 'clarify') return '都澄清完了';
   if (navView === 'archived') return '还没有归档的任务';
   if (isInbox(navProject)) return '筐是空的';
+  // 项目 + 状态叠着筛出 0 条时，光写「空」会让人以为筛选坏了
+  if (navProject && navFilter !== 'all') return '这个项目里没有这一档';
   return '空';
 }
 

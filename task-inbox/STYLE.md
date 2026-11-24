@@ -358,6 +358,18 @@ node -e 'const L=h=>{h=h.replace("#","");const v=[0,2,4].map(i=>parseInt(h.slice
    `min-width` 挪到 `.tbl` 上。横向滚动交给外层 `.board-scroll`，
    别让 `.tbl-wrap` 自己变成滚动容器（那会杀掉 sticky 表头，见第 2 条的同类问题）。
 
+7b. **圆角只有一个来源**
+   表格外框 `.tbl-wrap` 有 `border-radius:14px`，表头 `th` 也各自圆了 13px。
+   滚动时行是方形、由外框按 14 裁；表头按 13 圆 —— 两个弧差 1px，
+   接缝上就露出一条月牙形的白角。**文字上看不出差 1px，接缝上却很明显。**
+
+   规则：一个圆角只能有一个半径来源。要么让外层 `overflow:clip` 裁，
+   要么让内层 `border-radius` 跟外层**写成同一个数值**。别写 `inherit` ——
+   `th` 的父元素是 `<tr>`，那上面是 0，`inherit` 等于把圆角抹掉。
+
+   顺带：`overflow:clip` 与 `overflow:hidden` 的区别在这里是决定性的 ——
+   `hidden` 会让元素变成滚动容器，里面的 sticky 表头就再也不粘。
+
 8. **同一个属性在"一行 flex"里同时要长要短，一定会溢出**
    目录行原来是「路径 + 选目录 + 说明 + 主副 + 删除」一行排开，
    最小宽度 430px，而弹窗可用宽只有 394px → 底部冒出横向滚动条。
