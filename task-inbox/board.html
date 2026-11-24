@@ -2099,13 +2099,15 @@ function imgUrl(p){
 let backendName = '';
 
 async function refreshSystemBox(){
-  const c = store.counts || {};
   const set = (id, v) => { const el = $('#' + id); if (el) el.textContent = v; };
 
-  // 状态灯 + 一句话。文案只保留「现在要不要动手」这一层判断
+  // 状态灯 + 一句话。文案只保留「现在要不要动手」这一层判断。
+  // 数字从 sidebarCounts() 来，和上面导航行是同一份 —— 以前这里读后端的
+  // store.counts，于是底部写「2 待办」而导航行写「9」，同一个面板两个答案。
+  const sc = sidebarCounts();
   const state = $('#sysState');
   const sum = $('#sysSum');
-  const todo = c.todo || 0, doing = c.doing || 0;
+  const todo = sc.counts.todo, doing = sc.counts.doing;
   if (state) state.textContent = todo ? 'ACTIVE' : 'READY';
   if (sum) {
     if (todo || doing) {
@@ -2174,34 +2176,63 @@ function isInbox(p){ return p === INBOX; }
    归档 → 待澄清 → 未分配 → 看板列。
    被合并的卡（merged_into 非空）在最前面就排掉：它已经是历史记录，
    不删不归档，但绝不占看板 —— 否则合并完旧卡还杵在那儿，等于没合并。
-   唯一的入口是【合】徽章的浮层（relPicker）。 */
-function inView(t){
+   唯一的入口是【合】徽章的浮层（relPicker）。
+
+   opt 用来「按另一个视图算一遍」，侧栏计数就靠它：
+   传 {view:'board', project:'诺华'} 就能得到「点开诺华会看到什么」。
+   不传就用当前的全局状态。**不要**另写一份过滤 —— 那就是
+   「侧栏 9、列头 2」的成因。 */
+function inView(t, opt){
+  const view = opt?.view ?? navView;
+  const proj = opt?.project ?? navProject;
+
   if (t.merged_into) return false;                       // 被合并的：只看得到，不占位
-  if (navView === 'archived') return !!t.archived_at;
+  if (view === 'archived') return !!t.archived_at;
   if (t.archived_at) return false;                       // 归档的只在归档视图出现
-  if (navView === 'clarify') return t.dev_ready === false;
+  if (view === 'clarify') return t.dev_ready === false;
   if (t.dev_ready === false) return false;               // 待澄清的不进看板
-  if (isInbox(t.project)) {
-    // 「默认」筐：只有点它的时候才看得到内容；看板三列里一条都不留
-    return navProject === INBOX;
-  }
-  if (navProject === INBOX) return false;                // 筐里不该混进真项目
+
+  const inbox = isInbox(t.project);
+  // 「默认」筐：只有点它的时候才看得到内容；看板三列里一条都不留
+  if (isInbox(proj)) return inbox;
+  if (inbox) return false;
+
+  /* 点某个项目 = 只看这个项目。
+     这一行以前**不存在** —— 侧栏点击只改了高亮、标题和面包屑，
+     卡片始终是全部任务的。于是「点项目没反应」看起来像筛选坏了，
+     其实是压根没筛。 */
+  if (proj && t.project !== proj) return false;
   return true;
 }
 
+/* 侧栏那五个数字。口径直接调 inView()，所以永远等于「点进去能看到的」。
+   选了项目就只数这个项目 —— 否则又是一屏两套账。 */
+function sidebarCounts(){
+  const tasks = store.tasks || [];
+  const n = (view, status) => tasks.filter(t => inView(t, { view, project: navProject })
+    && (!status || t.status === status)).length;
+  const c = {
+    todo: n('board', 'todo'),
+    doing: n('board', 'doing'),
+    done: n('board', 'done')
+  };
+  return { counts: c, total: c.todo + c.doing + c.done, draft: n('clarify'), archived: n('archived') };
+}
+
 function renderSidebar(){
-  const c = store.counts || {};
+  // 全部数字都由 sidebarCounts() 现算，口径就是 inView()。
+  // 以前这里读 store.counts（后端另算的一份），两份口径迟早会分叉 ——
+  // 「侧栏写 9、列头写 2」就是这么来的。
+  const sc = sidebarCounts();
   const tasks = store.tasks || [];
   const set = (id, v) => { const el = $('#' + id); if (el) el.textContent = v; };
-  set('cntAll', store.total || 0);
-  set('cntTodo', c.todo || 0);
-  set('cntDoing', c.doing || 0);
-  set('cntDone', c.done || 0);
-  // 待澄清：未归档、未合并、未确认开工。始终显示（0 也显示）——
-  // 它的存在本身就是提示。口径和「待澄清」页签一致（inView 先排归档再排合并）。
-  set('cntDraft', tasks.filter(t => !t.archived_at && !t.merged_into && t.dev_ready === false).length);
-  // 归档条数：已完成之后的那一档，单独数
-  set('cntArchNum', tasks.filter(t => !!t.archived_at && !t.merged_into).length);
+  set('cntAll', sc.total);
+  set('cntTodo', sc.counts.todo);
+  set('cntDoing', sc.counts.doing);
+  set('cntDone', sc.counts.done);
+  // 待澄清 / 归档：各是一个独立视图，跟着当前项目一起收窄
+  set('cntDraft', sc.draft);
+  set('cntArchNum', sc.archived);
 
   // 状态高亮
   document.querySelectorAll('#navMenu .nav-link').forEach(el => {
@@ -2218,11 +2249,9 @@ function renderSidebar(){
   const projects = store.projects || [];
   host.innerHTML = projects.map(p => {
     const inbox = isInbox(p.name);
-    // 计数 = 点进这个项目**能看到几张卡**，和 inView() 同一套口径：
-    // 归档的、被合并的、待澄清的（它们归「待澄清」页签）都不算。
-    // 以前非「默认」项目把待澄清也算进去，于是侧栏写 13、点进去只有 6。
-    const n = tasks.filter(t => (t.project_id === p.id || t.project === p.name)
-      && !t.archived_at && !t.merged_into && t.dev_ready !== false).length;
+    // 计数 = 点进这个项目**能看到几张卡**。直接问 inView，不另写条件 ——
+    // 以前这里自己写了一套（只排归档），于是侧栏写 13、点进去只有 6。
+    const n = tasks.filter(t => inView(t, { view: 'board', project: p.name })).length;
     const active = navProject === p.name ? ' active' : '';
     const initial = (p.name || '?').trim().slice(0, 1).toUpperCase();
     // 「默认」用收件筐图标，不用文件夹 —— 它不是一个装文件的目录
