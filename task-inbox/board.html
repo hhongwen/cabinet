@@ -479,14 +479,14 @@ h1{
 
 /* 主按钮：深橙底 + 白字。不要换回 --orange（3.53:1，不过 AA） */
 .dlg button.primary, .dr-row button.primary, .dock .go:not(:disabled),
-.dr-cta button.primary {
+.dr-cta button.primary, .rel-dlg button.primary, .agent-act button.primary {
   color:#fff; font-weight:750;
   border-color:var(--orange-cta-deep);
   background:linear-gradient(180deg,var(--orange-cta-hi),var(--orange-cta));
   box-shadow:inset 0 1px 0 rgba(255,255,255,.22), 0 2px 8px -2px rgba(191,58,15,.42);
 }
 .dlg button.primary:hover, .dr-row button.primary:hover, .dock .go:hover:not(:disabled),
-.dr-cta button.primary:hover {
+.dr-cta button.primary:hover, .rel-dlg button.primary:hover, .agent-act button.primary:hover {
   color:#fff;
   background:linear-gradient(180deg,#e04a17,#c93c10);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.26), 0 4px 12px -3px rgba(191,58,15,.5);
@@ -504,8 +504,9 @@ h1{
    规则：所有 textarea / input / select 的材质只在这里定义一次，
    组件里只写宽高、内边距和字号。新增输入框时直接沿用选择器列表。
    ========================================================================== */
-.dock textarea, .dr-foot textarea,
+.dock textarea, .dr-foot textarea, .agent-input,
 .dlg select, .dlg input[type=text], .dlg input:not([type]), .dlg textarea,
+.rel-dlg input, .rel-dlg select,
 .pick-bar input, .dir-row input, .dr-title-in, .sect-edit, .picker-in, .rel-split,
 .tbl-in {
   color:var(--ink);
@@ -516,16 +517,17 @@ h1{
   box-shadow:var(--ctl-inset-shadow);
   transition:border-color .16s, background .16s, box-shadow .16s;
 }
-.dock textarea:focus, .dr-foot textarea:focus,
+.dock textarea:focus, .dr-foot textarea:focus, .agent-input:focus,
 .dlg select:focus, .dlg input:focus, .dlg textarea:focus,
+.rel-dlg input:focus, .rel-dlg select:focus,
 .pick-bar input:focus, .dir-row input:focus, .dr-title-in:focus, .sect-edit:focus,
 .picker-in:focus, .rel-split:focus, .tbl-in:focus {
   background:#fff;
   border-color:var(--orange);
   box-shadow:var(--ctl-inset-shadow), var(--ctl-focus-ring);
 }
-.dock textarea::placeholder, .dr-foot textarea::placeholder,
-.dlg input::placeholder {color:var(--text-4)}
+.dock textarea::placeholder, .dr-foot textarea::placeholder, .agent-input::placeholder,
+.dlg input::placeholder, .rel-dlg input::placeholder {color:var(--text-4)}
 
 /* ---------- 筛选条：一个整体工具条，每段都是自定义下拉 ---------- */
 .filters{
@@ -758,6 +760,46 @@ body select.sel-native{
   width:100%;min-height:96px;resize:vertical;font-size:12.5px;
   padding:7px 9px;border-radius:10px;
 }
+/* ---------- Agent 会话（阶段 1A） ----------
+   会话列表是内容层：实底、不用玻璃。状态只用左侧圆点和文字，
+   不在卡片里再堆一套进度条 —— CLI 没有可信的百分比。 */
+.agent-list{display:flex;flex-direction:column;gap:6px}
+.agent-row{
+  display:flex;align-items:center;gap:7px;padding:7px 8px;
+  border:1px solid var(--ctl-edge);border-radius:9px;background:var(--silver-00);
+}
+.agent-row.open{border-color:var(--ctl-edge-hi);background:var(--ctl-inset)}
+.agent-row .mini-btn{flex:0 0 auto}
+.agent-dot{width:7px;height:7px;border-radius:50%;background:var(--text-4);flex:0 0 auto}
+.agent-dot.idle{background:var(--done)}
+.agent-dot.busy{background:var(--doing)}
+.agent-dot.unknown{background:var(--p1)}
+.agent-dot.unavailable{background:var(--text-4)}
+.agent-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.agent-name{font:11.5px/1.45 var(--font-mono);color:var(--text-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent-sub{font:10px/1.45 var(--font-mono);color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent-body{margin-top:8px;padding-top:8px;border-top:1px solid var(--hair)}
+.agent-result{
+  margin:6px 0 0;padding:7px 8px;background:var(--silver-00);
+  border:1px solid var(--hair);border-radius:7px;
+  font:11px/1.55 var(--font-mono);white-space:pre-wrap;word-break:break-word;
+  max-height:180px;overflow:auto;color:var(--text-1);
+}
+.agent-error{font:10.5px/1.55 var(--font-mono);color:var(--orange);margin-top:5px}
+.agent-hint{font:10px/1.55 var(--font-mono);color:var(--text-3);margin-top:6px}
+.agent-hint code{
+  font:10px var(--font-mono);color:var(--text-2);background:var(--silver-00);
+  border:1px solid var(--hair);padding:0 3px;border-radius:4px;
+}
+.agent-act{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.agent-empty{font:11px/1.65 var(--font-mono);color:var(--text-4)}
+.agent-form{display:flex;flex-direction:column;gap:7px}
+.agent-form label{display:flex;flex-direction:column;gap:3px;font:10px var(--font-mono);color:var(--text-3)}
+.agent-dir-row{display:flex;gap:5px}
+.agent-dir-row input{flex:1;min-width:0}
+/* Agent 输入框：材质走输入框总则，这里只写尺寸 */
+.agent-input{width:100%;min-height:64px;resize:vertical;font-size:12px;line-height:1.6;padding:8px 10px}
+
 /* 被合并的卡：头部一行灰字，说清"为什么改不动"。只读闸门在后端，
    这行只是让人别白点 —— 灰字而不是报错色，它不是错误。 */
 .dr-lock{font:11px/1.55 var(--font-mono);color:var(--text-3);margin-top:6px}
@@ -968,6 +1010,13 @@ body select.sel-native{
 /* 【等 N】：还有前置没做完。同一个 .tag.rel 材质，只换色 ——
    它和【合】【拆】一样是"关于这张卡的一条约束/事实"，不是流程状态 */
 .tag.rel.dep{--rel-ink:var(--dep-ink);--rel-bg:var(--dep-bg);--rel-edge:var(--dep-edge)}
+/* Agent 会话徽标：形状沿用 .tag，左侧一个状态点。
+   颜色只表达「这张卡的会话现在什么状态」，不抢优先级和流程标签的注意力。 */
+.tag.agent{color:var(--text-3);background:var(--neutral-bg);box-shadow:inset 0 0 0 1px var(--ctl-edge);gap:4px}
+.tag.agent::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor;flex:0 0 auto}
+.tag.agent.busy{color:var(--doing)}
+.tag.agent.unknown{color:var(--p1)}
+.tag.agent.unavailable{color:var(--text-4)}
 /* 被合并的卡：整体淡下去、不可拖。它是历史记录 ——
    正常视图里根本不会渲染它（inView 排掉），attr 是给"临时带着看"的场合兜底 */
 .card.merged{opacity:.55;cursor:default}
@@ -2064,6 +2113,14 @@ const PRI_LABEL = { p0:'P0 阻塞', p1:'P1 紧急', p2:'P2 常规', p3:'P3 低',
 const PRI_COLOR = { p0:'var(--p0)', p1:'var(--p1)', p2:'var(--p2)', p3:'var(--p3)', p4:'var(--p4)' };
 const KIND_LABEL = { text:'文字', image:'图片', image_text:'图文', link:'链接', file:'附件', mixed:'混合' };
 const STATUS_LABEL = { todo:'未开始', doing:'进行中', done:'已完成' };
+// 阶段 1A：Agent 会话。状态文案只做展示，判断逻辑在后端 ——
+// 卡片上不出现「75%」这种没有可信来源的进度。
+const AGENT_ROLE_LABEL = { plan:'规划', dev:'开发', review:'审阅', test:'测试' };
+const AGENT_STATUS_LABEL = { idle:'空闲', busy:'执行中', unknown:'待核对', unavailable:'不可用' };
+const TURN_STATUS_LABEL = {
+  queued:'排队中', running:'执行中', completed:'已完成',
+  failed:'失败', interrupted:'已停止', unknown:'待核对'
+};
 
 
 const SOLO = new URLSearchParams(location.search).has('solo');
@@ -3093,6 +3150,17 @@ function cardHTML(t){
     meta.push('<span class="tag rel dep" role="button" tabindex="0"'
       + ' data-blocked="' + esc(t.id) + '" title="还等 ' + nWait + ' 条前置做完，点开看">【等 ' + nWait + '】</span>');
   }
+  // Agent 会话徽标：卡片上只露「在谁手上、什么状态」，不展开会话内容。
+  // 0 条不渲染 —— 大多数卡还没挂 Agent，不该每张都多一个空标签。
+  const nAgent = Number(t.agent_session_count || 0);
+  if (nAgent > 0) {
+    const st = t.agent_status || 'idle';
+    const label = st === 'busy' ? 'Agent 运行中'
+      : st === 'unknown' ? 'Agent 待核对'
+      : 'Agent ' + nAgent;
+    meta.push('<span class="tag agent ' + esc(st) + '" title="这张卡挂着外部 Agent 会话">'
+      + esc(label) + '</span>');
+  }
   const shots = (t.payload && t.payload.images && t.payload.images.length)
     ? '<div class="shots">' + t.payload.images.slice(0, 4).map(src => `<img src="${esc(imgUrl(src))}" alt="" loading="lazy">`).join('') + '</div>'
     : '';
@@ -3925,10 +3993,21 @@ let drBusy = false;
 // 当前抽屉里这张卡的关系。和 /api/tasks/:id 分两次拉：
 // 只读卡片（没人点开）不该为关系多付一次查询，而关系区的数据要能单独刷新。
 let drLinks = { asFrom: [], asTo: [] };
+// 阶段 1A：这张卡的 Agent 会话。和 messages（与 Cabinet 对话）是两套数据，
+// 故意分开存 —— 混在一起就分不清「改任务字段」和「让 Agent 改代码」。
+let drSessions = { sessions: [] };
+let drActiveSessionId = null;
+let drAgentTimer = null;
+let drAgentFailures = 0;
 
 function drOpen(id){
   drTaskId = id;
   drLinks = { asFrom: [], asTo: [] };
+  drSessions = { sessions: [] };
+  drActiveSessionId = null;
+  clearInterval(drAgentTimer);
+  drAgentTimer = null;
+  drAgentFailures = 0;
   drRestoreWidth();
   $('#drMask').classList.add('on');
   $('#drawer').classList.add('on');
@@ -3948,6 +4027,11 @@ function drRestoreWidth(){
 function drClose(){
   drTaskId = null;
   drLinks = { asFrom: [], asTo: [] };
+  drSessions = { sessions: [] };
+  drActiveSessionId = null;
+  clearInterval(drAgentTimer);
+  drAgentTimer = null;
+  drAgentFailures = 0;
   drDocClose();               // 预览栏的宽度状态不能跟着留下来，下次打开会莫名其妙变宽
   $('#drMask').classList.remove('on');
   $('#drawer').classList.remove('on');
@@ -3959,10 +4043,21 @@ async function drLoad(){
   const id = drTaskId;
   try {
     const r = await api('GET', '/api/tasks/' + encodeURIComponent(id));
-    // 关系并行拉：失败不该让整张卡打不开，退化成「没有关系」
-    drLinks = await api('GET', '/api/tasks/' + encodeURIComponent(id) + '/links')
-      .catch(() => ({ asFrom: [], asTo: [] }));
+    // 关系和会话并行拉：任一失败只降级自己那一块，不该让整张卡打不开。
+    // 会话列表失败时退化成空列表，用户仍能看到「挂一个」入口。
+    const [links, sessions] = await Promise.all([
+      api('GET', '/api/tasks/' + encodeURIComponent(id) + '/links')
+        .catch(() => ({ asFrom: [], asTo: [] })),
+      api('GET', '/api/tasks/' + encodeURIComponent(id) + '/sessions')
+        .catch(() => ({ sessions: [] }))
+    ]);
     if (drTaskId !== id) return;         // 期间换了卡，这份结果作废
+    drLinks = links;
+    drSessions = sessions;
+    // 默认打开最近一条会话；没有就保持空态，让「挂一个」自己说话
+    if (!drActiveSessionId && drSessions.sessions.length) {
+      drActiveSessionId = drSessions.sessions[0].id;
+    }
     const t = r.task || r;
     drRenderHead(t);
     drRenderDetail(t);
@@ -4313,6 +4408,16 @@ function buildSections(t){
       : '<span style="color:var(--text-3)">还没有整理。点右上角生成一份能直接派给 agent 的需求说明。</span>'
   });
 
+  // 6. Agent 会话：和「与 Cabinet 对话」分开的一块。
+  //    它不在卡片上展开，只在这里；卡片上只留一个状态徽标。
+  const nAgent = (drSessions.sessions || []).length;
+  secs.push({
+    key: 'agent',
+    title: 'Agent 会话' + (nAgent ? ' ' + nAgent : ''),
+    action: '<button class="mini-btn" data-agent-new="1">挂一个</button>',
+    body: '<div id="agentBody">' + agentSectionHTML(t) + '</div>'
+  });
+
   return secs;
 }
 
@@ -4409,6 +4514,285 @@ function gapsSection(t){
   };
 }
 
+/* ---------- Agent 会话（阶段 1A） ----------
+   和上面的 Cabinet 对话分开两块：
+     Cabinet 对话 = 模型返回结构化补丁，直接改这张卡；
+     Agent 会话   = 外部 CLI 的持久会话，真正去写代码 / 跑命令。
+   混在一起会让人分不清「改成 P1」是改任务还是改代码。 */
+
+function agentSessionBusy(s) {
+  return !!(s && (s.running || s.status === 'busy'));
+}
+
+function agentStatusText(s) {
+  if (!s) return '';
+  if (s.status === 'unavailable') return '不可用';
+  if (agentSessionBusy(s)) return '执行中';
+  if (s.status === 'unknown') return '待核对';
+  const last = s.last_turn;
+  if (!last) return '空闲';
+  return TURN_STATUS_LABEL[last.status] || '空闲';
+}
+
+function agentSectionHTML(t) {
+  const list = drSessions.sessions || [];
+  if (!list.length) {
+    return '<span class="agent-empty">还没有 Agent 会话。挂一个之后，这里是一个能连续对话的外部 CLI 会话，'
+      + '和上面的 Cabinet 对话不是一回事。</span>';
+  }
+  const active = list.find(s => s.id === drActiveSessionId) || list[0];
+  const rows = list.map(s => {
+    const busy = agentSessionBusy(s);
+    const st = busy ? 'busy' : (s.status || 'idle');
+    const role = AGENT_ROLE_LABEL[s.role] || s.role;
+    const agent = s.agent === 'opencode' ? 'OpenCode' : s.agent;
+    const model = s.model ? ' · ' + s.model : '';
+    const turns = s.turn_count ? ' · ' + s.turn_count + ' 轮' : '';
+    return '<div class="agent-row' + (active && active.id === s.id ? ' open' : '') + '">'
+      + '<span class="agent-dot ' + esc(st) + '"></span>'
+      + '<div class="agent-main">'
+      + '<div class="agent-name">' + esc(role + ' · ' + agent + model) + '</div>'
+      + '<div class="agent-sub">' + esc(agentStatusText(s) + turns) + '</div>'
+      + '</div>'
+      + (active && active.id === s.id ? '' :
+        '<button type="button" class="mini-btn" data-agent-open="' + esc(s.id) + '">打开</button>')
+      + '</div>';
+  }).join('');
+  return '<div class="agent-list">' + rows + '</div>' + (active ? agentActiveHTML(active) : '');
+}
+
+function agentActiveHTML(s) {
+  const busy = agentSessionBusy(s);
+  const last = s.running || s.last_turn;
+  const out = [];
+  if (last) {
+    out.push('<div class="agent-body">');
+    out.push('<div class="agent-sub">' + esc(TURN_STATUS_LABEL[last.status] || last.status || '')
+      + (last.started_at ? ' · ' + esc(ago(last.started_at)) : '') + '</div>');
+    if (last.result_text) out.push('<pre class="agent-result">' + esc(last.result_text) + '</pre>');
+    else if (busy) out.push('<div class="agent-hint">执行中…结果会在这一块出现。</div>');
+    if (last.error) out.push('<div class="agent-error">' + esc(last.error) + '</div>');
+    out.push('</div>');
+  }
+  out.push('<textarea class="agent-input" placeholder="给这个 Agent 发一条消息…（Ctrl+Enter 发送）"></textarea>');
+  out.push('<div class="agent-act">');
+  if (busy) {
+    const turnId = (s.running && s.running.id) || (last && last.id) || '';
+    out.push('<button type="button" class="mini-btn" data-agent-stop="' + esc(turnId) + '">停止</button>');
+  } else {
+    out.push('<button type="button" class="primary" data-agent-send="' + esc(s.id) + '">发送</button>');
+  }
+  out.push('<button type="button" class="mini-btn" data-agent-reconcile="' + esc(s.id) + '">核对状态</button>');
+  out.push('</div>');
+  out.push('<div class="agent-hint">Agent 会在 <code>' + esc(s.working_directory || '') + '</code> '
+    + '直接执行命令（自动批准权限）。会话建立后工作目录不能改。</div>');
+  return out.join('');
+}
+
+function applySessionState(st) {
+  if (!st || !st.session) return;
+  const next = { ...st.session, running: st.running || null };
+  const list = drSessions.sessions || (drSessions.sessions = []);
+  const i = list.findIndex(s => s.id === next.id);
+  if (i >= 0) list[i] = { ...list[i], ...next };
+  else list.push(next);
+  if (!drActiveSessionId) drActiveSessionId = next.id;
+}
+
+async function refreshAgentSession(id) {
+  const st = await api('GET', '/api/sessions/' + encodeURIComponent(id));
+  applySessionState(st);
+  return st;
+}
+
+/* 只重绘 Agent 区，不重绘整个抽屉：否则轮询会把用户正在打的字清掉。 */
+function drRenderAgent() {
+  if (!drTask) return;
+  const host = $('#agentBody');
+  if (!host) return;
+  const input = host.querySelector('.agent-input');
+  const draft = input ? input.value : '';
+  host.innerHTML = agentSectionHTML(drTask);
+  const next = host.querySelector('.agent-input');
+  if (next && draft) next.value = draft;
+  bindAgentEvents(drTask);
+}
+
+function bindAgentEvents(t) {
+  const host = $('#agentBody');
+  if (!host) return;
+  host.querySelectorAll('[data-agent-open]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      drActiveSessionId = btn.dataset.agentOpen;
+      drRenderAgent();
+    });
+  });
+  const input = host.querySelector('.agent-input');
+  const send = host.querySelector('[data-agent-send]');
+  if (send) {
+    send.addEventListener('click', (e) => {
+      e.stopPropagation();
+      drSendAgent(send.dataset.agentSend, input ? input.value : '');
+    });
+  }
+  if (input) {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        if (send) send.click();
+      }
+    });
+  }
+  const stop = host.querySelector('[data-agent-stop]');
+  if (stop) {
+    stop.addEventListener('click', (e) => {
+      e.stopPropagation();
+      drStopAgent(stop.dataset.agentStop);
+    });
+  }
+  const rec = host.querySelector('[data-agent-reconcile]');
+  if (rec) {
+    rec.addEventListener('click', (e) => {
+      e.stopPropagation();
+      drReconcileAgent(rec.dataset.agentReconcile);
+    });
+  }
+}
+
+async function drSendAgent(sessionId, text) {
+  const clean = String(text || '').trim();
+  if (!clean) { toast('说点什么再发送'); return; }
+  const s = (drSessions.sessions || []).find(x => x.id === sessionId);
+  try {
+    const r = await api('POST', '/api/sessions/' + encodeURIComponent(sessionId) + '/turns', { text: clean });
+    if (s) {
+      s.running = r.turn;
+      s.status = 'busy';
+      s.last_turn = { ...(s.last_turn || {}), ...r.turn };
+    }
+    const input = $('#agentBody .agent-input');
+    if (input) input.value = '';
+    drRenderAgent();
+    pollAgentSession(sessionId);
+  } catch (e) {
+    toast('发送失败：' + e.message);
+  }
+}
+
+async function drStopAgent(turnId) {
+  if (!turnId) { toast('这一轮还没拿到 Turn ID，稍等一下再试'); return; }
+  const s = (drSessions.sessions || []).find(x =>
+    (x.running && x.running.id === turnId) || (x.last_turn && x.last_turn.id === turnId));
+  try {
+    await api('POST', '/api/turns/' + encodeURIComponent(turnId) + '/interrupt');
+    if (s) pollAgentSession(s.id);
+    drRenderAgent();
+  } catch (e) {
+    toast('停止失败：' + e.message);
+  }
+}
+
+async function drReconcileAgent(sessionId) {
+  try {
+    const r = await api('POST', '/api/sessions/' + encodeURIComponent(sessionId) + '/reconcile');
+    applySessionState({ session: r.session, running: null });
+    drRenderAgent();
+    toast(r.error ? '核对失败：' + r.error : '已核对');
+  } catch (e) {
+    toast('核对失败：' + e.message);
+  }
+}
+
+function pollAgentSession(id) {
+  clearInterval(drAgentTimer);
+  drAgentFailures = 0;
+  const taskId = drTaskId;
+  const tick = async () => {
+    if (drTaskId !== taskId) { clearInterval(drAgentTimer); drAgentTimer = null; return; }
+    try {
+      const st = await refreshAgentSession(id);
+      drAgentFailures = 0;
+      if (drTaskId === taskId) drRenderAgent();
+      if (!st.running && st.session.status !== 'busy') {
+        clearInterval(drAgentTimer);
+        drAgentTimer = null;
+      }
+    } catch {
+      drAgentFailures++;
+      if (drAgentFailures >= 3) {
+        clearInterval(drAgentTimer);
+        drAgentTimer = null;
+        toast('状态刷新失败，点核对重试');
+      }
+    }
+  };
+  tick();
+  drAgentTimer = setInterval(tick, 2000);
+}
+
+/* 新建会话：复用关系弹窗的壳，不另造一套 modal。 */
+async function drStartAgent(t) {
+  if (!t) return;
+  let info = { agents: [], roles: [] };
+  try { info = await api('GET', '/api/agents'); } catch { /* 降级成只有 OpenCode */ }
+  const project = (store.projects || []).find(p => p.id === t.project_id)
+    || (store.projects || []).find(p => p.name === t.project);
+  const dirs = (project && project.dirs) || [];
+  const primary = dirs.find(d => d.primary) || dirs[0];
+  const roles = (info.roles && info.roles.length) ? info.roles : ['dev'];
+  const roleOpts = roles.map(r => '<option value="' + esc(r) + '"'
+    + (r === 'dev' ? ' selected' : '') + '>' + esc(AGENT_ROLE_LABEL[r] || r) + '</option>').join('');
+  const opencode = (info.agents || []).find(a => a.kind === 'opencode');
+  const agentOpts = '<option value="opencode"' + (opencode && opencode.available ? '' : ' disabled') + '>'
+    + 'OpenCode' + (opencode && opencode.available ? '' : '（不可用）') + '</option>'
+    + '<option value="codex" disabled>Codex（1C 再接）</option>';
+
+  const dlg = relDialog({
+    title: '挂一个 Agent 会话',
+    hint: '会话建立后工作目录不能改。Agent 会在这个目录直接执行命令（自动批准权限）。',
+    submitLabel: '挂上',
+    bodyHTML: '<div class="agent-form">'
+      + '<label><span>角色</span><select class="agent-role sel-native" data-sel="field">' + roleOpts + '</select></label>'
+      + '<label><span>Agent</span><select class="agent-agent sel-native" data-sel="field">' + agentOpts + '</select></label>'
+      + '<label><span>工作目录</span><div class="agent-dir-row">'
+      + '<input class="agent-dir" value="' + esc((primary && primary.path) || '') + '" placeholder="D:\\WorkFiles\\code\\...">'
+      + '<button type="button" class="mini-btn" data-pick-dir="1">选目录</button>'
+      + '</div></label>'
+      + '<label><span>模型</span><input class="agent-model" value="" placeholder="'
+      + esc((project && project.default_model) || '留空 = 用 Agent 默认模型') + '"></label>'
+      + '</div>',
+    onSubmit: async () => {
+      const role = dlg.querySelector('.agent-role').value;
+      const agent = dlg.querySelector('.agent-agent').value;
+      const dir = dlg.querySelector('.agent-dir').value.trim();
+      const model = dlg.querySelector('.agent-model').value.trim();
+      if (!dir) throw new Error('工作目录不能为空');
+      const r = await api('POST', '/api/tasks/' + encodeURIComponent(t.id) + '/sessions', {
+        role, agent, working_directory: dir, model: model || undefined
+      });
+      drActiveSessionId = r.session.id;
+      await drLoad();
+      toast(r.created ? '已挂上 Agent 会话' : '已打开已有会话');
+    }
+  });
+
+  // relDialog 是动态插进来的，两个 select 要在这里套自定义下拉壳；
+  // 只套壳不回填会让按钮空白，所以 selSync 也得跟一次。
+  buildSels(dlg);
+  selSync();
+
+  dlg.querySelector('[data-pick-dir]')?.addEventListener('click', async () => {
+    const input = dlg.querySelector('.agent-dir');
+    try {
+      const r = await api('POST', '/api/pickdir', { initial: input.value });
+      if (r.path) input.value = r.path;
+    } catch (e) {
+      toast('选目录失败：' + e.message);
+    }
+  });
+}
+
 let drTask = null;
 
 function drRenderDetail(t){
@@ -4435,7 +4819,7 @@ function drRenderDetail(t){
   host.querySelectorAll('.sect-h').forEach(h => {
     h.addEventListener('click', (e) => {
       if (e.target.closest('[data-brief]') || e.target.closest('[data-doc-open]')
-        || e.target.closest('[data-raw-edit]')) return;
+        || e.target.closest('[data-raw-edit]') || e.target.closest('[data-agent-new]')) return;
       h.parentElement.classList.toggle('open');
     });
   });
@@ -4447,6 +4831,13 @@ function drRenderDetail(t){
   // 原文就地编辑：「编辑」把正文换成 textarea，保存走 PATCH payload.text
   const rawBtn = host.querySelector('[data-raw-edit]');
   if (rawBtn) rawBtn.addEventListener('click', (e) => { e.stopPropagation(); drEditRaw(); });
+
+  // Agent 会话区：新建入口在 section 头上，其余按钮在 #agentBody 里
+  const agentNew = host.querySelector('[data-agent-new]');
+  if (agentNew) {
+    agentNew.addEventListener('click', (e) => { e.stopPropagation(); drStartAgent(drTask); });
+  }
+  bindAgentEvents(drTask);
 
   // 关系区的两个动作。挂在这里而不是 document 委托，因为它们只在这一屏幕里存在，
   // 而且要拿 drTask（当前这张卡的完整数据）去拼请求。
