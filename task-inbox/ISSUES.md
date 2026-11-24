@@ -1202,6 +1202,58 @@ classify / chat / brief / backend   一行测试都没有
 
 ---
 
+## 侧栏收敛（2026-11-24，样式轮）
+
+用户反馈：「左侧列表选择过多时会有滑动框，冗余内容太多」。
+**这不是样式问题，是三个结构问题叠在一起**，按 §「先分类」拆开看：
+
+| 用户看到的 | 真正的原因 | 证据 |
+|---|---|---|
+| 列表一多就出现滚动条 | `.sidebar` 整条 `overflow:auto`，品牌/项目/底部共用一条滚动 | `board.html:129` 原文 `overflow:auto` |
+| 滚起来后找不到设置 | 齿轮在滚动内容的最底部，项目多就被推出屏幕 | 同上，`.sidebar-bottom` 在流里 |
+| 冗余 | 左下角 150px 卡重复了导航行里的数字 | 「6 待办 · 2 进行中」= `cntTodo`/`cntDoing` |
+
+### 改了什么
+
+1. **三段式**：`overflow:hidden` + `.side-scroll{flex:1;min-height:0;overflow-y:auto}`。
+   现在滚的只有中间那条，品牌和底部齿轮钉住。
+   → 必须写 `min-height:0`，否则 flex 子项按内容撑开，`overflow:auto` 不生效
+   （同一个坑见 `STYLE.md` 第八节第 5 条）。
+2. **底部卡 → 一条 `.sysbar`**：状态灯 + 一句话 + 22px 齿轮。
+   删掉七段进度条（13 条任务时只有 2 段亮着）、大号文案、模型名占行。
+   模型名挪到 `.sys-sum` 的 `title`，信息没丢、也不再挤占行宽。
+   侧栏因此多出 ~110px 给项目列表。
+3. **`section-title` 右侧常驻 `+`**（`#sideNewProj`）→ 复用
+   `openProjectEditor(null)`。UI-1 第 4 条要求的入口，这里落地了。
+4. **字号下限 10px**：原来散着 8.5 / 9 / 9.5px 若干档，中文在 1080p 100%
+   缩放下是糊的。`style-audit.mjs` 加了 `min-font-size` 检查拦新增。
+5. **文字对比度**：`--text-3` `#7b878b`→`#667277`、`--text-4` `#8f9b9f`→`#7f8b8f`，
+   同时侧栏底色提亮成 `--side-top/mid/bot`（`#f0f3f3`→`#dde3e5`）。
+   原来最暗端 `#cbd2d4` 上 `--text-3` 只有 **2.41:1**，"未分配"和计数读不清。
+
+### 验证
+
+```
+26 个假项目探针（/d/tmp/probe，用完已删）  中间滚动、品牌与齿轮不动 ✓
+1280×700（用户截图的尺寸）                  无溢出、无滚动条 ✓
+1440×860                                    三列齐、侧栏 236px ✓
+880×700（自动窄轨）                         46px 行内不再露出半截「归档」字 ✓
+node style-audit.mjs                        0 error ✓
+node test-sqlite.mjs                        302/302 ✓
+node test-parsers.mjs                       86/86 ✓
+内联脚本 node --check                         OK ✓
+```
+
+### 顺带发现（**未改**，需要人决策）
+
+侧栏「全部任务 26」和面包屑下「23 条」对不上：前者是 `store.total`
+（含归档 + 收件筐里的 2 条），后者是当前视图可见数。
+数字都有出处，但**同一个页面两个"总数"没有解释**，用户只会认为算错了。
+要改得先定「全部任务」到底含不含收件筐 —— 这条归到 DEF-1 的语义里去定，
+不在这轮样式改动里顺手改。
+
+---
+
 ## 遗留三件（2026-11-24 处理完）
 
 第六批交付时留了三条尾巴，这里记一下各自的处理方式和**为什么那样处理**。
@@ -1302,6 +1354,53 @@ limit，没有 `dev_ready` 也没有 `include_archived`。所以你在对话里�
   /api/classify 加注释标记 legacy，指引改用 /reclassify
   README 的 `⚙` 引用改成「侧栏底部的设置按钮」；📁 的描述补上回退路径
   ROADMAP §7 快照刷新到 17 条任务
+
+第八批（卡片关系第 2~4 步）  ✅ 2026-11-24 13:25
+  规格和踩坑见 docs/relations-and-table.md 第八节。
+
+  第 2 步 依赖
+    schema v6：tasks.link_warn（前置断开时给下游留一句提示）
+    环检测抽成 reachable(kind) + ACYCLIC 登记表，merge_parent / depends_on 共用
+      但各自只爬自己的链 —— 否则「A 依赖 B、B 合并自 C」会被误判成环
+    拦截在 applyStatus（不是前端）：doing/done 时算 blockedBy，被拦就抛错
+      todo 永远放行；前置被合并视为已完成（否则下游永久卡住且无入口解开）
+      删/合并前置时写 link_warn，写入必须在 DELETE 之前
+    接口 GET /api/tasks/:id/blocked、POST|DELETE /api/tasks/:id/depends
+
+  第 3 步 层级
+    schema v7：tasks.parent_id + idx_tasks_parent
+    recomputeStatus() 从改动点沿 parentMap() 往上爬，循环不递归（≤5 层）
+      deriveStatus：全 done→done；任一 doing→doing；否则 todo
+      直接 UPDATE 不走 applyStatus（要 skipBlock），但 done_at 必须照写
+        —— archiveStale 只认 done_at，派生 done 不写时间戳就永远不归档
+    有子项的卡 status 只读（前后端都拦）；深度上限 5 层
+    看板不做缩进树（三列会跨列），改成卡片下面就展开子清单
+    接口 GET /api/tasks/:id/children、POST|DELETE /api/tasks/:id/parent
+
+  第 4 步 表格
+    schema v8：seq_no / plan_start_at / plan_end_at / owner /
+      estimate_hours / actual_hours（doing_at/done_at 不动，那是事实）
+    同一份数据的第二种渲染：visibleTasks() / 筛选 / 项目 / 抽屉全部复用
+    11 列，5 列行内编辑；归一化在后端（'' / 'abc' / 负数 → NULL，
+      2026-02-31 也拒 —— JS 的 new Date() 会顺手滚成 3/3，等于替用户改数据）
+    表头 sticky；.tbl-wrap 刻意不加 overflow:hidden（会把 sticky 弄失效）
+
+  实现时修掉的三个坑
+    recomputeStatus 的快照陷阱：childIndex() 是进函数时拍的，往上爬时上一级
+      读的还是它 —— 不同步就出现「叶子→中间 done，→祖父永远 todo」
+    idx_tasks_parent 不能写进 SCHEMA 常量：它引用 v7 才有的列，而
+      db.exec(SCHEMA) 在迁移之前跑，会让 v6 老库升级卡在 no such column
+    表格折叠是纯装饰：tableRows 里被折叠的子孙没记进 seen，末尾那个
+      「成环兜底」把它们当孤儿行重新平铺，折叠箭头点了没反应
+
+  前端
+    卡片【等 N】徽章 + waiting 浮层；抽屉「等这些做完 / 挡住谁」+ 加前置 + 取消
+    卡片「▾ 子项 2/5」就地展开子清单；抽屉「上级 / 子项」+ 挂到父卡下 + 解除
+    有子项的卡状态下拉禁用并注明「状态由 3 个子项决定」
+    看板 / 表格切换（localStorage.ti.viewMode）；表格缩进 + 折叠 + 排序 + 行内编辑
+
+  测试    220 → 302（依赖 50 条 + 层级 32 条）→ 362（表格 60 条）
+  style-audit 0 error（.rel-x / .tbl-sort 加进按钮豁免并写明理由）
 
 第七批（卡片关系第 1 步）  ✅ 2026-11-24 10:25
   规格见 docs/relations-and-table.md —— 合并 / 拆分 / 层级 / 依赖 是四种语义，

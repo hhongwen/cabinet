@@ -307,7 +307,7 @@ tasks 加：
 
 ---
 
-*2026-11-24 立案 · 第 1 步（合并 / 拆分）已落地 · 层级 / 依赖 / 表格仍是设计稿*
+*2026-11-24 立案 · 四步全部落地（schema v5→v8）· 落地记录见第七、八节*
 
 ---
 
@@ -356,3 +356,75 @@ tasks 加：
 
 `links` 表已经能存这四种 kind，`linkTasks` 也放行了 `parent` 和 `depends_on`
 （含环检测），所以第 2、3 步主要是 **UI 和拦截逻辑**，不用再动表结构。
+
+---
+
+## 八、第 2~4 步落地记录（2026-11-24）
+
+四步全部落地。schema 从 v4 一路升到 **v8**：
+
+```
+v5  links 表 + tasks.merged_into / split_state     合并 / 拆分
+v6  tasks.link_warn                                前置断开提示
+v7  tasks.parent_id + idx_tasks_parent             层级
+v8  seq_no / plan_start_at / plan_end_at / owner /
+    estimate_hours / actual_hours                  表格字段
+```
+
+### 第 2 步：依赖
+
+- **环检测抽成通用函数** `reachable(kind, start, target)` + `ACYCLIC` 登记表，
+  `merge_parent` 和 `depends_on` 共用，但**各自只爬自己的链**（两种 kind 不混爬，
+  否则「A 依赖 B、B 合并自 C」会被误判成环）
+- **拦截放在 `applyStatus` 里**，不在前端 —— CLI 和 HTTP 都绕不过去。
+  前端那层 `blockedText()` 只是省一次往返 + 说清是哪几条
+- **`todo` 永远放行**：往回退不欠任何前置
+- **前置被合并视为已完成**：否则一条被合并掉的前置会让下游永远卡住，
+  而没有任何入口能解开
+- **删/合并前置时给下游写 `link_warn`**（v6 那个字段）。写入必须在
+  `DELETE` 之前 —— 边一 CASCADE 就找不到谁在等它了
+
+### 第 3 步：层级
+
+- **父卡状态派生** `recomputeStatus()`：从改动的卡沿 `parentMap()` 往上爬，
+  循环不递归（最多 5 层）。`deriveStatus`：全 done → done；任一 doing → doing；
+  否则 todo
+- **派生时直接 UPDATE，不走 `applyStatus`**：`applyStatus` 会做依赖拦截 +
+  写时间戳，派生场景必须 `skipBlock`，拉进来语义就搅在一起了。
+  但 **`done_at` 必须照写** —— `archiveStale()` 只认 `done_at IS NOT NULL`，
+  派生 done 却不写时间戳，父卡永远不进归档
+- **有子项的卡 status 只读**（`patch` 抛错，前后端都拦）
+- **深度上限 5 层**（根算第 1 层），第 6 层抛「该拆项目，不是加深层级」
+- **看板不做缩进树**：三列会让父子跨列，缩进没意义。改成卡片下面就地展开
+  一张子清单（最多 6 行，点一条跳过去）；表格里才做缩进（它本来就是全宽）
+
+### 第 4 步：表格
+
+- **同一份数据的第二种渲染**，不是新页面：`visibleTasks()` / 筛选 / 项目 /
+  视图全部复用，点行开的是同一个抽屉。切换状态存 `localStorage.ti.viewMode`
+- 11 列，5 列可**行内编辑**（负责人 / 预估 / 实际 / 计划开始 / 计划结束），
+  归一化全在后端做（`''` / `'abc'` / 负数 → NULL；`2026-02-31` 这种
+  「格式对但那天不存在」也拒 —— JS 的 `new Date()` 会顺手滚成 3 月 3 日，
+  那等于替用户改数据）
+- 层级缩进只在**当前可见集合内部**成立：父卡不在这一屏，子卡就当根行
+  （避免孤儿缩进）
+- 表头 `position:sticky`，`.board-scroll` 是滚动容器。`.tbl-wrap` 刻意
+  **不加 `overflow:hidden`** —— 任何 overflow 都会让里面的 sticky 改成
+  相对它定位，于是表头永远不粘
+
+### 实现时踩到并修掉的三个坑
+
+1. **`recomputeStatus` 的快照陷阱**：`childIndex()` 是进函数时拍的一张表，
+   逐级往上爬时上一级读的还是这张表。不同步的话「叶子 done → 中间 done」成立，
+   但「→ 祖父 done」永远是 todo。修法：UPDATE 之后把快照里那条也改掉。
+2. **`idx_tasks_parent` 不能写进 `SCHEMA` 常量**：它引用的 `parent_id` 是 v7
+   才有的列，而 `db.exec(SCHEMA)` 在迁移之前跑 —— 写在里面会让 v6 老库升级时
+   卡在「no such column: parent_id」。改成由 `MIGRATIONS[6]` 和新库分支各自建。
+3. **表格折叠是纯装饰**：`tableRows()` 里被折叠掉的子孙没记进 `seen`，
+   于是末尾那个「成环兜底」把它们当孤儿行重新平铺出来，折叠箭头点了没反应。
+   修法：折叠时用 `markHidden()` 递归把子孙也记进 `seen`（区别「藏起来」和「漏掉了」）。
+
+### 测试
+
+`test-sqlite` 176 → **362**，`test-parsers` 86 → 86（没动解析层），
+`style-audit` 0 error。

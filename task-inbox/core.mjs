@@ -136,6 +136,62 @@ export function createCore(dataDir) {
     return (images.length || files.length) ? { images, files } : null;
   }
 
+  // ---------- 表格视图的字段归一化（v8）----------
+  //
+  // 这两类字段（工时 / 计划日期）都存在「用户在一个 `<input>` 里打字」这个
+  // 入口上，所以会收到 ''、'abc'、' 3 '、'-1' 这些形状。归一化只做一件事：
+  // 把「说不清的值」变成 NULL，而不是让它落库变成脏数据 ——
+  // 表格里一个 `NaN` 会渲染成字面量 `NaN`，比空着难看得多。
+
+  /** 工时：空 / 非数字 / 负数一律 NULL。0 是合法值（「不用时间」也是一种估计）。 */
+  function normalizeHours(v) {
+    if (v === null || v === undefined) return null;
+    if (typeof v === 'string' && v.trim() === '') return null;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) return null;
+    return n;
+  }
+
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+  /**
+   * 计划日期：只认 `YYYY-MM-DD`，空 → NULL。
+   * **格式不对就抛错，不静默丢**：日期是给人排期的，`2026/3/5` 被悄悄吞掉
+   * 之后，用户会以为填进去了，等到要看排期时才发现是空的。
+   * 用正则而不是 `new Date()` 解析：`2026-02-31` 会被 JS 顺手滚成 3 月 3 日，
+   * 那是替用户改数据。多一层「这天真的存在吗」的校验。
+   */
+  function normalizeDate(v, field) {
+    if (v === null || v === undefined) return null;
+    const s = String(v).trim();
+    if (!s) return null;
+    if (!DATE_RE.test(s)) throw new Error((field || '日期') + '只接受 YYYY-MM-DD（收到「' + s + '」）');
+    const [y, m, d] = s.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) {
+      throw new Error((field || '日期') + '不是一个真实存在的日子（收到「' + s + '」）');
+    }
+    return s;
+  }
+
+  /** 短编号的显示串。放后端做，前端不拼 —— 格式只该有一处定义。 */
+  function seqLabel(n) {
+    const num = Number(n);
+    if (!Number.isFinite(num) || num <= 0) return null;
+    return 'T-' + String(Math.trunc(num)).padStart(3, '0');
+  }
+
+  /**
+   * 负责人：一个人名，不是列表（文档第五节第 5 条：先单值）。
+   * 空串 → NULL，和「没填」是同一件事；顺手截到 60 字，
+   * 免得有人把一整段需求描述贴进这个格子。
+   */
+  function normalizeOwner(v) {
+    if (v === null || v === undefined) return null;
+    const s = String(v).trim().slice(0, 60);
+    return s || null;
+  }
+
   function rowToProject(r) {
     if (!r) return null;
     return {
@@ -181,6 +237,24 @@ export function createCore(dataDir) {
       merged_into: r.merged_into ?? null,
       // 预留列：本轮拆分按「done + 备注」处理，这里恒为 null
       split_state: r.split_state ?? null,
+      // 前置被删/被合并时写下的一句话。非空 = 依赖关系需要人来重新确认一次，
+      // 用户看过就 PATCH 成空串（前端那个「知道了」按钮）
+      link_warn: r.link_warn ?? '',
+      // 冗余的父卡 id（跟着 parent 边同步）。真值是 links 里的那条件，
+      // 这一列只是让「这张卡有没有父卡」不用 join —— 见 storage.mjs MIGRATIONS[6]
+      parent_id: r.parent_id ?? null,
+      // ---- 表格视图的 6 个业务字段（v8）----
+      // seq_no 是身份，不可改；no 是它的显示串（T-001），后端拼好，
+      // 前端直接渲染 —— 格式只该有一处定义。
+      seq_no: r.seq_no === null || r.seq_no === undefined ? null : Number(r.seq_no),
+      no: seqLabel(r.seq_no),
+      plan_start_at: r.plan_start_at ?? null,
+      plan_end_at: r.plan_end_at ?? null,
+      owner: r.owner ?? null,
+      // 读的时候也归一化：手改库、老版本、导出再导入都可能塞进脏值，
+      // 前端表格直接渲染这个数，不该在那边再判一次。
+      estimate_hours: normalizeHours(r.estimate_hours),
+      actual_hours: normalizeHours(r.actual_hours),
       created_at: r.created_at,
       updated_at: r.updated_at,
       doing_at: r.doing_at,
@@ -210,36 +284,255 @@ export function createCore(dataDir) {
 
   // ---------- 关系派生字段 ----------
   //
-  // 列表里每张卡要带 has_merge / has_split / link_counts。这三个都是派生的，
+  // 列表里每张卡要带 has_merge / has_split / link_counts，以及依赖的
+  // blocked / waiting_count / blocking_count。这些都是派生的，
   // 不能存在 tasks 上（否则「改了层级，合并历史也跟着变」那种事就会出现）。
   //
   // 一次把 links 全捞出来在内存里归并：这张表很小（一条边两行数据），
   // 一次全表扫比「每张卡再查一次」便宜一个数量级 —— 后者 2000 条任务
   // 就是 2000 次 SQL，而 /api/state 每 3 秒被轮询一次。
+  //
+  // left join 一下 to 端的任务状态：判断「前置做完了没」需要它，
+  // 分开查就是 edges 条额外的 SQL。
+  // 列名刻意不加前缀 —— 这个行对象会直接喂给 prereqBlocks()，
+  // 它认的是 status / archived_at / merged_into 三个字段名。
+  const LINK_STAT_SQL = `
+    SELECT l.kind, l.from_id, l.to_id, t.status, t.archived_at, t.merged_into
+      FROM links l LEFT JOIN tasks t ON t.id = l.to_id`;
+
   function linkStats(ids) {
     const stat = new Map();
     if (!ids.size) return stat;
-    for (const r of conn().all('SELECT kind, from_id, to_id FROM links')) {
-      if (ids.has(r.from_id)) {
-        let s = stat.get(r.from_id);
-        if (!s) { s = { from: {}, to: {} }; stat.set(r.from_id, s); }
-        s.from[r.kind] = (s.from[r.kind] || 0) + 1;
-      }
-      if (ids.has(r.to_id)) {
-        let s = stat.get(r.to_id);
-        if (!s) { s = { from: {}, to: {} }; stat.set(r.to_id, s); }
-        s.to[r.kind] = (s.to[r.kind] || 0) + 1;
+    const hit = (id) => {
+      if (!ids.has(id)) return null;
+      let s = stat.get(id);
+      if (!s) { s = { from: {}, to: {}, waiting: 0, blocking: 0 }; stat.set(id, s); }
+      return s;
+    };
+    for (const r of conn().all(LINK_STAT_SQL)) {
+      const fromSide = hit(r.from_id);
+      const toSide = hit(r.to_id);
+      if (fromSide) fromSide.from[r.kind] = (fromSide.from[r.kind] || 0) + 1;
+      if (toSide) toSide.to[r.kind] = (toSide.to[r.kind] || 0) + 1;
+      // 依赖：只有「前置真的还没做完」才算数，否则一条已完成的边会永远算成阻塞
+      if (r.kind === 'depends_on' && prereqBlocks(r)) {
+        if (fromSide) fromSide.waiting += 1;      // 我还在等几条
+        if (toSide) toSide.blocking += 1;         // 我挡住了几条下游
       }
     }
     return stat;
   }
 
+  // 前置算不算「还欠着」。
+  //   · done            → 做完了，不拦
+  //   · merged_into 非空 → 被合并进别的卡了，**视为已完成**：合并出来的那张卡
+  //                        承接它的状态，不能因为一条前置被合并就永久卡住别人
+  //   · 已归档          → 出了流水线，不再占着别人（归档只发生在 done 之后，
+  //                        这条主要是防手改/脏数据）
+  function prereqBlocks(r) {
+    if (r.merged_into) return false;
+    if (r.status === 'done') return false;
+    if (r.archived_at) return false;
+    return true;
+  }
+
+  // ---------- 层级（parent / child）----------
+  //
+  // 方向：**子 → 父**，和 depends_on 同向（from 指向 to）。
+  // 文档第 1.3 节定了三条约束，这里是它们的落点：
+  //   1. 不能成环      → ACYCLIC.parent + reachable（复用依赖那套）
+  //   2. 深度上限 5 层 → linkTasks 里算「to 的祖先数 + 2 + from 的子树高」
+  //   3. 父卡状态派生   → recomputeStatus() + patch() 拒绝对有子项的卡手改
+  //
+  // 第 3 条只能放服务端：curl 一条 PATCH 就绕过前端，库里立刻出现
+  // 「父卡 done、下面三个 doing」—— 那比不做这个功能更糟。
+  const MAX_DEPTH = 5;
+
+  /** 这张卡有几个直接子项。走冗余列 parent_id，不 join links。 */
+  function childCount(id) {
+    return Number(conn().get('SELECT COUNT(*) AS c FROM tasks WHERE parent_id = ?', [id])?.c || 0);
+  }
+
+  /**
+   * parent 边的 child → parent 单值映射。
+   * 一张卡只允许有一个上级（多父会让「往上爬重算」变成分叉），
+   * 所以这里刻意用 Map 而不是邻接数组。
+   */
+  function parentMap() {
+    const map = new Map();
+    for (const r of conn().all(
+      "SELECT from_id, to_id FROM links WHERE kind = 'parent' ORDER BY created_at, rowid"
+    )) {
+      if (!map.has(r.from_id)) map.set(r.from_id, r.to_id);
+    }
+    return map;
+  }
+
+  /** 全库的 parent_id → 子项，一次捞出来给派生字段用（别每张卡查一次）。 */
+  function childIndex() {
+    const map = new Map();
+    for (const r of conn().all(
+      `SELECT id, parent_id, status, merged_into, archived_at
+         FROM tasks WHERE parent_id IS NOT NULL ORDER BY created_at, rowid`
+    )) {
+      if (!map.has(r.parent_id)) map.set(r.parent_id, []);
+      map.get(r.parent_id).push(r);
+    }
+    return map;
+  }
+
+  /** 直接子项，带卡片渲染要的几列。按创建时间 —— 先记的先列。 */
+  function childrenOf(taskId) {
+    const id = String(taskId || '');
+    if (!id) throw new Error('缺 taskId');
+    return conn().all(
+      `SELECT id, title, status, priority, project, category, archived_at, merged_into, created_at
+         FROM tasks WHERE parent_id = ? ORDER BY created_at, rowid`, [id]
+    ).map((r) => ({
+      id: r.id,
+      title: r.title,
+      status: r.status,
+      priority: r.priority,
+      project: r.project,
+      category: r.category,
+      archived_at: r.archived_at ?? null,
+      merged_into: r.merged_into ?? null,
+      created_at: r.created_at
+    }));
+  }
+
+  /**
+   * 整棵子树的状态分布，给卡片上那个「3/5」用。
+   *
+   * 算的是**所有后代**，不只是第一层 —— 「3/5」是给人看进度的，
+   * 而子项本身也可能是容器（5 层结构里很常见），只数第一层会骗人。
+   * 深度上限 5（MAX_DEPTH），所以这里最多 5 轮循环，不需要递归。
+   *
+   * 归档的子项照算（它确实做完了）；被合并的子项按它自己的 status 算 ——
+   * 合并只是「它变成了别人」，不是「它没做过」。
+   */
+  function subtreeStats(taskId, idx) {
+    const index = idx || childIndex();
+    const out = { total: 0, done: 0, doing: 0, todo: 0 };
+    const seen = new Set([String(taskId || '')]);
+    let level = index.get(String(taskId || '')) || [];
+    for (let d = 0; d < MAX_DEPTH && level.length; d++) {
+      const next = [];
+      for (const c of level) {
+        if (seen.has(c.id)) continue;        // 脏数据成环时兜底，别死循环
+        seen.add(c.id);
+        out.total += 1;
+        if (c.status === 'done') out.done += 1;
+        else if (c.status === 'doing') out.doing += 1;
+        else out.todo += 1;
+        for (const g of index.get(c.id) || []) next.push(g);
+      }
+      level = next;
+    }
+    return out;
+  }
+
+  /** 这张卡上面有几层上级（根 = 0）。顺着 parent 边往上爬，带成环兜底。 */
+  function ancestorDepth(id, adj) {
+    const map = adj || parentMap();
+    const seen = new Set([String(id)]);
+    let cur = String(id);
+    let d = 0;
+    for (let hop = 0; hop <= MAX_DEPTH + 2; hop++) {
+      const up = map.get(cur);
+      if (!up || seen.has(up)) break;
+      seen.add(up);
+      cur = up;
+      d += 1;
+    }
+    return d;
+  }
+
+  /** 这张卡下面有几层（叶子 = 0）。和 ancestorDepth 对称，用来算加边后的总深度。 */
+  function subtreeHeight(id, idx) {
+    const index = idx || childIndex();
+    const seen = new Set([String(id)]);
+    let level = index.get(String(id)) || [];
+    let h = 0;
+    while (level.length && h < MAX_DEPTH) {
+      h += 1;
+      const next = [];
+      for (const c of level) {
+        if (seen.has(c.id)) continue;
+        seen.add(c.id);
+        for (const g of index.get(c.id) || []) next.push(g);
+      }
+      level = next;
+    }
+    return h;
+  }
+
+  /**
+   * 给一张卡挂上层级派生字段。
+   *   child_count  **直接**子项数（抽屉里那句「状态由 3 个子项决定」读它）
+   *   subtree      所有后代的状态分布（卡片上那个「3/5」读它）
+   * 两个数刻意分开：直接子项决定这张卡的状态，后代只用来显示进度，
+   * 混成一个数就会出现「3 个子项决定状态」里面数着孙子。
+   */
+  function applyChildStat(t, idx) {
+    const index = idx || childIndex();
+    const direct = index.get(t.id) || [];
+    t.child_count = direct.length;
+    t.has_children = direct.length > 0;
+    t.subtree = subtreeStats(t.id, index);
+    return t;
+  }
+
+  /**
+   * 子项「算不算做完了」。和 prereqBlocks() 同一个判断，理由也一样：
+   * 被合并的子项（merged_into 非空）**视为已完成** —— 它已经变成了别人，
+   * 合并出来的那张卡承接它的进度。不这么算的话，一条被合并掉的子项会让
+   * 父卡永远停在 todo，没有任何入口能解开。
+   */
+  function childDone(c) {
+    if (c.merged_into) return true;
+    return c.status === 'done';
+  }
+
+  /**
+   * 父卡状态的派生规则（文档 1.3 第 3 条）：
+   *   全 done → done；任一 doing → doing；否则 todo
+   * 空列表返回 null（没有子项就没有派生值，不动它）。
+   */
+  function deriveStatus(children) {
+    if (!children.length) return null;
+    if (children.every(childDone)) return 'done';
+    if (children.some((c) => c.status === 'doing' && !c.merged_into)) return 'doing';
+    return 'todo';
+  }
+
+  /** 给一张卡填上派生字段。linkStats 一次算好，这里只做赋值 —— 别各算一套。 */
+  function applyLinkStat(t, s) {
+    const e = s || { from: {}, to: {}, waiting: 0, blocking: 0 };
+    t.has_merge = (e.from.merge_parent || 0) > 0;
+    t.has_split = (e.from.split_of || 0) > 0;
+    const counts = {};
+    for (const k of LINK_KINDS) counts[k] = (e.from[k] || 0) + (e.to[k] || 0);
+    t.link_counts = counts;
+    // 依赖派生：blocked 是「我还在等」，blocking_count 是「我挡住了谁」
+    t.blocked = e.waiting > 0;
+    t.waiting_count = e.waiting;
+    t.blocking_count = e.blocking;
+    return t;
+  }
+
   /**
    * 给一批任务挂上关系派生字段。原地改，返回同一个数组。
    *
-   *   has_merge    这张卡有 merge_parent 边指向旧卡（= 它是合并出来的新卡）
-   *   has_split    这张卡有 split_of 边指向子卡（= 它被拆过）
-   *   link_counts  两个方向都算：这张卡身上一共有多少条边，按 kind 分
+   *   has_merge      这张卡有 merge_parent 边指向旧卡（= 它是合并出来的新卡）
+   *   has_split      这张卡有 split_of 边指向子卡（= 它被拆过）
+   *   link_counts    两个方向都算：这张卡身上一共有多少条边，按 kind 分
+   *   blocked        还有前置没做完（depends_on 出边里 status 不是 done 的）
+   *   waiting_count  我还在等几条
+   *   blocking_count 我挡住了几条下游
+   *   has_children   这张卡有子项（status 因此变成只读）
+   *   child_count    子项总数，**含所有后代**（5 层结构里只数第一层会骗人）
+   *   subtree        {total,done,doing,todo} —— 卡片上那个「3/5」
    *
    * 方向的选择是刻意的：has_merge / has_split 只看「我指向谁」，
    * 因为徽章是入口 —— 点开看的是「我从哪来 / 我拆出了什么」。
@@ -249,13 +542,11 @@ export function createCore(dataDir) {
   function decorateLinks(tasks) {
     const ids = new Set(tasks.map((t) => t.id));
     const stat = linkStats(ids);
+    // 子项索引只建一次：subtreeStats 每张卡都调，各建一份就是 O(卡片数 × 全表)
+    const idx = childIndex();
     for (const t of tasks) {
-      const s = stat.get(t.id) || { from: {}, to: {} };
-      t.has_merge = (s.from.merge_parent || 0) > 0;
-      t.has_split = (s.from.split_of || 0) > 0;
-      const counts = {};
-      for (const k of LINK_KINDS) counts[k] = (s.from[k] || 0) + (s.to[k] || 0);
-      t.link_counts = counts;
+      applyLinkStat(t, stat.get(t.id));
+      applyChildStat(t, idx);
     }
     return tasks;
   }
@@ -535,6 +826,16 @@ export function createCore(dataDir) {
       archived_at: null,
       merged_into: null,      // 合并时才写；这里是新卡的出生状态
       split_state: null,      // 预留列，本轮恒 null
+      // ---- 表格视图的 6 个业务字段（v8）----
+      // seq_no 不在这里定：它要读库里的 MAX(seq_no)，只有 add() 知道。
+      seq_no: null,
+      // 收任务时也允许直接带业务字段（CLI / 脚本导入用），归一化规则和
+      // patch 走同一套 —— 否则「PATCH 写 -1 存 NULL、add 写 -1 存 -1」。
+      owner: normalizeOwner(input.owner),
+      estimate_hours: normalizeHours(input.estimate_hours),
+      actual_hours: normalizeHours(input.actual_hours),
+      plan_start_at: normalizeDate(input.plan_start_at, '计划开始'),
+      plan_end_at: normalizeDate(input.plan_end_at, '计划结束'),
       created_at: now,
       updated_at: now,
       doing_at: null,
@@ -549,12 +850,20 @@ export function createCore(dataDir) {
     t.project_id = proj.id;
     t.project = proj.name;
 
+    // 短编号 = MAX(seq_no) + 1。
+    // 不用 UNIQUE 约束换唯一性，理由见 storage.mjs MIGRATIONS[7]：
+    // 给已存在的表加 UNIQUE 只能重建表，那一步没有幂等写法。这里是单进程
+    // 单用户、写入口只有 add()，MAX+1 撞不上。
+    const seq = Number(d.get('SELECT MAX(seq_no) AS m FROM tasks')?.m || 0);
+    t.seq_no = Number.isFinite(seq) && seq > 0 ? seq + 1 : 1;
+
     d.run(
       `INSERT INTO tasks
          (id, title, kind, payload, project, project_id, category, status, priority, note, source,
           brief, brief_at, classify_state, classify_reason, classify_model, claimed_by, needs_project,
-          dev_ready, dev_gaps, archived_at, created_at, updated_at, doing_at, done_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          dev_ready, dev_gaps, archived_at, seq_no, owner, estimate_hours, actual_hours,
+          plan_start_at, plan_end_at, created_at, updated_at, doing_at, done_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         t.id, t.title, t.kind, JSON.stringify(t.payload), t.project, t.project_id,
         t.category, t.status, t.priority, t.note, t.source,
@@ -562,11 +871,13 @@ export function createCore(dataDir) {
         t.classify_state, t.classify_reason, t.classify_model, t.claimed_by,
         t.needs_project ? 1 : 0,
         t.dev_ready ? 1 : 0, JSON.stringify(t.dev_gaps || []), t.archived_at,
+        t.seq_no, t.owner, t.estimate_hours, t.actual_hours,
+        t.plan_start_at, t.plan_end_at,
         t.created_at, t.updated_at, t.doing_at, t.done_at
       ]
     );
 
-    return { ...t, message_count: 0 };
+    return { ...t, no: seqLabel(t.seq_no), message_count: 0 };
   }
 
   function getTask(id) {
@@ -578,14 +889,8 @@ export function createCore(dataDir) {
   }
 
   function decorateOne(t) {
-    const stat = linkStats(new Set([t.id]));
-    const s = stat.get(t.id) || { from: {}, to: {} };
-    t.has_merge = (s.from.merge_parent || 0) > 0;
-    t.has_split = (s.from.split_of || 0) > 0;
-    const counts = {};
-    for (const k of LINK_KINDS) counts[k] = (s.from[k] || 0) + (s.to[k] || 0);
-    t.link_counts = counts;
-    return t;
+    applyLinkStat(t, linkStats(new Set([t.id])).get(t.id));
+    return applyChildStat(t);
   }
 
   function requireTask(id) {
@@ -594,9 +899,27 @@ export function createCore(dataDir) {
     return t;
   }
 
-  function applyStatus(t, status) {
+  /**
+   * 改状态。唯一的写入口 —— patch / move / 拆分都走这里，所以依赖拦截放这儿：
+   * CLI 和 API 都绕不过去（只在前端拦是假的，curl 一条 /move 就进去了）。
+   *
+   * opts.skipBlock 是给内部用的逃生口：拆分会把原卡标成 done，那不是我「干完了」
+   * 的声明，而是这条卡被拆散了 —— 它不该被自己那些前置堵住。
+   */
+  function applyStatus(t, status, opts = {}) {
     if (!STATUSES.includes(status)) throw new Error('非法状态: ' + status);
     if (t.status === status) return { changed: false };
+
+    // 依赖拦截：前置没做完就不许进「进行中」或「已完成」。
+    // 往回退（todo）永远放行 —— 退回不做不欠任何前置。
+    if (!opts.skipBlock && (status === 'doing' || status === 'done')) {
+      const b = blockedBy(t.id);
+      if (b.blocked) {
+        throw new Error('还有 ' + b.waiting.length + ' 条前置没做完：'
+          + b.waiting.map((x) => '「' + x.title + '」').join('、'));
+      }
+    }
+
     const now = nowIso();
     const next = { status };
     if (status === 'doing' && !t.doing_at) next.doing_at = now;
@@ -608,12 +931,91 @@ export function createCore(dataDir) {
     return { changed: true, fields: next };
   }
 
+  /**
+   * 从 taskId 往上爬祖先链，逐级重算「有子项的卡」的状态（文档 1.3 第 3 条）。
+   *
+   * 规则：全 done → done；任一 doing → doing；否则 todo。
+   * 起点是 taskId **自己**：新挂上去的父卡需要立刻派生一次（那时它是从
+   * 「没子项」变成「有子项」，只有它自己需要重算）；之后逐级往上。
+   *
+   * 为什么是循环不是递归：祖先最多 5 层（MAX_DEPTH），循环足够，而且没有
+   * 栈深度的心理负担 —— 写「不能递归就停」的时候，循环是最直白的答案。
+   *
+   * 两个刻意的选择，都写在下面：
+   *
+   * 1. **直接 UPDATE，不走 applyStatus。**
+   *    applyStatus 会做 depends_on 拦截（派生必须 skipBlock）和写
+   *    doing_at/done_at；把它拉进来一起用，就得加一个 skipBlock 参数、
+   *    再解释一遍「这次为什么可以跳」，语义会搅在一起。
+   *    但 done_at 不能省 —— archiveStale() 只认 `done_at IS NOT NULL` 的行，
+   *    派生 done 却不写 done_at，这张父卡就永远不进归档，会一直占着已完成列。
+   *    所以这里照 applyStatus 的写法补三个时间戳（done 写 done_at、
+   *    doing 补 doing_at、todo 清两个），和手改的落库形状保持一致。
+   *
+   * 2. **归档的祖先不动。** 它已经出了流水线（看板上不占位），再去改它的
+   *    status 只会让归档视图里的记录和当时的事实打架；而且「取消子项 done」
+   *    把一张归档卡拽回看板更吓人。所以跳过、继续往上。
+   *
+   * 事务由调用方保证（patch / linkTasks / unlinkTasks 都包在 d.tx 里）。
+   *
+   * @returns {Array<{id, from, to}>} 这次真的变了的卡（测试和调试用）
+   */
+  function recomputeStatus(taskId) {
+    const d = conn();
+    const adj = parentMap();
+    const idx = childIndex();
+    const now = nowIso();
+    const updated = [];
+    const seen = new Set();
+    let cur = String(taskId || '');
+
+    for (let hop = 0; hop <= MAX_DEPTH + 2 && cur; hop++) {
+      if (seen.has(cur)) break;              // 脏数据成环时兜底，别死循环
+      seen.add(cur);
+
+      const kids = idx.get(cur) || [];
+      const want = deriveStatus(kids);
+      if (want) {
+        const row = d.get('SELECT id, status, doing_at, done_at, archived_at FROM tasks WHERE id = ?', [cur]);
+        if (row && !row.archived_at && row.status !== want) {
+          const sets = ['status = ?', 'updated_at = ?'];
+          const args = [want, now];
+          if (want === 'done') {
+            sets.push('done_at = ?'); args.push(now);
+            if (!row.doing_at) { sets.push('doing_at = ?'); args.push(now); }
+          } else if (want === 'doing') {
+            if (!row.doing_at) { sets.push('doing_at = ?'); args.push(now); }
+          } else {
+            sets.push('doing_at = NULL', 'done_at = NULL');
+          }
+          d.run('UPDATE tasks SET ' + sets.join(', ') + ' WHERE id = ?', [...args, cur]);
+          updated.push({ id: cur, from: row.status, to: want });
+          // 快照要跟着改：idx 是进函数时拍的一张表，再往上爬的时候
+          // 上一级读的还是这张表。不同步的话「叶子 done → 中间 done」成立，
+          // 但「→ 祖父 done」永远是 todo（实测过，就是这里）。
+          for (const list of idx.values()) {
+            for (const c of list) if (c.id === cur) c.status = want;
+          }
+        }
+      }
+      cur = adj.get(cur);                    // 往上一级
+    }
+    return updated;
+  }
+
   const PATCHABLE = [
     'title', 'kind', 'project', 'project_id', 'category', 'priority', 'note', 'claimed_by',
     'classify_state', 'classify_reason', 'classify_model'
+    // v8 那五个（owner / estimate_hours / actual_hours / plan_start_at /
+    // plan_end_at）**不在这条循环里** —— 它们要归一化，见下面那段。
+    // seq_no 也**不在**：它是身份，改它等于把「这是第 7 条需求」改成别人。
   ];
 
-  function patch(id, fields = {}) {
+  /**
+   * opts.skipParentStatus：内部用的逃生口，允许直接改「有子项的卡」的状态。
+   * 现在只有测试和将来可能的「强制对齐」会用到 —— 正常路径是让子项决定。
+   */
+  function patch(id, fields = {}, opts = {}) {
     const d = conn();
     const t = requireTask(id);
     const sets = [];
@@ -625,7 +1027,10 @@ export function createCore(dataDir) {
     // 唯一的例外是 merged_into 本身 —— 撤销合并（revertMerge）要靠它把卡放回来，
     // 而那时库里这张卡还带着 merged_into。
     if (t.merged_into) {
-      const others = Object.keys(fields).filter((k) => fields[k] !== undefined && k !== 'merged_into');
+      // link_warn 也放行：它只是「前置断了，看一眼」的便签，不是卡片内容，
+      // 清掉它不会改动任何历史事实。
+      const others = Object.keys(fields)
+        .filter((k) => fields[k] !== undefined && k !== 'merged_into' && k !== 'link_warn');
       if (others.length) {
         const into = getTask(t.merged_into);
         throw new Error('这条已被合并进「' + (into?.title || t.merged_into) + '」，是历史记录，不能改');
@@ -638,6 +1043,34 @@ export function createCore(dataDir) {
       args.push(fields[k]);
       if (k === 'project') nextProject = fields[k];
       if (k === 'project_id') nextProjectId = fields[k];
+    }
+
+    // ---- v8：表格行内编辑的四个字段 ----
+    // 不走 PATCHABLE 那条循环，因为它们进来的是用户在一个 <input> 里敲的字，
+    // 必须归一化后才能落库（'' / 'abc' / -1 一律存 NULL；日期不合法就抛错）。
+    //
+    // `null` 是「清空这一格」的合法请求，`undefined` 才是「这次没改它」——
+    // 两者的区别在这里很关键：模糊掉的话，点一下格子再失焦就会把已有值清掉。
+    if (fields.estimate_hours !== undefined) {
+      sets.push('estimate_hours = ?');
+      args.push(normalizeHours(fields.estimate_hours));
+    }
+    if (fields.actual_hours !== undefined) {
+      sets.push('actual_hours = ?');
+      args.push(normalizeHours(fields.actual_hours));
+    }
+    // 负责人同理：表格里清空那一格 = 「这人不管了」，存 NULL 而不是空串。
+    if (fields.owner !== undefined) {
+      sets.push('owner = ?');
+      args.push(normalizeOwner(fields.owner));
+    }
+    if (fields.plan_start_at !== undefined) {
+      sets.push('plan_start_at = ?');
+      args.push(normalizeDate(fields.plan_start_at, '计划开始'));
+    }
+    if (fields.plan_end_at !== undefined) {
+      sets.push('plan_end_at = ?');
+      args.push(normalizeDate(fields.plan_end_at, '计划结束'));
     }
 
     // 布尔列单独处理：库里存 0/1，外面看到的是 true/false
@@ -678,15 +1111,31 @@ export function createCore(dataDir) {
       args.push(target);
     }
 
+    // 前置断开提示：用户看过就清空（前端「知道了」按钮）。
+    // 它不是正文，只是一句便签 —— 截到 500 字，别让它变成一个能塞长文章的字段。
+    if (fields.link_warn !== undefined) {
+      sets.push('link_warn = ?');
+      args.push(String(fields.link_warn ?? '').slice(0, 500));
+    }
+
     if (fields.payload && typeof fields.payload === 'object') {
       const merged = { ...t.payload, ...fields.payload };
       sets.push('payload = ?');
       args.push(JSON.stringify(merged));
     }
 
+    // 有子项的卡：status 是派生的，只读（文档 1.3 第 3 条）。
+    // 拦在这里而不是前端：curl 一条 PATCH 就绕过界面，库里立刻出现
+    // 「父卡 done、下面三个 doing」—— 那比不做这个功能更糟。
+    // 逃生口 skipParentStatus 只给内部/测试用。
+    let statusChanged = false;
     if (fields.status !== undefined) {
-      const r = applyStatus(t, fields.status);
+      if (t.has_children && !opts.skipParentStatus) {
+        throw new Error('这张卡有 ' + t.child_count + ' 个子项，状态由子项决定');
+      }
+      const r = applyStatus(t, fields.status, opts);
       if (r.changed) {
+        statusChanged = true;
         for (const [k, v] of Object.entries(r.fields)) {
           sets.push(k + ' = ?');
           args.push(v);
@@ -709,7 +1158,21 @@ export function createCore(dataDir) {
     args.push(nowIso());
     args.push(id);
 
-    d.run('UPDATE tasks SET ' + sets.join(', ') + ' WHERE id = ?', args);
+    // 写 + 向上传播放同一个事务：中间失败会留下「子项变了两级祖先没变」，
+    // 那正是这个功能要防的那种不一致。
+    //
+    // 防抖（比如 200ms 内合并多次传播）刻意不做：单机自用，一次 patch
+    // 只传播一次，最多 5 层、每层一条 UPDATE，成本比定时器的故障面小得多。
+    d.tx(() => {
+      d.run('UPDATE tasks SET ' + sets.join(', ') + ' WHERE id = ?', args);
+      if (statusChanged) {
+        // 从父卡开始爬，不从自己：起点这一层会「用子项算自己」，而自己刚被
+        // 人手改过 —— 尤其是 skipParentStatus 那条路，从自己开始等于刚写就被
+        // 算回去。子项状态变了，该重算的本来就是它的祖先。
+        const up = parentMap().get(id);
+        if (up) recomputeStatus(up);
+      }
+    });
     return getTask(id);
   }
 
@@ -760,6 +1223,77 @@ export function createCore(dataDir) {
     };
   }
 
+  /** 一批边里，某个 kind 的 from → [to...] 邻接表。爬链用，只查一次。 */
+  function edgeMap(kind) {
+    const map = new Map();
+    for (const r of conn().all(
+      'SELECT from_id, to_id FROM links WHERE kind = ? ORDER BY created_at, rowid', [kind]
+    )) {
+      if (!map.has(r.from_id)) map.set(r.from_id, []);
+      map.get(r.from_id).push(r.to_id);
+    }
+    return map;
+  }
+
+  /**
+   * 从 start 沿某个 kind 的边往上爬，能不能爬到 target。爬到了 = 加这条边会成环。
+   *
+   * 两种 kind 共用这一个算法，因为**检环的形状是一样的**：
+   * 「from → to 这条边要成立，先得确认从 to 顺着同一个方向走不到 from」。
+   * merge_parent（新卡 → 旧卡）和 depends_on（等的人 → 被等的人）方向语义相反，
+   * 但拓扑上都是「有向图里加一条边之前，检查 to 的可达集合里有没有 from」。
+   * 层级（parent）将来也一样。
+   *
+   * 边界只看同一个 kind：合并链和依赖链是两张完全独立的图，
+   * 混着爬会把「A 依赖 B、B 合并自 C」误判成环。
+   *
+   * 用访问集合兜底 —— 就算库里已经存着一个环（老数据/手改），也不会死循环。
+   */
+  function reachable(kind, start, target) {
+    const adj = edgeMap(kind);
+    const seen = new Set();
+    const stack = [start];
+    while (stack.length) {
+      const cur = stack.pop();
+      if (cur === target) return true;
+      if (seen.has(cur)) continue;
+      seen.add(cur);
+      for (const next of adj.get(cur) || []) stack.push(next);
+    }
+    return false;
+  }
+
+  /** 会成环的 kind 和它们各自的报错话术。 */
+  const ACYCLIC = {
+    merge_parent: (from, to) => '合并关系会成环：' + from + ' 已经在 ' + to + ' 的合并链上',
+    depends_on: (from, to) => '依赖关系会成环：「' + (getTask(to)?.title || to)
+      + '」已经（间接）在等「' + (getTask(from)?.title || from) + '」了，两条会永远卡住',
+    // 层级成环 = 一张卡成了自己的祖先。往上爬重算状态时会立刻死循环，
+    // 而且「谁是父卡」在环里没有答案 —— 必须在加边时就拒。
+    parent: (from, to) => '层级会成环：「' + (getTask(to)?.title || to)
+      + '」已经在「' + (getTask(from)?.title || from) + '」下面了，不能反过来再挂一次'
+  };
+
+  /**
+   * 把 tasks.parent_id 这一列和 parent 边对齐（单值）。
+   *
+   * parent_id 是冗余列（见 storage.mjs MIGRATIONS[6]），真值始终是 links 里
+   * 那条件。所以每次增删 parent 边之后都调这里重算一次，而不是自己 +/- 1 ——
+   * 增量维护是最容易两边走歪的写法。
+   */
+  function syncParentId(taskId) {
+    const d = conn();
+    const id = String(taskId || '');
+    if (!id) return null;
+    const r = d.get(
+      "SELECT to_id FROM links WHERE kind = 'parent' AND from_id = ? ORDER BY created_at, rowid LIMIT 1",
+      [id]
+    );
+    const next = r ? r.to_id : null;
+    d.run('UPDATE tasks SET parent_id = ? WHERE id = ?', [next, id]);
+    return next;
+  }
+
   /**
    * 建一条边。
    * - kind 必须是四种之一
@@ -767,8 +1301,10 @@ export function createCore(dataDir) {
    * - 不能自己连自己
    * - 重复不报错（返回已有的那条）—— 合并/拆分是幂等的，
    *   重试一次请求不该变成一个错误
-   * - merge_parent 专门查一次环：合并关系理论上不该成环，
-   *   但一旦成环，「点【合】徽章」那个入口就会无限套娃
+   * - merge_parent / depends_on / parent 查环：合并成环会让【合】徽章无限套娃，
+   *   依赖成环会让两条卡永远等不到对方，层级成环会让「谁是父卡」没有答案
+   * - parent 还要查深度（≤ MAX_DEPTH 层），且一张卡只能有一个父卡
+   *   （再挂一次 = 换父卡：旧边先解掉，两边的状态都重算）
    */
   function linkTasks(fromId, toId, kind, note, opts = {}) {
     const d = conn();
@@ -783,16 +1319,34 @@ export function createCore(dataDir) {
     const exist = d.get('SELECT * FROM links WHERE kind = ? AND from_id = ? AND to_id = ?', [kind, from, to]);
     if (exist) return rowToLink(exist);
 
-    if (kind === 'merge_parent') {
-      // 环检测：从 to 往上爬它已有的 merge_parent 祖先，撞到 from 就是环。
-      // 用迭代 + 访问集合兜底 —— 就算库里已经存着一个环，也不会死循环。
-      const seen = new Set();
-      let cur = to;
-      while (cur && !seen.has(cur)) {
-        if (cur === from) throw new Error('合并关系会成环：' + from + ' 已经在 ' + to + ' 的合并链上');
-        seen.add(cur);
-        const up = d.get("SELECT to_id FROM links WHERE kind = 'merge_parent' AND from_id = ? LIMIT 1", [cur]);
-        cur = up?.to_id || null;
+    if (ACYCLIC[kind] && reachable(kind, to, from)) {
+      throw new Error(ACYCLIC[kind](from, to));
+    }
+
+    // 层级的两条额外约束（文档 1.3 的第 1、2 条；第 1 条已经在上面走 ACYCLIC）
+    let oldParent = null;
+    if (kind === 'parent') {
+      // 深度：一张卡只有一个父卡，所以「挂上去之后最深能到几层」是可算的。
+      //   to 的深度      = 它的祖先数 + 1
+      //   from 的深度    = to 的深度 + 1（新加的这条边）
+      //   整条链最深     = from 的深度 + from 自己的子树高
+      // 超过 MAX_DEPTH 就拒 —— 这一步能在「加边」时拦住，就不用等渲染时才发现
+      // 有一棵 9 层的树。
+      const depth = ancestorDepth(to) + 2 + subtreeHeight(from);
+      if (depth > MAX_DEPTH) {
+        throw new Error('层级最多 ' + MAX_DEPTH + ' 层，这条挂上去就是 ' + depth
+          + ' 层 —— 超过 ' + MAX_DEPTH + ' 层就该拆项目，不是加深层级');
+      }
+      // 一张卡只能有一个父卡：已经有别的父卡就是「换父卡」。
+      // 旧的边在这里解掉（拖进拖出就是这么实现的），并记住它是谁 ——
+      // 它少了一个子项，状态得跟着重算。
+      const cur = d.get(
+        "SELECT id, to_id FROM links WHERE kind = 'parent' AND from_id = ? ORDER BY created_at, rowid LIMIT 1",
+        [from]
+      );
+      if (cur && cur.to_id !== to) {
+        d.run('DELETE FROM links WHERE id = ?', [cur.id]);
+        oldParent = cur.to_id;
       }
     }
 
@@ -804,32 +1358,60 @@ export function createCore(dataDir) {
       note: String(note || '').slice(0, 500),
       created_at: nowIso()
     };
-    d.run(
-      'INSERT INTO links (id, kind, from_id, to_id, note, created_at) VALUES (?,?,?,?,?,?)',
-      [row.id, row.kind, row.from_id, row.to_id, row.note, row.created_at]
-    );
-    // 关系变了也是「这张卡变了」：列表里的 has_merge / has_split 要跟着刷。
-    // 批量建边（合并/拆分）时调用方传 touch:false —— 外层一次事务里已经统一刷过了。
-    if (opts.touch !== false) {
-      const now = nowIso();
-      d.run('UPDATE tasks SET updated_at = ? WHERE id IN (?, ?)', [now, from, to]);
-    }
+    // 边 + parent_id + 派生状态是同一件事，必须一起成功或一起失败
+    d.tx(() => {
+      d.run(
+        'INSERT INTO links (id, kind, from_id, to_id, note, created_at) VALUES (?,?,?,?,?,?)',
+        [row.id, row.kind, row.from_id, row.to_id, row.note, row.created_at]
+      );
+      // 关系变了也是「这张卡变了」：列表里的 has_merge / has_split 要跟着刷。
+      // 批量建边（合并/拆分）时调用方传 touch:false —— 外层一次事务里已经统一刷过了。
+      if (opts.touch !== false) {
+        const now = nowIso();
+        d.run('UPDATE tasks SET updated_at = ? WHERE id IN (?, ?)', [now, from, to]);
+      }
+      if (kind === 'parent') {
+        syncParentId(from);
+        // 从 to 开始往上是正确的：to 第一次有子项时自己要先派生一次，
+        // 之后逐级把它的祖先一起重算（祖先可能 5 层）
+        recomputeStatus(to);
+        if (oldParent) recomputeStatus(oldParent);
+      }
+    });
     return row;
   }
 
   function unlinkTasks(fromId, toId, kind) {
     const d = conn();
     if (!LINK_KINDS.includes(kind)) throw new Error('未知关系类型: ' + kind);
-    const r = d.run('DELETE FROM links WHERE kind = ? AND from_id = ? AND to_id = ?',
-      [kind, String(fromId || ''), String(toId || '')]);
-    return { removed: Number(r.changes || 0) };
+    const from = String(fromId || '');
+    const to = String(toId || '');
+    let removed = 0;
+    d.tx(() => {
+      const r = d.run('DELETE FROM links WHERE kind = ? AND from_id = ? AND to_id = ?', [kind, from, to]);
+      removed = Number(r.changes || 0);
+      if (removed && kind === 'parent') {
+        syncParentId(from);
+        // 少了一个子项：父卡和它上面的链状态都得重算（可能从 done 退回 doing/todo）
+        recomputeStatus(to);
+      }
+    });
+    return { removed };
   }
 
   function deleteLink(id) {
     const d = conn();
-    const r = d.run('DELETE FROM links WHERE id = ?', [String(id || '')]);
-    if (!Number(r.changes || 0)) throw new Error('关系不存在: ' + id);
-    return { removed: 1 };
+    const row = d.get('SELECT * FROM links WHERE id = ?', [String(id || '')]);
+    if (!row) throw new Error('关系不存在: ' + id);
+    let removed = 0;
+    d.tx(() => {
+      removed = Number(d.run('DELETE FROM links WHERE id = ?', [row.id]).changes || 0);
+      if (removed && row.kind === 'parent') {
+        syncParentId(row.from_id);
+        recomputeStatus(row.to_id);
+      }
+    });
+    return { removed };
   }
 
   /**
@@ -872,6 +1454,53 @@ export function createCore(dataDir) {
       'SELECT * FROM links WHERE from_id = ? AND kind = ? ORDER BY created_at, rowid',
       [String(taskId || ''), kind]
     ).map(rowToLink);
+  }
+
+  /**
+   * 这张卡还在等谁 —— depends_on 出边里「真的还没做完」的那些前置。
+   *
+   * 方向按文档第 1.4 节：**from_id 是等的人，to_id 是被等的（前置）**。
+   * 「算不算还欠着」的判定只有一份，在 prereqBlocks() 里 ——
+   * blockedBy、卡片上的 blocked 徽章、blocking_count 三处都读它，
+   * 分开写必然出现「徽章说等 1 条、拖拽却放行」这种自相矛盾。
+   *
+   * @returns {{blocked:boolean, waiting:Array<{id,title,status,project}>}}
+   */
+  function blockedBy(taskId) {
+    const id = String(taskId || '');
+    if (!getTask(id)) throw new Error('任务不存在: ' + id);
+    const waiting = [];
+    for (const r of conn().all(
+      `SELECT l.to_id AS id, t.title, t.status, t.project,
+              t.archived_at, t.merged_into
+         FROM links l JOIN tasks t ON t.id = l.to_id
+        WHERE l.kind = 'depends_on' AND l.from_id = ?
+        ORDER BY l.created_at, l.rowid`, [id]
+    )) {
+      if (!prereqBlocks(r)) continue;
+      waiting.push({ id: r.id, title: r.title, status: r.status, project: r.project });
+    }
+    return { blocked: waiting.length > 0, waiting };
+  }
+
+  /**
+   * 前置没了，在下游卡上留一行提示。
+   *
+   * 边本身由 ON DELETE CASCADE 清（删除）/ 原样保留（合并），但「我这里曾经
+   * 有一条约束」这件事不该静默消失 —— 人得知道要重新确认一次。
+   * 已经写过提示的不覆盖，追加一行（上限一行字，多了就顶掉最老的）。
+   */
+  function warnDependents(taskId, title, reason) {
+    const d = conn();
+    const line = '原来的前置「' + title + '」被' + reason + '了，重新确认依赖';
+    const rows = d.all("SELECT from_id FROM links WHERE kind = 'depends_on' AND to_id = ?", [taskId]);
+    const now = nowIso();
+    for (const r of rows) {
+      const cur = String(d.get('SELECT link_warn FROM tasks WHERE id = ?', [r.from_id])?.link_warn || '').trim();
+      const next = (cur ? cur + '\n' + line : line).slice(-500);
+      d.run('UPDATE tasks SET link_warn = ?, updated_at = ? WHERE id = ?', [next, now, r.from_id]);
+    }
+    return rows.length;
   }
 
   /**
@@ -933,10 +1562,20 @@ export function createCore(dataDir) {
       });
 
       const now = nowIso();
+      const parents = new Set();
       for (const t of olds) {
+        // 这张旧卡如果正被别人当前置：边留着（卡没删，历史该看得见），
+        // 但下游要留一行提示 —— 它已经"变成别人"了，依赖关系得人重新确认。
+        // 阻塞判定那边会把 merged_into 非空的前置当作已完成（见 prereqBlocks），
+        // 所以合并不会把下游永久卡死，只是要人来看一眼。
+        warnDependents(t.id, t.title, '合并');
         d.run('UPDATE tasks SET merged_into = ?, updated_at = ? WHERE id = ?', [created.id, now, t.id]);
         linkTasks(created.id, t.id, 'merge_parent', '', { touch: false });
+        // 被合并的子项「视为已完成」（childDone），所以它原来挂着的父卡
+        // 可能因此变成 done —— 合并也是进度变化，得往上重算。
+        if (t.parent_id) parents.add(t.parent_id);
       }
+      for (const p of parents) recomputeStatus(p);
       d.run('UPDATE tasks SET updated_at = ? WHERE id = ?', [now, created.id]);
       return getTask(created.id);
     });
@@ -960,6 +1599,7 @@ export function createCore(dataDir) {
     return d.tx(() => {
       const now = nowIso();
       const restored = [];
+      const parents = new Set();
       for (const e of edges) {
         d.run("DELETE FROM links WHERE id = ?", [e.id]);
         // 只清指向这张卡的引用：万一某张旧卡后来又被合并进别的卡，
@@ -967,10 +1607,15 @@ export function createCore(dataDir) {
         d.run('UPDATE tasks SET merged_into = NULL, updated_at = ? WHERE id = ? AND merged_into = ?',
           [now, e.to_id, id]);
         const back = getTask(e.to_id);
-        if (back) restored.push(back.id);
+        if (back) {
+          restored.push(back.id);
+          // 旧卡「不再是已完成」，它上面的父卡可能要从 done 退回来
+          if (back.parent_id) parents.add(back.parent_id);
+        }
       }
       d.run('UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ? AND archived_at IS NULL',
         [now, now, id]);
+      for (const p of parents) recomputeStatus(p);
       return { task: getTask(id), restored };
     });
   }
@@ -1027,8 +1672,10 @@ export function createCore(dataDir) {
         'UPDATE tasks SET note = ?, updated_at = ? WHERE id = ?',
         [note ? note + '\n' + line : line, stamp, source.id]
       );
-      // status 走 applyStatus 那条路，doing_at / done_at 才会按现有规则落
-      const done = applyStatus(source, 'done');
+      // status 走 applyStatus 那条路，doing_at / done_at 才会按现有规则落。
+      // skipBlock：「我被拆散了」不是「我干完了」，不该被自己的前置挡住 ——
+      // 否则一条等前置的卡就永远拆不开了。
+      const done = applyStatus(source, 'done', { skipBlock: true });
       if (done.changed) {
         const sets = Object.entries(done.fields).map(([k]) => k + ' = ?');
         d.run('UPDATE tasks SET ' + sets.join(', ') + ' WHERE id = ?',
@@ -1038,6 +1685,11 @@ export function createCore(dataDir) {
       if (opts.note) {
         d.run('UPDATE tasks SET note = note || ? WHERE id = ?', ['\n' + String(opts.note), source.id]);
       }
+
+      // 原卡被标成 done，它上面的父卡（如果有）状态要跟着重算 ——
+      // 「一张卡拆着拆着就完成了」对父卡来说是实打实的进度变化。
+      const up = parentMap().get(source.id);
+      if (up) recomputeStatus(up);
 
       return { source: getTask(source.id), children: children.map((c) => getTask(c.id)) };
     });
@@ -1076,9 +1728,27 @@ export function createCore(dataDir) {
     // messages / links 靠 ON DELETE CASCADE 一并清掉。
     // 但 merged_into 是个普通 TEXT 列（没有外键），删掉被合并的旧卡之后
     // 别处指向它的引用会悬空 —— 手工清一遍。
+    //
+    // 依赖边同样被 CASCADE 清掉，但「我原来在等这条卡」这件事不能跟着消失：
+    // 删除之前先在下游卡上写一行 link_warn。顺序不能反 —— 边没了就找不到
+    // 谁在等它了。
+    //
+    // 层级：parent 边被 CASCADE 清掉，但两端都得跟着反应过来 ——
+    //   · 子卡的 parent_id 要清空（否则它带着一个指向空气的父卡 id，
+    //     「有没有子项」和「我在谁下面」两处全算错）
+    //   · 这张卡自己的父卡少了一个子项，状态要重算（可能从 done 退回）
+    // 两件事都先记下来，删完再动 —— 删完就查不到这些关系了。
+    const up = t.parent_id || null;
+
     d.tx(() => {
+      warnDependents(id, t.title, '删除');
       d.run('UPDATE tasks SET merged_into = NULL WHERE merged_into = ?', [id]);
+      // parent_id 是普通 TEXT 列（和外键无关），CASCADE 只清 links 表里那条边，
+      // 子卡上冗余的 parent_id 得手工清 —— 不然后端「有没有父卡」和
+      // 「有没有子项」两边立刻打架。
+      d.run('UPDATE tasks SET parent_id = NULL, updated_at = ? WHERE parent_id = ?', [nowIso(), id]);
       d.run('DELETE FROM tasks WHERE id = ?', [id]);
+      if (up) recomputeStatus(up);
     });
 
     // 库删成功才动文件。反过来的话，删文件成功、删库失败，就留下一条指向空文件的任务。
@@ -1385,9 +2055,10 @@ export function createCore(dataDir) {
     const projects = d.all('SELECT * FROM projects ORDER BY sort_order, created_at').map(rowToProject);
     const tasks = d.all(TASK_SELECT + ' ORDER BY t.created_at').map((r) => {
       const t = rowToTask(r);
-      // 老格式里没有 message_count 这个派生字段，messages 是实数组 —— 去干净点，
-      // 导出的文件才好跟历史 tasks.json 直接 diff
+      // 老格式里没有 message_count / no 这类派生字段，messages 是实数组 —— 去干净点，
+      // 导出的文件才好跟历史 tasks.json 直接 diff（no 由 seq_no 推得出来，不必存两遍）
       delete t.message_count;
+      delete t.no;
       t.messages = listMessages(t.id);
       return t;
     });
@@ -1473,6 +2144,11 @@ export function createCore(dataDir) {
     conn, init, close,
     add, getTask, patch, move, remove, list, state, count, revision, archiveStale,
     linkTasks, unlinkTasks, deleteLink, listLinks, linksOf,
+    blockedBy, reachable,
+    // 层级（第 3 步）：增删 parent 边时内部会同步 parent_id + 重算祖先状态，
+    // 这里把只读的那几个（childrenOf / subtreeStats / recomputeStatus）也开出去，
+    // 服务端和测试要能单独验它们。
+    childrenOf, childCount, subtreeStats, recomputeStatus, deriveStatus, MAX_DEPTH,
     mergeTasks, splitTask, revertMerge,
     pushMessage, listMessages, recentMessages, clearMessages, setBrief,
     listProjects, getProject, addProject, updateProject, deleteProject, findProject, ensureProject,

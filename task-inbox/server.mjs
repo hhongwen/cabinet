@@ -668,6 +668,98 @@ export function createHandler(core, opts = {}) {
         }
       }
 
+      // ---------- 依赖（depends_on）----------
+      //
+      // 三个入口都挂在 /api/tasks/:id/ 下面，所以必须早于单条任务路由。
+      // 方向按文档 1.4：**from_id 是等的人，to_id 是前置**。
+      // 这里只做转发，环检测和「前置没做完不能进 doing」都在 core 里 ——
+      // 校验放在路由层的话，CLI 那条路就绕过去了。
+      {
+        // 删一条：DELETE /api/tasks/:id/depends/:onId
+        // 写在建那条之前 —— 不带 onId 的正则匹配不上这个路径，顺序其实无所谓，
+        // 但先写长的更不容易在以后再改时踩到。
+        const dd = p.match(/^\/api\/tasks\/([^/]+)\/depends\/([^/]+)$/);
+        if (dd && (req.method === 'DELETE' || req.method === 'POST')) {
+          const id = decodeURIComponent(dd[1]);
+          const onId = decodeURIComponent(dd[2]);
+          const r = core.unlinkTasks(id, onId, 'depends_on');
+          if (!r.removed) return json(res, 404, { error: '这条依赖不存在' });
+          return json(res, 200, { ok: true, task: core.getTask(id) });
+        }
+        const dm = p.match(/^\/api\/tasks\/([^/]+)\/depends$/);
+        if (dm && req.method === 'POST') {
+          const id = decodeURIComponent(dm[1]);
+          const b = await readBody(req);
+          const onTaskId = String(b.onTaskId || b.toId || '').trim();
+          if (!onTaskId) return json(res, 400, { error: '要给 onTaskId（要等哪张卡）' });
+          // 成环在这里被抛出来，落到下面那个 catch —— 400 + 人话
+          core.linkTasks(id, onTaskId, 'depends_on', b.note);
+          return json(res, 200, { task: core.getTask(id), ...core.blockedBy(id) });
+        }
+        const bm = p.match(/^\/api\/tasks\/([^/]+)\/blocked$/);
+        if (bm && req.method === 'GET') {
+          const id = decodeURIComponent(bm[1]);
+          if (!core.getTask(id)) return json(res, 404, { error: '任务不存在' });
+          return json(res, 200, core.blockedBy(id));
+        }
+      }
+
+      // ---------- 层级（parent / child）----------
+      //
+      // 方向和依赖一样：**子 → 父**，`POST /api/tasks/:id/parent` 里的 `:id`
+      // 是子卡，body.parentId 是要挂上去的父卡。所以这里的路径读起来是
+      // 「把 :id 这张卡挂到 body 里那张下面」。
+      //
+      // 三条约束都不在这层：环检测 / 5 层上限 / 父卡状态派生全在 core 里，
+      // 路由只做转发 —— 校验写在路由里，CLI 和以后的批量操作就绕过去了。
+      {
+        const pm = p.match(/^\/api\/tasks\/([^/]+)\/parent$/);
+        if (pm) {
+          const id = decodeURIComponent(pm[1]);
+          if (req.method === 'POST') {
+            const b = await readBody(req);
+            const parentId = String(b.parentId || b.toId || '').trim();
+            if (!parentId) return json(res, 400, { error: '要给 parentId（挂到哪张卡下面）' });
+            // linkTasks 会对「换父卡」自己解掉旧边，并把两边状态重算一遍
+            const link = core.linkTasks(id, parentId, 'parent', b.note);
+            return json(res, 200, {
+              link,
+              task: core.getTask(id),
+              parent: core.getTask(parentId),
+              children: core.childrenOf(parentId),
+              subtree: core.subtreeStats(parentId)
+            });
+          }
+          if (req.method === 'DELETE') {
+            const t = core.getTask(id);
+            if (!t) return json(res, 404, { error: '任务不存在' });
+            if (!t.parent_id) return json(res, 404, { error: '这张卡没有上级' });
+            // 先记下父卡：解完边之后 task.parent_id 会被清空，就拿不到了
+            const upId = t.parent_id;
+            const r = core.unlinkTasks(id, upId, 'parent');
+            if (!r.removed) return json(res, 404, { error: '这条上下级关系不存在' });
+            return json(res, 200, {
+              ok: true,
+              task: core.getTask(id),
+              parent: core.getTask(upId),
+              children: core.childrenOf(upId),
+              subtree: core.subtreeStats(upId)
+            });
+          }
+        }
+
+        const cm = p.match(/^\/api\/tasks\/([^/]+)\/children$/);
+        if (cm && req.method === 'GET') {
+          const id = decodeURIComponent(cm[1]);
+          if (!core.getTask(id)) return json(res, 404, { error: '任务不存在' });
+          // subtree 是所有后代（卡片上的「3/5」），children 是直接子项（就地展开的清单）
+          return json(res, 200, {
+            children: core.childrenOf(id),
+            subtree: core.subtreeStats(id)
+          });
+        }
+      }
+
       // 单条任务 + 它的对话
       {
         const dm = p.match(/^\/api\/tasks\/([^/]+)$/);

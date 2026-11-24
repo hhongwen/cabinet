@@ -84,6 +84,11 @@ Linux 没专门适配，但选文件夹会**自动降级**到页面里逐层点�
 | 抽屉里点标题 | 就地改，Enter 保存 · Esc 取消 |
 | 抽屉「原始描述 → 编辑」 | 改原文，不影响附件和对话 |
 | 抽屉的对话框 | 贴图 / 拖文件都能发，纯文件不写字也行 |
+| 标题右边「看板 / 表格」 | 换一种画法，筛选和抽屉都是同一份 |
+| 卡片上「▾ 子项 2/5」 | 就地展开子项清单，点一条跳过去 |
+| 点表格一行 | 打开同一个抽屉 |
+| 点表格里的负责人 / 工时 / 计划日期 | 直接改，Enter 保存 · Esc 放弃 |
+| 点表头 | 按该列排序，再点反向 |
 | 侧栏 `‹` | 收起侧栏，左上角小按钮再展开 |
 | 按 `n` | 聚焦底栏 |
 | 按 `,` | 打开设置 |
@@ -396,10 +401,48 @@ Task Inbox 要的是「问一句拿个 JSON」，属于**调模型**不是**派 
 |---|---|---|
 | `merge_parent` | 合并后的卡 → 被合并的卡 | 我从哪来 |
 | `split_of` | 原卡 → 子卡 | 我拆出了谁 |
-| `parent` | 子 → 父 | 我属于谁（**第 3 步，未实现**） |
-| `depends_on` | 卡 → 前置卡 | 我要等谁（**第 2 步，未实现**） |
+| `parent` | 子 → 父 | 我属于谁 |
+| `depends_on` | 卡 → 前置卡 | 我要等谁 |
 
-设计判断见 [../docs/relations-and-table.md](../docs/relations-and-table.md)。
+设计判断和一串实现时踩到的坑见 [../docs/relations-and-table.md](../docs/relations-and-table.md)。
+
+### 层级（父子）
+
+卡片上会出现「▾ 子项 2/5」，点开就地展开一张子清单（最多 6 行）。
+**看板里不做缩进树** —— 三列会让父子跨列，缩进没意义；表格里才缩进。
+
+- 最多 **5 层**（根算第 1 层），第 6 层会提示「该拆项目，不是加深层级」
+- **有子项的卡，状态是派生的**：子项全 done 才 done，任一 doing 就 doing。
+  所以它的状态下拉是禁用的（后端也会拒）
+- 表格里才有真正的缩进 + 折叠
+
+### 依赖（前置）
+
+「这张要等那些做完」。卡片上出现【等 N】徽章，点开能看到在等谁。
+
+- **前置没做完时拖不进「进行中」/「已完成」**，会提示还等哪几条。
+  拦截在后端（`applyStatus`），CLI 和 HTTP 都绕不过
+- 往后退（回「未开始」）永远允许
+- **前置被合并掉算已完成** —— 否则那个下游永远卡住，又没有入口能解开
+- 前置被删除 / 被合并时，下游卡片上会留一行提示「原来的前置 X 没了，重新确认」
+
+### 表格视图
+
+标题右边有 **看板 / 表格** 切换。它不是新页面 —— 筛选、项目、待澄清/归档
+全部沿用同一套，切的只是画法，点一行打开的还是同一个抽屉。
+
+```
+编号   名称          状态    优先级   项目      负责人  预估  实际  计划开始    计划结束    关系
+T-001  检查部署状态   进行中  P1 紧急  诺华      —      —     —     —          —         —
+T-014  表父卡       未开始  P2 常规  Cabinet   张工    8     6.5   11-25      11-30      【合】
+  T-015  子项一       已完成  P2 常规  Cabinet   —      —     —     —          —         —
+```
+
+- **负责人 / 预估工时 / 实际工时 / 计划开始 / 计划结束 可以直接点格子改**
+  （Enter 保存、Esc 放弃、值没变不发请求）
+- 点表头排序，再点一次反向；空值一律排最后
+- 有子项的行缩进 16px/层，箭头折叠
+- 表格是内容层，**不用玻璃**；表头 sticky，窄屏横向滚动不挤
 
 ---
 
@@ -431,7 +474,7 @@ Task Inbox 要的是「问一句拿个 JSON」，属于**调模型**不是**派 
 | `settings` | 通道、模型、`archive_after_days` 这类键值 |
 | `meta` | 库版本号，迁移用 |
 
-**schema 版本**：现在 **v5**。加字段时 `SCHEMA_VERSION +1` 并在 `MIGRATIONS` 里补一条，
+**schema 版本**：现在 **v8**。加字段时 `SCHEMA_VERSION +1` 并在 `MIGRATIONS` 里补一条，
 **一次改动只占一个号** —— 分两次加字段时，后落地的那条会被
 `fromVersion < SCHEMA_VERSION` 跳过，字段永远补不上。
 
@@ -440,6 +483,9 @@ v2  needs_project
 v3  dev_ready / archived_at / messages.attachments / projects.sort_order
 v4  dev_gaps
 v5  links 表 + tasks.merged_into / tasks.split_state
+v6  tasks.link_warn（前置断开时给下游留一句提示）
+v7  tasks.parent_id + idx_tasks_parent（层级）
+v8  seq_no / plan_start_at / plan_end_at / owner / estimate_hours / actual_hours（表格）
 ```
 
 老数据自动迁移：建库时如果目录里还有 `tasks.json` 而且 `tasks` 表是空的，
@@ -570,7 +616,7 @@ node style-audit.mjs
 ### 测试
 
 ```bash
-node test-sqlite.mjs    # 存储层 + schema 迁移 + 卡片关系，220 项
+node test-sqlite.mjs    # 存储层 + schema 迁移 + 卡片关系 + 层级 + 表格字段，362 项
 node test-parsers.mjs   # classify / chat 解析层 + 队列路由，86 项，不碰真模型
 node style-audit.mjs    # 界面样式规范
 ```

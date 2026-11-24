@@ -154,7 +154,7 @@ export function openSqlite(file) {
 // ---------- schema ----------
 
 // 版本号存在 meta 里。加字段时：把 SCHEMA_VERSION +1，在 MIGRATIONS 里补一条。
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 8;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -196,6 +196,17 @@ CREATE TABLE IF NOT EXISTS tasks (
   archived_at     TEXT,                          -- NULL = 未归档
   merged_into     TEXT,                          -- 被合并进的卡片 id（NULL = 没被合并）
   split_state     TEXT,                          -- 预留：拆分状态（本轮不写，恒 NULL）
+  link_warn       TEXT NOT NULL DEFAULT '',      -- 前置被删/合并后的提示（看过就清空）
+  parent_id       TEXT,                          -- 冗余的父卡 id（跟着 parent 边同步，单值）
+  -- v8：表格视图要的 6 个业务字段。doing_at / done_at 是**事实**，
+  -- plan_* 是**意图**，两回事，绝不合并。
+  seq_no          INTEGER,                       -- 短编号（显示成 T-001）。唯一性不靠 UNIQUE 约束，
+                                                 -- 见 MIGRATIONS[7] 的说明
+  plan_start_at   TEXT,                          -- 计划开始 YYYY-MM-DD
+  plan_end_at     TEXT,                          -- 计划结束 YYYY-MM-DD
+  owner           TEXT,                          -- 需求负责人
+  estimate_hours  REAL,                          -- 预估工时
+  actual_hours    REAL,                          -- 实际工时
   created_at      TEXT NOT NULL,
   updated_at      TEXT NOT NULL,
   doing_at        TEXT,
@@ -205,6 +216,9 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE INDEX IF NOT EXISTS idx_tasks_sort    ON tasks(priority, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tasks_status  ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
+-- idx_tasks_parent 不放在这里：它引用的 parent_id 是 v7 才有的列，
+-- 而 db.exec(SCHEMA) 在迁移之前跑 —— 写在 SCHEMA 里会让 v6 老库升级时
+-- 卡在「no such column: parent_id」。那条索引由 MIGRATIONS[6] 和新库分支各自建。
 
 CREATE TABLE IF NOT EXISTS messages (
   id          TEXT PRIMARY KEY,
@@ -316,6 +330,86 @@ CREATE INDEX IF NOT EXISTS idx_links_to   ON links(kind, to_id);`);
     };
     addColumn('merged_into', 'merged_into TEXT');
     addColumn('split_state', 'split_state TEXT');
+  },
+
+  // v5 → v6：依赖（depends_on）的前置断开提示
+  //
+  // 前置卡被删除 / 被合并时，那条边会被级联清掉（ON DELETE CASCADE），
+  // 但「这条约束曾经存在过」这件事不该静默消失 —— 下游卡上留一行提示，
+  // 让人重新确认依赖关系。只加这一列，依赖关系本身仍然活在 links 表里。
+  5: (db) => {
+    const cols = db.all('PRAGMA table_info(tasks)').map((c) => c.name);
+    if (!cols.includes('link_warn')) {
+      db.exec("ALTER TABLE tasks ADD COLUMN link_warn TEXT NOT NULL DEFAULT ''");
+    }
+  },
+
+  // v6 → v7：层级（parent / child）的冗余父卡 id
+  //
+  // parent 关系本身活在 links 表里（kind = 'parent'，方向：子 → 父）。
+  // 但看板每帧都要判断「这张卡有没有父卡、要不要显示折叠箭头」，
+  // 走 links join 会把 state() 那条已经够复杂的 SQL 再搅一遍；
+  // 而 parent_id 是**单值**（一张卡只能有一个父卡），跟着 parent 边同步，
+  // 冗余成本很低 —— 一个 TEXT 列 + 一个索引，换掉每帧一次 join。
+  //
+  // 回填：从已有的 parent 边刷一遍。现在真库里还没有这种边（第 3 步才落地），
+  // 但迁移必须写成幂等的 —— 万一哪次手工插过边、或者以后又有人把这个
+  // 版本重跑一遍，结果都得一样：parent_id 和 parent 边完全一致。
+  6: (db) => {
+    const cols = db.all('PRAGMA table_info(tasks)').map((c) => c.name);
+    if (!cols.includes('parent_id')) {
+      db.exec('ALTER TABLE tasks ADD COLUMN parent_id TEXT');
+    }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)');
+
+    // 先清空，再按边回填 —— 只回填、不清空的话，边已经被删掉的卡会留着一个
+    // 指向空气的 parent_id，"有没有子项"就会一直算错
+    db.exec('UPDATE tasks SET parent_id = NULL');
+    db.exec(`
+      UPDATE tasks SET parent_id = (
+        SELECT l.to_id FROM links l
+         WHERE l.kind = 'parent' AND l.from_id = tasks.id
+         ORDER BY l.created_at, l.rowid LIMIT 1
+      )
+      WHERE EXISTS (SELECT 1 FROM links l WHERE l.kind = 'parent' AND l.from_id = tasks.id)`);
+  },
+
+  // v7 → v8：表格视图的 6 个业务字段
+  //
+  // 表格是「同一份数据的第二种渲染」，缺的不是布局而是列 —— 编号、计划时间、
+  // 负责人、工时这些业务字段以前根本没有地方存。这批一次加完，理由和 v2 那条
+  // 一样：分开升版本，后落地的那个落地时会把先落的那个跳过去。
+  //
+  // `seq_no` 的唯一性**不靠 UNIQUE 约束**：SQLite 给已存在的表加 UNIQUE 只能
+  // 走「建新表 + 拷数据 + 改名」，那一步没有幂等写法，中途失败会留下半张表。
+  // 改成「插入时算 MAX(seq_no)+1」（core.mjs 的 add()），代价是并发插入理论上
+  // 会撞号，而这个应用是单进程单用户、写入口只有 add()，撞不到。
+  //
+  // 回填按 `created_at, rowid` 排序 —— created_at 相同（同一毫秒里批量收进来的）
+  // 时靠 rowid 兜出一个稳定顺序，否则重跑一次这个迁移号的分配就变了。
+  // 只用 `WHERE seq_no IS NULL`，且起点接在已有最大值后面：整体回填时正好是
+  // 1..N，部分已填时不会和现有编号撞车。
+  7: (db) => {
+    const addColumn = (column, ddl) => {
+      const cols = db.all('PRAGMA table_info(tasks)').map((c) => c.name);
+      if (!cols.includes(column)) db.exec('ALTER TABLE tasks ADD COLUMN ' + ddl);
+    };
+    addColumn('seq_no', 'seq_no INTEGER');
+    addColumn('plan_start_at', 'plan_start_at TEXT');
+    addColumn('plan_end_at', 'plan_end_at TEXT');
+    addColumn('owner', 'owner TEXT');
+    addColumn('estimate_hours', 'estimate_hours REAL');
+    addColumn('actual_hours', 'actual_hours REAL');
+
+    db.exec(`
+      WITH base AS (
+        SELECT COALESCE(MAX(seq_no), 0) AS m FROM tasks WHERE seq_no IS NOT NULL
+      ), numbered AS (
+        SELECT id, (SELECT m FROM base) + ROW_NUMBER() OVER (ORDER BY created_at, rowid) AS rn
+          FROM tasks WHERE seq_no IS NULL
+      )
+      UPDATE tasks SET seq_no = (SELECT rn FROM numbered WHERE numbered.id = tasks.id)
+       WHERE seq_no IS NULL`);
   }
 };
 
@@ -333,7 +427,8 @@ export function applySchema(db) {
   db.exec(SCHEMA);   // 全部 CREATE TABLE IF NOT EXISTS，对老库是空操作
 
   if (fromVersion === null) {
-    // 新库：SCHEMA 已经建全，直接记版本号
+    // 新库：SCHEMA 已经建全，只差那条不能写进 SCHEMA 的索引（见上面注释）
+    db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)');
     db.run('INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)', ['schema_version', String(SCHEMA_VERSION)]);
     return db;
   }
@@ -421,8 +516,9 @@ export function migrateFromJson(db, dataDir, opts = {}) {
         `INSERT OR REPLACE INTO tasks
            (id, title, kind, payload, project, project_id, category, status, priority, note, source,
             brief, brief_at, classify_state, classify_reason, classify_model, claimed_by,
-            dev_ready, dev_gaps, archived_at, created_at, updated_at, doing_at, done_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+            dev_ready, dev_gaps, archived_at, seq_no, owner, estimate_hours, actual_hours,
+            plan_start_at, plan_end_at, created_at, updated_at, doing_at, done_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [
           t.id, t.title, t.kind, JSON.stringify(t.payload || {}), t.project, pid,
           t.category || '', t.status || 'todo', t.priority || 'p3', t.note || '', t.source || 'chat',
@@ -433,6 +529,13 @@ export function migrateFromJson(db, dataDir, opts = {}) {
           t.dev_ready === 0 || t.dev_ready === false ? 0 : 1,
           JSON.stringify(Array.isArray(t.dev_gaps) ? t.dev_gaps : []),
           t.archived_at || null,
+          // v8 那 6 个：exportAll 会带，所以原样倒回去时编号和工时都不丢；
+          // 老 tasks.json 没有它们，缺的（null）在循环结束后统一回填。
+          Number.isFinite(Number(t.seq_no)) && Number(t.seq_no) > 0 ? Number(t.seq_no) : null,
+          t.owner || null,
+          Number.isFinite(Number(t.estimate_hours)) && Number(t.estimate_hours) >= 0 ? Number(t.estimate_hours) : null,
+          Number.isFinite(Number(t.actual_hours)) && Number(t.actual_hours) >= 0 ? Number(t.actual_hours) : null,
+          t.plan_start_at || null, t.plan_end_at || null,
           t.created_at, t.updated_at, t.doing_at || null, t.done_at || null
         ]
       );
@@ -457,6 +560,20 @@ export function migrateFromJson(db, dataDir, opts = {}) {
         msgCount++;
       }
     }
+
+    // v8 的短编号回填：从 JSON 导入的任务没有 seq_no（老文件里没有这一列），
+    // 按 created_at, rowid 排一遍补上 —— 和 MIGRATIONS[7] 的回填是同一个规则。
+    // 有些任务可能从 exportAll 的导出里带着 seq_no 回来，所以起点接在
+    // 已有最大值后面，不是从 1 硬来（否则会和带回来的编号撞车）。
+    db.exec(`
+      WITH base AS (
+        SELECT COALESCE(MAX(seq_no), 0) AS m FROM tasks WHERE seq_no IS NOT NULL
+      ), numbered AS (
+        SELECT id, (SELECT m FROM base) + ROW_NUMBER() OVER (ORDER BY created_at, rowid) AS rn
+          FROM tasks WHERE seq_no IS NULL
+      )
+      UPDATE tasks SET seq_no = (SELECT rn FROM numbered WHERE numbered.id = tasks.id)
+       WHERE seq_no IS NULL`);
 
     // settings.json 一并搬进来（如果存在），然后由调用方决定改名
     const settingsFile = path.join(dataDir, 'settings.json');

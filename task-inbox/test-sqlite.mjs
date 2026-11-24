@@ -695,13 +695,471 @@ console.log('\n=== 17. 卡片关系：合并 / 拆分 ===');
   })());
 }
 
+console.log('\n=== 20. 层级（parent / child） ===');
+{
+  // ---- v6 → v7 迁移 ----
+  // 先删索引再删列：SQLite 不允许删掉还挂在索引里的列，
+  // 而 MIGRATIONS[6] 会重建这个索引 —— 所以降级要成套做。
+  core.conn().exec('DROP INDEX IF EXISTS idx_tasks_parent');
+  core.conn().exec('ALTER TABLE tasks DROP COLUMN parent_id');
+  core.conn().run("UPDATE meta SET value='6' WHERE key='schema_version'");
+  ok('降级成功（parent_id 没了）',
+    !core.conn().all('PRAGMA table_info(tasks)').map((c) => c.name).includes('parent_id'));
+
+  const v7 = createCore(tmp);
+  v7.init();
+  ok('tasks.parent_id 回来了',
+    v7.conn().all('PRAGMA table_info(tasks)').map((c) => c.name).includes('parent_id'));
+  eq('版本升到当前版本',
+    v7.conn().get("SELECT value FROM meta WHERE key='schema_version'").value, String(SCHEMA_VERSION));
+  ok('老任务 parent_id 都是 null',
+    v7.state({ include_archived: true }).tasks.every((t) => t.parent_id === null));
+  v7.close();
+}
+
+{
+  // ---- 建边 / 派生字段 ----
+  const p = core.add({ title: '父卡P', project: '层级样本' });
+  const c1 = core.add({ title: '子项C1', project: '层级样本' });
+  const c2 = core.add({ title: '子项C2', project: '层级样本' });
+  const c3 = core.add({ title: '子项C3', project: '层级样本' });
+
+  core.linkTasks(c1.id, p.id, 'parent');
+  core.linkTasks(c2.id, p.id, 'parent');
+  core.linkTasks(c3.id, p.id, 'parent');
+
+  eq('子卡的 parent_id 指向父卡', core.getTask(c1.id).parent_id, p.id);
+  const kids = core.childrenOf(p.id);
+  eq('childrenOf 返回 3 个', kids.length, 3);
+  eq('父卡 child_count 是 3', core.getTask(p.id).child_count, 3);
+  ok('父卡 has_children 为真', core.getTask(p.id).has_children === true);
+  eq('子卡没有 has_children', core.getTask(c1.id).has_children, false);
+  eq('subtree 初始全是 todo', core.getTask(p.id).subtree.todo, 3);
+
+  // ---- 状态派生：2 done + 1 todo → 父卡仍是 todo ----
+  core.move(c1.id, 'done');
+  core.move(c2.id, 'done');
+  eq('2/3 完成时父卡还是 todo', core.getTask(p.id).status, 'todo');
+  eq('subtree 反映 2 个 done', core.getTask(p.id).subtree.done, 2);
+
+  // 全部 done → 父卡自动 done
+  core.move(c3.id, 'done');
+  eq('子项全 done 后父卡自动 done', core.getTask(p.id).status, 'done');
+  ok('派生 done 也写了 done_at（否则归档漏掉它）', !!core.getTask(p.id).done_at);
+
+  // ---- 有子项的卡不能手改 status ----
+  let locked = null;
+  try { core.patch(p.id, { status: 'doing' }); } catch (e) { locked = e.message; }
+  ok('有子项的卡改 status 被拒', locked !== null);
+  ok('错误话说清了原因', /子项/.test(String(locked)));
+
+  // ---- 取消一个子项的 done → 父卡跟着回退 ----
+  core.move(c1.id, 'todo');
+  eq('取消一个子项后父卡退回 todo', core.getTask(p.id).status, 'todo');
+  eq('派生回退时清掉 done_at', core.getTask(p.id).done_at, null);
+
+  // ---- 祖先传播：孙卡影响爷爷 ----
+  const g = core.add({ title: '祖父G', project: '层级样本' });
+  const mid = core.add({ title: '中间M', project: '层级样本' });
+  const leaf = core.add({ title: '叶子L', project: '层级样本' });
+  core.linkTasks(mid.id, g.id, 'parent');
+  core.linkTasks(leaf.id, mid.id, 'parent');
+  ok('三层建得起来', core.getTask(leaf.id).parent_id === mid.id);
+  core.move(leaf.id, 'done');
+  eq('叶子 done → 中间 done', core.getTask(mid.id).status, 'done');
+  eq('叶子 done → 祖父也 done', core.getTask(g.id).status, 'done');
+
+  // ---- 环检测 ----
+  let cycle = null;
+  try { core.linkTasks(g.id, leaf.id, 'parent'); } catch (e) { cycle = e.message; }
+  ok('父子成环被拒', cycle !== null);
+
+  // ---- 深度上限 5 层 ----
+  // 根算第 1 层，所以「深0..深4」正好 5 层，挂得上；
+  // 再挂「深5」就是第 6 层，必须被拒。
+  const chain = [];
+  let cur = core.add({ title: '深0', project: '层级样本' });
+  chain.push(cur.id);
+  for (let i = 1; i <= 4; i++) {
+    const n = core.add({ title: '深' + i, project: '层级样本' });
+    core.linkTasks(n.id, cur.id, 'parent');
+    chain.push(n.id);
+    cur = n;
+  }
+  eq('5 层能建起来', chain.length, 5);
+
+  const tooDeep = core.add({ title: '深5', project: '层级样本' });
+  let deep = null;
+  try { core.linkTasks(tooDeep.id, cur.id, 'parent'); } catch (e) { deep = e.message; }
+  ok('第 6 层被拒', deep !== null);
+  ok('错误信息提到了拆项目', /拆项目|5 层/.test(String(deep)));
+
+  // ---- 解除父子 ----
+  core.unlinkTasks(c3.id, p.id, 'parent');
+  eq('解除后子卡 parent_id 清空', core.getTask(c3.id).parent_id, null);
+  eq('解除后父卡少一个子项', core.getTask(p.id).child_count, 2);
+
+  // 还有子项时仍然是只读的 —— 这是对的行为，别把「少了一个」当「没有子项了」
+  let stillLocked = null;
+  try { core.patch(p.id, { status: 'doing' }); } catch (e) { stillLocked = e.message; }
+  ok('还剩 2 个子项时仍然只读', stillLocked !== null);
+
+  // 全部解除后才是自由的
+  core.unlinkTasks(c1.id, p.id, 'parent');
+  core.unlinkTasks(c2.id, p.id, 'parent');
+  eq('全部解除后 child_count 归零', core.getTask(p.id).child_count, 0);
+  ok('全部解除后父卡可以手改状态', (() => {
+    try { core.patch(p.id, { status: 'todo' }); return true; } catch { return false; }
+  })());
+
+  // ---- 删父卡：子卡 parent_id 要清 ----
+  const dp = core.add({ title: '待删父卡', project: '层级样本' });
+  const dc = core.add({ title: '待删子卡', project: '层级样本' });
+  core.linkTasks(dc.id, dp.id, 'parent');
+  core.remove(dp.id);
+  eq('删父卡后子卡 parent_id 清空', core.getTask(dc.id).parent_id, null);
+  ok('删父卡后子卡还在', !!core.getTask(dc.id));
+}
+
 console.log('\n=== 18. 重开后数据还在 ===');
 const totalBefore = core.count();
 core.close();
 const core2 = createCore(tmp);
 eq('重开后任务数一致', core2.count(), totalBefore);
 ok('重开后数据非空', core2.count() > 0);
-core2.close();
+
+console.log('\n=== 19. 依赖关系 ===');
+{
+  // ---- 19.1 v5 → v6 迁移 ----
+  // 这一步要 DROP 列，所以先把 core2 关掉独占这个库。
+  core2.close();
+  {
+    const cols0 = createCore(tmp);
+    cols0.init();
+    cols0.conn().exec('ALTER TABLE tasks DROP COLUMN link_warn');
+    cols0.conn().run("UPDATE meta SET value='5' WHERE key='schema_version'");
+    ok('降级成功（link_warn 没了）',
+      !cols0.conn().all('PRAGMA table_info(tasks)').map((c) => c.name).includes('link_warn'));
+    cols0.close();
+
+    const v6 = createCore(tmp);
+    v6.init();
+    ok('tasks.link_warn 回来了',
+      v6.conn().all('PRAGMA table_info(tasks)').map((c) => c.name).includes('link_warn'));
+    // 这一步只验「v5 → v6 那批列补回来了」，版本号本身跟着 SCHEMA_VERSION 走：
+    // 后面每加一步都会往上抬，写死 6 会让所有后续迁移都得回来改这两行。
+    eq('版本升到当前版本', v6.conn().get("SELECT value FROM meta WHERE key='schema_version'").value, String(SCHEMA_VERSION));
+    ok('SCHEMA_VERSION ≥ 6（v6 那批迁移必须已经存在）', SCHEMA_VERSION >= 6, String(SCHEMA_VERSION));
+    ok('老任务的 link_warn 是空串',
+      v6.state({ include_archived: true }).tasks.every((t) => t.link_warn === ''));
+    v6.close();
+  }
+
+  // 后面都在这份升级完的库上跑
+  const dep = createCore(tmp);
+  dep.init();
+
+  // ---- 19.2 建边 + blockedBy ----
+  {
+    const p = dep.add({ title: '前置：RIS 表对接' });
+    const d = dep.add({ title: '通知：架构变更定时检查' });
+    dep.linkTasks(d.id, p.id, 'depends_on');
+
+    const b = dep.blockedBy(d.id);
+    ok('建 depends_on 边后 blocked', b.blocked === true);
+    eq('waiting 里就是那条前置', b.waiting.map((x) => x.id), [p.id]);
+    eq('waiting 项带标题', b.waiting[0].title, '前置：RIS 表对接');
+    ok('waiting 项带 status/project',
+      b.waiting[0].status === 'todo' && typeof b.waiting[0].project === 'string');
+    ok('前置自己不被阻塞', dep.blockedBy(p.id).blocked === false);
+
+    // ---- 19.3 前置做完就不阻塞 ----
+    dep.move(p.id, 'done');
+    ok('前置 done 之后不再 blocked', dep.blockedBy(d.id).blocked === false);
+    eq('waiting 清空', dep.blockedBy(d.id).waiting.length, 0);
+    ok('done 之后可以进 doing', dep.move(d.id, 'doing').status === 'doing');
+
+    // ---- 19.4 前置没做完时 move 被拦 ----
+    const p2 = dep.add({ title: '前置：埋点上报' });
+    const d2 = dep.add({ title: '通知：等埋点' });
+    dep.linkTasks(d2.id, p2.id, 'depends_on');
+    let errDoing = null;
+    try { dep.move(d2.id, 'doing'); } catch (e) { errDoing = e.message; }
+    ok('前置没做完时进 doing 被拒', errDoing !== null);
+    ok('错误信息里带前置标题', /前置：埋点上报/.test(String(errDoing)), String(errDoing));
+    ok('错误信息里带条数', /还有 1 条前置没做完/.test(String(errDoing)), String(errDoing));
+
+    let errDone = null;
+    try { dep.move(d2.id, 'done'); } catch (e) { errDone = e.message; }
+    ok('前置没做完时直接标 done 也被拒', errDone !== null);
+
+    // patch 那条路同样被拦（不是只有 move 拦）
+    let errPatch = null;
+    try { dep.patch(d2.id, { status: 'doing' }); } catch (e) { errPatch = e.message; }
+    ok('patch 改状态同样被拦', errPatch !== null);
+
+    // ---- 19.9 往回退永远允许 ----
+    // d2 现在是 todo 且被拦住；先让它进 doing 再从 doing 退回 todo 也不该被拦，
+    // 所以这里用另一条已经 doing 的卡补一条前置来验证「退回去不受限」。
+    const d3 = dep.add({ title: '已经在做的卡' });
+    dep.move(d3.id, 'doing');
+    const p3 = dep.add({ title: '后补的前置' });
+    dep.linkTasks(d3.id, p3.id, 'depends_on');
+    ok('补前置后立刻算 blocked', dep.getTask(d3.id).blocked === true);
+    ok('blocked 的卡退回去不被拦', dep.move(d3.id, 'todo').status === 'todo');
+
+    // ---- 19.5 前置被合并 → 不再算阻塞 ----
+    const p4 = dep.add({ title: '前置：会被合并的' });
+    const p5 = dep.add({ title: '前置：合并的另一半' });
+    const d4 = dep.add({ title: '下游：等一条会被合并的前置' });
+    dep.linkTasks(d4.id, p4.id, 'depends_on');
+    ok('合并前 blocked', dep.blockedBy(d4.id).blocked === true);
+    const mergedDep = dep.mergeTasks([p4.id, p5.id], { title: '合并出来的前置' });
+    ok('被合并的前置不再算阻塞', dep.blockedBy(d4.id).blocked === false);
+    eq('waiting 清空', dep.blockedBy(d4.id).waiting.length, 0);
+    ok('下游卡因此可以进 doing', dep.move(d4.id, 'doing').status === 'doing');
+    ok('前置被合并时下游留了提示', dep.getTask(d4.id).link_warn.trim().length > 0);
+    ok('提示里说清是「合并」',
+      /原来的前置「前置：会被合并的」被合并了/.test(dep.getTask(d4.id).link_warn),
+      dep.getTask(d4.id).link_warn);
+
+    // ---- 19.6 环检测 ----
+    const c1 = dep.add({ title: '环A' });
+    const c2 = dep.add({ title: '环B' });
+    dep.linkTasks(c1.id, c2.id, 'depends_on');
+    let cyc = null;
+    try { dep.linkTasks(c2.id, c1.id, 'depends_on'); } catch (e) { cyc = e.message; }
+    ok('反向再加一条被拒（成环）', cyc !== null);
+    ok('错误信息说清了是依赖成环', /依赖关系会成环/.test(String(cyc)), String(cyc));
+    eq('被拒之后边没写进去', dep.listLinks(c2.id).asFrom.length, 0);
+
+    // 三节点的间接环也要拦住：A 等 B、B 等 C，再加 C 等 A
+    const c3 = dep.add({ title: '环C' });
+    dep.linkTasks(c2.id, c3.id, 'depends_on');
+    let cyc3 = null;
+    try { dep.linkTasks(c3.id, c1.id, 'depends_on'); } catch (e) { cyc3 = e.message; }
+    ok('间接环（三节点）也被拒', cyc3 !== null);
+
+    // 自己连自己被拒
+    let selfDep = null;
+    try { dep.linkTasks(c1.id, c1.id, 'depends_on'); } catch (e) { selfDep = e.message; }
+    ok('不能自己依赖自己', selfDep !== null);
+
+    // 两种 kind 的链不能混着爬：合并链上的人不该被当成依赖链上的祖先
+    const m1 = dep.add({ title: '混合样本M1' });
+    const m2 = dep.add({ title: '混合样本M2' });
+    const mm = dep.mergeTasks([m1.id, m2.id], { title: '混合合并M' });
+    // mm → m1 是 merge_parent 边；再加 m1 → mm 的依赖不该因为「合并链上有 mm」被拒
+    let crossKind = null;
+    try { dep.linkTasks(m1.id, mm.id, 'depends_on'); } catch (e) { crossKind = e.message; }
+    ok('merge 链不参与 depends_on 的环检测', crossKind === null, String(crossKind));
+    dep.unlinkTasks(m1.id, mm.id, 'depends_on');
+
+    // ---- 19.7 state() 里的派生字段 ----
+    const s1 = dep.add({ title: '派生：等的那个' });
+    const s2 = dep.add({ title: '派生：前置一' });
+    const s3 = dep.add({ title: '派生：前置二' });
+    dep.linkTasks(s1.id, s2.id, 'depends_on');
+    dep.linkTasks(s1.id, s3.id, 'depends_on');
+    const st = dep.state({ include_archived: true });
+    const byId = new Map(st.tasks.map((t) => [t.id, t]));
+    ok('state 里 s1 是 blocked', byId.get(s1.id).blocked === true);
+    eq('s1 的 waiting_count', byId.get(s1.id).waiting_count, 2);
+    eq('s1 的 blocking_count', byId.get(s1.id).blocking_count, 0);
+    eq('s2 的 blocking_count', byId.get(s2.id).blocking_count, 1);
+    eq('s3 的 blocking_count', byId.get(s3.id).blocking_count, 1);
+    ok('s2 自己不被阻塞', byId.get(s2.id).blocked === false);
+    eq('s2 的 waiting_count', byId.get(s2.id).waiting_count, 0);
+    ok('list() 里也有这些字段', (() => {
+      const one = dep.list({ include_archived: true }).tasks.find((t) => t.id === s1.id);
+      return one.blocked === true && one.waiting_count === 2 && one.blocking_count === 0;
+    })());
+    ok('getTask 也带上（抽屉读这一份）', dep.getTask(s1.id).blocked === true);
+    eq('link_counts.depends_on 两个方向都算',
+      dep.getTask(s1.id).link_counts.depends_on, 2);
+
+    // s2 做完之后 s1 只剩 1 条
+    dep.move(s2.id, 'done');
+    eq('一条前置做完后 waiting_count 降下来', dep.getTask(s1.id).waiting_count, 1);
+    ok('还有一条没做完时仍然 blocked', dep.getTask(s1.id).blocked === true);
+
+    // ---- 19.8 删掉前置 → link_warn ----
+    const w1 = dep.add({ title: '下游：前置会被删' });
+    const w2 = dep.add({ title: '前置：马上被删' });
+    dep.linkTasks(w1.id, w2.id, 'depends_on');
+    ok('删之前没有被删提示', dep.getTask(w1.id).link_warn === '');
+    dep.remove(w2.id);
+    const warned = dep.getTask(w1.id).link_warn;
+    ok('删掉前置后下游有 link_warn', warned.trim().length > 0, JSON.stringify(warned));
+    ok('提示里说清是「删除」并带标题', /原来的前置「前置：马上被删」被删除了/.test(warned), warned);
+    ok('删完之后不再 blocked', dep.getTask(w1.id).blocked === false);
+
+    // 看过就清：PATCH link_warn 成空串
+    eq('link_warn 能清空', dep.patch(w1.id, { link_warn: '' }).link_warn, '');
+    // 只清这一句，不动别的字段
+    ok('清提示不影响标题', dep.getTask(w1.id).title === '下游：前置会被删');
+  }
+
+  dep.close();
+}
+
+console.log('\n=== 21. 表格字段（v8：seq_no / plan_* / owner / *_hours） ===');
+{
+  // ---- 21.1 v7 → v8 迁移 ----
+  // 降级：把 6 个列 DROP 掉、版本写回 7。
+  // 这 6 列没有索引也没有约束挂在上面，所以 SQLite 的 DROP COLUMN 能直接做
+  // （parent_id 那次不行，因为它带索引，得先删索引）。
+  const v7 = createCore(tmp);
+  v7.init();
+  const DROP8 = ['seq_no', 'plan_start_at', 'plan_end_at', 'owner', 'estimate_hours', 'actual_hours'];
+  for (const c of DROP8) {
+    try { v7.conn().exec('ALTER TABLE tasks DROP COLUMN ' + c); } catch { /* 已经没有 */ }
+  }
+  v7.conn().run("UPDATE meta SET value='7' WHERE key='schema_version'");
+  const colsOf = (c) => c.conn().all('PRAGMA table_info(tasks)').map((x) => x.name);
+  ok('降级成功（6 列都没了）', DROP8.every((c) => !colsOf(v7).includes(c)),
+    DROP8.filter((c) => colsOf(v7).includes(c)).join(','));
+  const totalBefore = Number(v7.conn().get('SELECT COUNT(*) AS c FROM tasks').c);
+  ok('降级不会删数据', totalBefore > 0, String(totalBefore));
+  v7.close();
+
+  const v8 = createCore(tmp);
+  v8.init();
+  ok('tasks 的 6 个列回来了', DROP8.every((c) => colsOf(v8).includes(c)));
+  eq('版本升到 8', v8.conn().get("SELECT value FROM meta WHERE key='schema_version'").value, '8');
+  eq('SCHEMA_VERSION 就是 8', SCHEMA_VERSION, 8);
+  eq('迁移不动任务条数', Number(v8.conn().get('SELECT COUNT(*) AS c FROM tasks').c), totalBefore);
+
+  // ---- 21.2 老任务的 seq_no 回填 ----
+  const seqs = v8.conn().all('SELECT seq_no FROM tasks ORDER BY seq_no').map((r) => Number(r.seq_no));
+  eq('每条任务都有 seq_no', seqs.length, totalBefore);
+  ok('seq_no 没有 null', seqs.every((n) => Number.isFinite(n) && n > 0), JSON.stringify(seqs.slice(0, 5)));
+  eq('seq_no 从 1 开始', seqs[0], 1);
+  eq('seq_no 不重复', new Set(seqs).size, seqs.length);
+  // 回填按 created_at, rowid 顺序：最早建的那条拿到 1
+  const earliest = v8.conn().get('SELECT id, seq_no FROM tasks ORDER BY created_at, rowid LIMIT 1');
+  eq('最早的卡拿到 T-001', earliest.seq_no, 1);
+  ok('迁移后派生字段 no 也对得上',
+    v8.state({ include_archived: true }).tasks.every((t) => t.no === 'T-' + String(t.seq_no).padStart(3, '0')));
+
+  // 幂等：再跑一次 init 不会把编号重排/洗掉
+  const before2 = v8.conn().all('SELECT id, seq_no FROM tasks ORDER BY id').map((r) => r.id + ':' + r.seq_no);
+  v8.init();
+  const after2 = v8.conn().all('SELECT id, seq_no FROM tasks ORDER BY id').map((r) => r.id + ':' + r.seq_no);
+  eq('重跑 init 不动已有 seq_no', after2, before2);
+  v8.close();
+
+  // 后面在这份升级完的库上跑
+  const tt = createCore(tmp);
+  tt.init();
+
+  // ---- 21.3 新任务 seq_no = MAX + 1 ----
+  const maxSeq = Number(tt.conn().get('SELECT MAX(seq_no) AS m FROM tasks').m);
+  const n1 = tt.add({ title: '表格样本一', project: '表格样本' });
+  eq('新任务 seq_no = MAX+1', n1.seq_no, maxSeq + 1);
+  const n2 = tt.add({ title: '表格样本二', project: '表格样本' });
+  eq('再建一条继续 +1', n2.seq_no, maxSeq + 2);
+  eq('add 返回里带派生 no', n2.no, 'T-' + String(maxSeq + 2).padStart(3, '0'));
+  eq('落库的 seq_no 也是这个', Number(tt.conn().get('SELECT seq_no FROM tasks WHERE id=?', [n2.id]).seq_no), maxSeq + 2);
+
+  // ---- 21.7 编号派生串 ----
+  const t1 = tt.conn().get('SELECT id FROM tasks WHERE seq_no = 1');
+  eq('seq_no=1 派生 T-001', tt.getTask(t1.id).no, 'T-001');
+  ok('低于 100 的补零见到 3 位', /^T-\d{3,}$/.test(tt.getTask(t1.id).no), tt.getTask(t1.id).no);
+
+  // ---- 21.4 patch 能写 5 个字段，seq_no 不行 ----
+  const p = tt.patch(n1.id, {
+    owner: ' 韩宏文 ',
+    estimate_hours: 3.5,
+    actual_hours: '2',
+    plan_start_at: '2026-03-05',
+    plan_end_at: '2026-03-09'
+  });
+  eq('owner 写进去了（并去掉首尾空格）', p.owner, '韩宏文');
+  eq('estimate_hours 写进去了', p.estimate_hours, 3.5);
+  eq('actual_hours 字符串 "2" 存成数字 2', p.actual_hours, 2);
+  eq('plan_start_at 写进去了', p.plan_start_at, '2026-03-05');
+  eq('plan_end_at 写进去了', p.plan_end_at, '2026-03-09');
+
+  const seqBefore = tt.getTask(n1.id).seq_no;
+  const afterPatchSeq = tt.patch(n1.id, { seq_no: 9999 });
+  eq('seq_no 不可改（patch 忽略它）', afterPatchSeq.seq_no, seqBefore);
+  eq('库里 seq_no 也没变', Number(tt.conn().get('SELECT seq_no FROM tasks WHERE id=?', [n1.id]).seq_no), seqBefore);
+
+  // 清空一格 = 存 NULL，不是空串
+  const cleared = tt.patch(n1.id, { owner: '', plan_end_at: null, estimate_hours: null });
+  eq('owner 清空后是 null', cleared.owner, null);
+  eq('plan_end_at 清空后是 null', cleared.plan_end_at, null);
+  eq('estimate_hours 清空后是 null', cleared.estimate_hours, null);
+  ok('库里存的也是 NULL 而不是空串',
+    tt.conn().get('SELECT owner, plan_end_at, estimate_hours FROM tasks WHERE id=?', [n1.id]).owner === null);
+
+  // 只改一个字段不能把别的清掉（undefined = 这次没改它）
+  tt.patch(n1.id, { plan_start_at: '2026-04-01' });
+  eq('只改 plan_start_at 时 actual_hours 原样保留', tt.getTask(n1.id).actual_hours, 2);
+  eq('只改 plan_start_at 时 plan_start_at 变了', tt.getTask(n1.id).plan_start_at, '2026-04-01');
+
+  // ---- 21.5 工时脏值一律 NULL ----
+  const dirty = (v) => tt.patch(n1.id, { estimate_hours: v }).estimate_hours;
+  eq("estimate_hours '' → null", dirty(''), null);
+  eq("estimate_hours '   ' → null", dirty('   '), null);
+  eq("estimate_hours 'abc' → null", dirty('abc'), null);
+  eq('estimate_hours -1 → null', dirty(-1), null);
+  eq('estimate_hours null → null', dirty(null), null);
+  eq('estimate_hours 0 是合法值', dirty(0), 0);
+  const dirtyA = (v) => tt.patch(n1.id, { actual_hours: v }).actual_hours;
+  eq("actual_hours 'abc' → null", dirtyA('abc'), null);
+  eq('actual_hours -2.5 → null', dirtyA(-2.5), null);
+  // 脏值不写进库
+  tt.patch(n1.id, { actual_hours: 'abc' });
+  ok('库里的 actual_hours 是 NULL',
+    tt.conn().get('SELECT actual_hours FROM tasks WHERE id=?', [n1.id]).actual_hours === null);
+
+  // ---- 21.6 日期格式非法要抛错 ----
+  const badDate = (v) => { try { tt.patch(n1.id, { plan_start_at: v }); return null; } catch (e) { return e.message; } };
+  ok("'2026/03/05' 被拒", badDate('2026/03/05') !== null);
+  ok('错误话说清了格式', /YYYY-MM-DD/.test(String(badDate('2026/03/05'))));
+  ok("'20260305' 被拒", badDate('20260305') !== null);
+  ok("'2026-3-5' 被拒（要求两位）", badDate('2026-3-5') !== null);
+  ok("'2026-02-31' 被拒（那天不存在）", badDate('2026-02-31') !== null);
+  ok("'2026-13-01' 被拒（月份不存在）", badDate('2026-13-01') !== null);
+  eq('被拒之后原来的值没被改掉', tt.getTask(n1.id).plan_start_at, '2026-04-01');
+  const badEnd = (v) => { try { tt.patch(n1.id, { plan_end_at: v }); return null; } catch (e) { return e.message; } };
+  ok('plan_end_at 同样校验', badEnd('明天') !== null);
+  eq('空串仍然是合法的「清空」', tt.patch(n1.id, { plan_end_at: '' }).plan_end_at, null);
+
+  // ---- add() 也走同一套归一化 ----
+  const n3 = tt.add({
+    title: '带业务字段的新卡', project: '表格样本',
+    owner: '  李四  ', estimate_hours: '-1', actual_hours: 'abd', plan_start_at: '2026-05-06'
+  });
+  eq('add 的 owner 也去空格', n3.owner, '李四');
+  eq('add 的 estimate_hours 负数 → null', n3.estimate_hours, null);
+  eq("add 的 actual_hours 'abd' → null", n3.actual_hours, null);
+  eq('add 的 plan_start_at 正常写入', n3.plan_start_at, '2026-05-06');
+  let addBad = null;
+  try { tt.add({ title: '日期非法的新卡', plan_start_at: '2026/5/6' }); } catch (e) { addBad = e.message; }
+  ok('add 的非法日期也抛错', addBad !== null);
+  ok('add 被拒后没有留下半条任务',
+    !tt.state({ include_archived: true }).tasks.some((x) => x.title === '日期非法的新卡'));
+
+  // 新字段在 state / list / getTask 三处都带
+  const inState = tt.state({ include_archived: true }).tasks.find((x) => x.id === n1.id);
+  ok('state 带表格字段',
+    inState.seq_no === seqBefore && inState.no === tt.getTask(n1.id).no
+    && 'estimate_hours' in inState && 'plan_start_at' in inState && 'owner' in inState);
+  const inList = tt.list({ include_archived: true }).tasks.find((x) => x.id === n1.id);
+  ok('list 带表格字段', inList.no === inState.no && inList.plan_start_at === inState.plan_start_at);
+
+  // 导出/备份也带上 6 个字段，原样倒回来编号还在
+  const dump = tt.exportAll();
+  const dumped = dump.tasks.find((x) => x.id === n1.id);
+  ok('导出里有 seq_no / owner / 工时', dumped.seq_no === seqBefore && dumped.owner === null
+    && dumped.actual_hours === null && dumped.plan_start_at === '2026-04-01');
+  ok('导出里没有派生的 no（由 seq_no 推得出来）', dumped.no === undefined);
+
+  tt.close();
+}
 
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log('\n────────────────────────');

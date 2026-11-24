@@ -174,6 +174,12 @@ const BUTTON_EXEMPT = new Set([
   '.mini-btn',          // 已挂在总则里，这里列上防误报
   '.tag-retry',         // 抽屉里的「未判断·重试」：贴着 tag 行的行内补救入口，
                         // 刻意不长成瓷底按钮，否则会跟正常卡片抢注意力
+  '.rel-x',             // 依赖行尾的「取消前置」：18px 方形热点，挂在可点整行里，
+                        // 做成瓷底按钮会比它所在的行还显眼
+  '.tbl-sort',          // 表格表头的排序触发器：整格是点击区、贴着实色的 sticky
+                        // 表头。挂总则会变成一排浮在表头上的白瓷块，把表头撑高
+                        // 又比表里的内容抢眼；它的"凸起"语义也不对 —— 点它
+                        // 改的是排序而不是提交动作
 ]);
 
 {
@@ -354,6 +360,31 @@ const INPUT_POOL = ['.dock textarea', '.dr-foot textarea', '.dr-fields select', 
     const v = Number(m[1]);
     if (ALLOWED.has(v)) continue;
     warn('z-index', `"${r.sel.split(',')[0].trim()}" 用了 z-index:${v}，不在 STYLE.md 的分层表里——先补表再写值`, lineOf(r.start));
+  }
+}
+
+// ---------- 检查 5e：字号不许小于 10px（STYLE.md 第二节） ----------
+
+{
+  // 8.5 / 9 / 9.5px 这类"微缩字"在 1080p 100% 缩放下中文是糊的。
+  // 只拦承载信息的字号：装饰性箭头、图标内字形不算（用 .no-min-font 注释放行）。
+  const MIN = 10;
+  const hits = [];
+  for (const r of rules) {
+    // 允许单条规则前一行写 /* min-font-ok */ 显式放行
+    const before = cssNoComment.slice(Math.max(0, r.start - 60), r.start);
+    if (/min-font-ok\s*\*\/\s*$/.test(before)) continue;
+    for (const m of r.body.matchAll(/font(?:-size)?\s*:\s*(?:[^;]*?\s)?(\d+(?:\.\d+)?)px/gi)) {
+      const v = Number(m[1]);
+      if (v >= MIN) continue;
+      hits.push({ sel: r.sel.split(',')[0].trim(), v, line: lineOf(r.start) });
+      break;
+    }
+  }
+  for (const h of hits) {
+    warn('min-font-size',
+      `"${h.sel}" 用了 ${h.v}px 字号（下限 ${MIN}px）——中文在这个尺寸下读不出来`,
+      h.line);
   }
 }
 
