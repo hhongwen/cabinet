@@ -149,7 +149,7 @@ export function createChat(opts = {}) {
       else lines.push('（一张图找不到：' + path.basename(String(img)) + '）');
     }
 
-    // 图片直接交给 backend：magpie / alma 都能看，CLI 通道会自己抛错。
+    // 图片直接交给 backend：magpie 能看，CLI 通道会自己抛错。
     // 这里不 try —— 吞掉那条「通道不支持图片」的话术，用户就不知道该换通道了。
     const r = await backend.chat({ system: SYSTEM, text: lines.join('\n\n'), images: imgPaths });
     const parsed = jsonBlock(r.text);

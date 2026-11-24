@@ -1,8 +1,8 @@
 #!/bin/bash
 # install.command —— macOS 安装脚本（双击运行）
 #
-# 和 install.cmd 做同样的事：把插件文件拷到 Alma 的插件目录，
-# 通知 Alma 重新加载，然后确认服务真的起来了。
+# 和 install.cmd 做同样的事：把程序文件拷到 ~/.config/cabinet/app，
+# 起一次服务，然后确认真的起来了。
 #
 # 和 Windows 版的差别只有一个：这里还要 chmod，让 pickdir 之类的东西能跑，
 # 顺带把权限写进 copy 后的文件，避免从压缩包解出来的文件丢 exec 位。
@@ -12,8 +12,7 @@ set -u
 cd "$(dirname "$0")" || exit 1
 . ./_lib.sh
 
-DST="$HOME/.config/alma/plugins/task-inbox"
-ALMA_API="http://localhost:23001"
+DST="$HOME/.config/cabinet/app"
 
 echo
 echo "=== Task Inbox Setup (macOS) ==="
@@ -32,10 +31,9 @@ fi
 
 mkdir -p "$DST" || { echo "[X] 建不了目录：$DST"; exit 1; }
 
-# 这张清单要和 install.cmd 里的 for %%f 完全一致 —— 少一个文件插件就激活不了。
+# 这张清单要和 install.cmd 里的 for %%f 完全一致 —— 少一个文件服务就起不来。
 FILES=(
   manifest.json
-  main.mjs
   core.mjs
   storage.mjs
   server.mjs
@@ -46,6 +44,8 @@ FILES=(
   browse.mjs
   cli.mjs
   pickdir.ps1
+  stop-service.ps1
+  style-audit.mjs
   board.html
 )
 
@@ -64,14 +64,15 @@ fi
 
 chmod -R u+rw "$DST"
 
-# ---------- 通知 Alma 重载 ----------
+# ---------- 起服务 ----------
 
 echo
-echo "通知 Alma 重新加载插件..."
-if curl -s --max-time 5 -X POST "$ALMA_API/api/plugins/refresh" -o /dev/null 2>/dev/null; then
-  echo "[OK] 重载已发送"
+echo "启动服务..."
+if pgrep -f "server.mjs" >/dev/null 2>&1; then
+  echo "[skip] 已有实例在跑"
 else
-  echo "[!] Alma 没在跑。下次启动 Alma 时会自动加载插件。"
+  nohup node "$DST/server.mjs" > "$DST/server.log" 2>&1 &
+  echo "[OK] 已启动（日志 $DST/server.log）"
 fi
 
 # ---------- 确认服务 ----------
@@ -87,7 +88,7 @@ done
 if [ -n "$BASE" ]; then
   echo "[OK] 服务就绪：$BASE"
 else
-  echo "[!] 服务没起来。检查 Alma → 设置 → 插件 → task-inbox 是否已启用。"
+  echo "[!] 服务没起来。看一眼日志：$DST/server.log"
   echo "    也可以手动跑一次看报错：node \"$DST/server.mjs\""
   BASE="http://127.0.0.1:46001"
 fi

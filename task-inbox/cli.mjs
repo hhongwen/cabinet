@@ -22,7 +22,7 @@ function stamp() {
   return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 }
 
-const DATA_DIR = process.env.TASK_INBOX_DATA || path.join(os.homedir(), '.config', 'alma', 'task-inbox');
+const DATA_DIR = process.env.TASK_INBOX_DATA || path.join(os.homedir(), '.config', 'cabinet');
 const core = createCore(DATA_DIR);
 
 const argv = process.argv.slice(2);

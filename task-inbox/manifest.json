@@ -1,23 +1,12 @@
 {
-  "id": "task-inbox",
-  "name": "Task Inbox",
+  "id": "cabinet",
+  "name": "Cabinet",
   "version": "0.2.0",
   "description": "统一任务入口：文字 / 截图 / 链接都收进来，按项目+状态+优先级看板管理",
-  "author": { "name": "Alma" },
-  "main": "main.mjs",
-  "engines": { "alma": "^0.4.0" },
-  "type": ["tool", "ui"],
-  "permissions": ["notifications", "tools:register", "chat:read"],
-  "activationEvents": ["onStartup"],
-  "contributes": {
-    "components": {
-      "statusBar": [
-        { "id": "task-inbox.status", "alignment": "right", "priority": 88 }
-      ]
-    },
-    "commands": [
-      { "id": "task-inbox.openBoard", "title": "打开任务看板", "category": "Task Inbox" },
-      { "id": "task-inbox.openInbox", "title": "打开收件箱", "category": "Task Inbox" }
-    ]
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "cli": "node cli.mjs",
+    "test": "node test-sqlite.mjs && node test-parsers.mjs && node style-audit.mjs"
   }
 }

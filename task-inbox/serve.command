@@ -1,5 +1,5 @@
 #!/bin/bash
-# serve.command —— 独立后台服务（不依赖 Alma）
+# serve.command —— 后台起服务
 #
 # 和 serve.cmd 一个作用：先探端口，已经有人跑就直接退出，不重复起第二个实例。
 # 所以拿它做开机自启是安全的。
@@ -12,7 +12,7 @@ set -u
 cd "$(dirname "$0")" || exit 1
 . ./_lib.sh
 
-LOG_DIR="$HOME/.config/alma/task-inbox"
+LOG_DIR="$HOME/.config/cabinet"
 LOG="$LOG_DIR/serve.log"
 
 # 区间里任何一个已经活着就复用

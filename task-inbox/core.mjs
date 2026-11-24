@@ -1,6 +1,6 @@
 // core.mjs —— 任务存储的纯逻辑层
 //
-// 这里不碰 http、不碰 Alma API，只做一件事：把任务存进 SQLite、读出来、改掉。
+// 这里不碰 http、不碰任何外部 API，只做一件事：把任务存进 SQLite、读出来、改掉。
 //
 // 和旧版的区别：
 //   旧版每次操作都 load() 整个 tasks.json + 改 + save() 全量写回。
@@ -35,7 +35,7 @@ export const KIND_LABEL = {
 };
 
 export const DEFAULT_SETTINGS = {
-  backend: 'auto',                      // auto | magpie | alma | opencode | codex
+  backend: 'auto',                      // auto | magpie | opencode | codex
   model: 'auto/deepseek-v4.1-flash',
   classify: true,                       // 关掉就只收不判
   // done 超过这么多天就自动归档。一年调一次的参数，所以只放库里，不做输入框。
@@ -2023,7 +2023,7 @@ export function createCore(dataDir) {
     const next = { ...loadSettings() };
 
     if (patch.backend !== undefined) {
-      const ok = ['auto', 'magpie', 'alma', 'opencode', 'codex'];
+      const ok = ['auto', 'magpie', 'opencode', 'codex'];
       if (!ok.includes(patch.backend)) throw new Error('未知通道: ' + patch.backend);
       next.backend = patch.backend;
     }

@@ -1,8 +1,9 @@
-// server.mjs —— 可以独立跑的 HTTP 服务
+// server.mjs —— 独立跑的 HTTP 服务
 //
-// 两种用法：
-//   1. Alma 插件里被 main.mjs import，跟着 Alma 一起活
-//   2. 命令行 `node server.mjs` 单独跑，不依赖 Alma
+// 这就是主程序：`node server.mjs` 起来之后，浏览器打开 http://127.0.0.1:46001/
+// 就能用。不依赖任何外部应用，也不再有「宿主进程」这一层 ——
+// 早先它同时被当成 Alma 插件的内嵌服务，插件一开就抢走端口，
+// 于是「改了代码要重启宿主」变成常态。现在没有宿主了。
 //
 // 端口被占时不报错，直接退出（说明已经有一个在跑了）。
 
@@ -26,7 +27,10 @@ const { createBriefWriter } = await loadLocal('brief.mjs');
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
-export const DEFAULT_DATA_DIR = path.join(os.homedir(), '.config', 'alma', 'task-inbox');
+/* 数据目录。以前挂在 ~/.config/alma/ 下面 —— 那只是因为它当初是个插件，
+   借了宿主的目录。现在它自己的东西放自己的地方。
+   TASK_INBOX_DATA 环境变量可以整个覆盖（换机器 / 放到同步盘都用它）。 */
+export const DEFAULT_DATA_DIR = path.join(os.homedir(), '.config', 'cabinet');
 export const DEFAULT_PORT = 46001;
 export const FALLBACK_PORTS = [46002, 46003, 46004, 46005];
 
@@ -416,24 +420,7 @@ async function listModels() {
       modelCache = { at: Date.now(), data: list, from: 'magpie' };
       return modelCache;
     }
-  } catch { /* 继续试 alma */ }
-
-  try {
-    const r = await fetch((process.env.ALMA_API_URL || 'http://localhost:23001') + '/api/models',
-      { signal: AbortSignal.timeout(4000) });
-    if (r.ok) {
-      const d = await r.json();
-      const list = (d.data || []).map((m) => ({
-        id: m.id,
-        name: m.name || m.id,
-        vision: !!m.capabilities?.vision,
-        context: m.capabilities?.contextWindow || 0,
-        owner: m.providerName || ''
-      }));
-      modelCache = { at: Date.now(), data: list, from: 'alma' };
-      return modelCache;
-    }
-  } catch { /* 都没有 */ }
+  } catch { /* 没有第二家了：magpie 拉不到就是空清单 */ }
 
   return { at: Date.now(), data: [], from: 'none' };
 }
@@ -537,7 +524,7 @@ export function createHandler(core, opts = {}) {
         if (queue) queue.resetClassifier();     // 立刻生效，不用重启
         return json(res, 200, next);
       }
-      // 可用模型清单：从 magpie 或 alma 现拉，缓存 5 分钟
+      // 可用模型清单：从 magpie 现拉，缓存 5 分钟
       if (p === '/api/models' && req.method === 'GET') {
         return json(res, 200, await listModels());
       }

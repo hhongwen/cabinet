@@ -1,11 +1,14 @@
-// backend.mjs —— 三种模型接入方式，自动探测降级
+// backend.mjs —— 模型接入，自动探测降级
 //
 //   1. magpie   http://127.0.0.1:3425/v1    首选：OpenAI 兼容，base64 图直接给，不要 key
-//   2. alma     http://localhost:23001      次选：图要先传 gallery 换成 url
-//   3. cli      opencode run / codex exec   兜底：进程启动慢，但完全不依赖本机服务
+//   2. cli      opencode run / codex exec   兜底：进程启动慢，但完全不依赖本机服务
 //
-// 三者都只做一件事：给一段文本（可带图），返回模型输出的字符串。
+// 两者都只做一件事：给一段文本（可带图），返回模型输出的字符串。
 // 上层不用关心走的是哪条。
+//
+// 以前还有第三条「alma」（走 Alma 自己的 /api/chat/completions）。已经删掉了：
+// 这个应用不再依赖 Alma，就不该在探测链里留一条指向它的分支 —— 那会让
+// 「Alma 开着/关着」悄悄改变任务分类的结果，排查时完全看不出来。
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -13,7 +16,6 @@ import { spawn } from 'node:child_process';
 import os from 'node:os';
 
 const MAGPIE = process.env.MAGPIE_URL || 'http://127.0.0.1:3425/v1';
-const ALMA = process.env.ALMA_API_URL || 'http://localhost:23001';
 const DEFAULT_MODEL = process.env.TASK_INBOX_MODEL || 'auto/deepseek-v4.1-flash';
 const CLI_TIMEOUT = Number(process.env.TASK_INBOX_CLI_TIMEOUT || 60000);
 
@@ -79,80 +81,7 @@ function magpieBackend() {
   };
 }
 
-// ---------- 2. alma ----------
-
-function almaBackend() {
-  let cachedModel = null;
-
-  async function resolveModel(model) {
-    if (cachedModel) return cachedModel;
-    const want = model || DEFAULT_MODEL;
-    try {
-      const r = await fetch(ALMA + '/api/models', { signal: AbortSignal.timeout(6000) });
-      const d = await r.json();
-      const list = d.data || [];
-      const hit = list.find((m) => m.id === want);
-      if (hit) { cachedModel = hit.providerId + ':' + hit.id; return cachedModel; }
-      const anyVision = list.find((m) => m.capabilities?.vision);
-      if (anyVision) { cachedModel = anyVision.providerId + ':' + anyVision.id; return cachedModel; }
-    } catch { /* 忽略 */ }
-    return want.includes(':') ? want : want;
-  }
-
-  async function uploadImage(file) {
-    const buf = await fs.promises.readFile(file);
-    const r = await fetch(ALMA + '/api/attachments/image', {
-      method: 'POST',
-      headers: { 'content-type': guessImageType(file) },
-      body: buf,
-      signal: AbortSignal.timeout(20000)
-    });
-    if (!r.ok) throw new Error('gallery 上传 ' + r.status);
-    const d = await r.json();
-    return d.url;
-  }
-
-  return {
-    name: 'alma',
-    async available() { return await probe(ALMA + '/api/health'); },
-    async chat({ system, text, images = [], model }) {
-      const parts = [{ type: 'text', text }];
-      for (const img of images.slice(0, 3)) {
-        const url = await uploadImage(img);
-        parts.push({
-          type: 'file',
-          filename: path.basename(img),
-          mediaType: guessImageType(img),
-          url
-        });
-      }
-
-      const body = {
-        model: await resolveModel(model),
-        stream: false,
-        messages: [
-          ...(system ? [{ role: 'system', parts: [{ type: 'text', text: system }] }] : []),
-          { role: 'user', parts }
-        ]
-      };
-
-      const r = await fetch(ALMA + '/api/chat/completions', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(60000)
-      });
-      const raw = await r.text();
-      if (!r.ok) throw new Error('alma ' + r.status + ': ' + raw.slice(0, 200));
-      const d = JSON.parse(raw);
-      const msg = d?.choices?.[0]?.message;
-      if (!msg) throw new Error('alma 返回没有 choices');
-      return { text: msg.content || '', model: d.model || body.model };
-    }
-  };
-}
-
-// ---------- 3. CLI 兜底 ----------
+// ---------- 2. CLI 兜底 ----------
 
 // Windows 上 opencode/codex 是 .cmd，spawn 直接给名字会 ENOENT。
 // 这里绕开：找到 npm 全局装的真实 js 入口，用 node 跑。
@@ -243,7 +172,7 @@ function cliBackend(kind) {
     async chat({ system, text, images = [] }) {
       if (images.length) {
         // CLI 传图各家参数都不一样，容易失败。这里直说，不假装能行。
-        throw new Error(kind + ' 通道不支持图片，请用 magpie 或 alma');
+        throw new Error(kind + ' 通道不支持图片，请用 magpie');
       }
       const prompt = (system ? system + '\n\n' : '') + text;
       const bin = resolveCliBin(kind);
@@ -267,7 +196,6 @@ export function createBackend(opts = {}) {
 
   const all = {
     magpie: magpieBackend(),
-    alma: almaBackend(),
     opencode: cliBackend('opencode'),
     codex: cliBackend('codex')
   };
@@ -285,10 +213,10 @@ export function createBackend(opts = {}) {
     }
 
     // 固定顺序：最快的先试
-    for (const name of ['magpie', 'alma', 'opencode', 'codex']) {
+    for (const name of ['magpie', 'opencode', 'codex']) {
       if (await all[name].available()) { resolved = all[name]; return resolved; }
     }
-    throw new Error('没有可用的模型通道（magpie / alma / cli 都不在）');
+    throw new Error('没有可用的模型通道（magpie / cli 都不在）');
   }
 
   return {

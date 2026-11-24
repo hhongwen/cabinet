@@ -75,15 +75,15 @@ cat > "$PLIST" <<PLIST_EOF
   </dict>
 
   <key>StandardOutPath</key>
-  <string>$HOME/.config/alma/task-inbox/launchd.out.log</string>
+  <string>$HOME/.config/cabinet/launchd.out.log</string>
 
   <key>StandardErrorPath</key>
-  <string>$HOME/.config/alma/task-inbox/launchd.err.log</string>
+  <string>$HOME/.config/cabinet/launchd.err.log</string>
 </dict>
 </plist>
 PLIST_EOF
 
-mkdir -p "$HOME/.config/alma/task-inbox"
+mkdir -p "$HOME/.config/cabinet"
 
 if launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null; then
   echo "[OK] 已加入开机自启（launchd）"
@@ -98,7 +98,7 @@ fi
 
 echo "     $PLIST"
 echo
-echo "说明：开机后先起独立服务，Alma 启动时看到端口已占就直接复用，不会起两个。"
-echo "      所以 Alma 关掉也不影响访问。"
+echo "说明：开机后自动起服务（就是 Cabinet 本身）。已有实例会跳过，不会起两个。"
+echo "      改完代码用 stop.cmd / stop.command 停一下再启动即可。"
 echo
 echo "取消：./autostart.command off"

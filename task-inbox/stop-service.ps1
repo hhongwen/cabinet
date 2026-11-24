@@ -1,9 +1,10 @@
-# stop-service.ps1 —— 停掉正在跑的 task-inbox 服务
+# stop-service.ps1 —— 停掉正在跑的 Cabinet 服务
 #
 # 为什么要有这个：改完代码不重启，46001 上跑的还是旧进程，
-# 表现是「明明改了却没生效」，而且没有任何提示。install 每次装完顺手停一下。
+# 表现是「明明改了却没生效」，而且没有任何提示。
+# 现在它就是主程序，改完代码 `stop.cmd` + `start.cmd` 两步，不用动别的应用。
 #
-# 只杀命令行里带 task-inbox 的 node 进程。别的 node（codex、mcp-proxy、
+# 只杀命令行里带 cabinet / task-inbox 的 node 进程。别的 node（codex、mcp-proxy、
 # 各种 dev server）一律不碰 —— 按进程名一把梭是会把别人工作弄丢的。
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -14,7 +15,7 @@ $procs = Get-CimInstance Win32_Process -Filter "Name='node.exe'"
 foreach ($p in $procs) {
     $cmd = [string]$p.CommandLine
     if (-not $cmd) { continue }
-    if ($cmd -notmatch 'task-inbox') { continue }
+    if ($cmd -notmatch 'task-inbox|cabinet') { continue }
 
     try {
         Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop

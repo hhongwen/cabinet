@@ -2,10 +2,10 @@
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
-set "DST=%USERPROFILE%\.config\alma\plugins\task-inbox"
+set "DST=%USERPROFILE%\.config\cabinet\app"
 
 echo.
-echo === Task Inbox Setup ===
+echo === Cabinet Setup ===
 echo.
 
 where node >nul 2>&1
@@ -29,7 +29,7 @@ if !NODEMAJOR! EQU 22 (
 )
 
 if not exist "%DST%" mkdir "%DST%"
-for %%f in (manifest.json main.mjs core.mjs storage.mjs server.mjs classify.mjs backend.mjs chat.mjs brief.mjs browse.mjs cli.mjs pickdir.ps1 stop-service.ps1 board.html) do (
+for %%f in (manifest.json core.mjs storage.mjs server.mjs classify.mjs backend.mjs chat.mjs brief.mjs browse.mjs cli.mjs pickdir.ps1 stop-service.ps1 style-audit.mjs board.html) do (
   if exist "%%f" (
     copy /Y "%%f" "%DST%" >nul
     echo [OK] %%f
@@ -40,26 +40,21 @@ for %%f in (manifest.json main.mjs core.mjs storage.mjs server.mjs classify.mjs 
 
 rem --- 先把还在跑的旧服务停掉 ---
 rem 不这么做的话，改了代码但 46001 上还是旧进程，会以为改动没生效。
-rem 只动「命令行里带 task-inbox」的 node，不碰别的 node 进程。
+rem 只动「命令行里带 cabinet / task-inbox」的 node，不碰别的 node 进程。
 echo.
-echo Stopping any running task-inbox service...
+echo Stopping any running Cabinet service...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0stop-service.ps1"
 
 echo.
-echo Notifying Alma to reload plugins...
-curl -s --max-time 5 -X POST http://localhost:23001/api/plugins/refresh -o nul 2>nul
-if errorlevel 1 (
-  echo [!] Alma not running. Plugin loads automatically when Alma starts.
-) else (
-  echo [OK] reload sent
-)
+echo Starting Cabinet from %DST% ...
+start "" /min node "%DST%\server.mjs"
 
 echo.
 echo Waiting for service...
 timeout /t 3 >nul
 curl -s --max-time 2 http://127.0.0.1:46001/api/ping >nul 2>&1
 if errorlevel 1 (
-  echo [!] service not up. Check Alma Settings - Plugins - task-inbox enabled.
+  echo [!] service not up. Try: start.cmd   (or check node is on PATH)
 ) else (
   echo [OK] service ready
 )
@@ -73,5 +68,6 @@ echo.
 echo Usage:
 echo   start.cmd          - start service, open board
 echo   start.cmd quick    - start service, open quick window
+echo   stop.cmd           - stop the service
 echo   node cli.mjs ls    - list tasks in terminal
 echo.

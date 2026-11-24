@@ -5,7 +5,7 @@
 //   2. 拼 prompt
 //   3. 解析模型返回的 JSON
 //
-// 三条通道（magpie / alma / cli）自动探测，这里不用关心。
+// 两条通道（magpie / cli）自动探测，这里不用关心。
 
 import fs from 'node:fs';
 import path from 'node:path';

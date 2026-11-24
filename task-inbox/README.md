@@ -21,7 +21,7 @@ install.cmd
 ./install.command     # 或在 Finder 里双击 install.command
 ```
 
-四件事：查 node、同步到 Alma 插件目录、通知热重载、等端口起来。
+四件事：查 node、把程序文件装到 `~/.config/cabinet/app`、起服务、等端口起来。
 
 想要桌面快捷方式和开机自启：
 
@@ -223,7 +223,7 @@ node cli.mjs backup [文件]            热备份成 .db（服务在跑也能备
 
 - 归档**不删任何东西**：附件、对话、需求说明全留着
 - 归档视图里可以「取回」
-- 阈值在 `settings` 的 `archive_after_days`，改就 `alma config` 或直接改库 ——
+- 阈值在 `settings` 的 `archive_after_days`，改就直接改库 ——
   一年调一次的参数，不给它做 UI
 - `cli.mjs export` **包含**归档任务：备份语义是全都要
 
@@ -314,7 +314,6 @@ node cli.mjs backup [文件]            热备份成 .db（服务在跑也能备
 | 顺序 | 通道 | 地址 | 图片 | 特点 |
 |---|---|---|---|---|
 | 1 | **magpie** | `127.0.0.1:3425/v1` | base64 直接给 | 最快，不要 key |
-| 2 | **alma** | `localhost:23001` | 先传 gallery 换 url | 要 Alma 在跑 |
 | 3 | **opencode** | CLI | ✗ | 进程启动慢，纯兜底 |
 | 4 | **codex** | CLI | ✗ | 同上 |
 
@@ -324,7 +323,7 @@ node cli.mjs backup [文件]            热备份成 .db（服务在跑也能备
 
 侧栏底部那个「设置」按钮（或按 `,`）：
 
-- **模型通道** —— auto / magpie / alma / opencode / codex
+- **模型通道** —— auto / magpie / opencode / codex
 - **模型** —— 输入框带下拉，65 个模型现拉，标了哪些支持图片
 - **开关** —— 关掉就只收不判
 
@@ -346,7 +345,7 @@ OpenAI 兼容，少一跳，图可以直接给 base64：
 { "type": "image_url", "image_url": { "url": "data:image/png;base64,..." } }
 ```
 
-走 Alma 就没这么舒服 —— 必须先 POST `/api/attachments/image` 换成
+走别的通道就没这么舒服 —— 有些要求先上传换成
 `http://localhost:23001/api/gallery/cache/xxx.png` 才能用，否则模型说「没看到图片」。
 
 ### 不需要把 Cabinet 接进 magpie 的 agents
@@ -449,19 +448,18 @@ T-014  表父卡       未开始  P2 常规  Cabinet   张工    8     6.5   11-
 ## 数据
 
 ```
-~/.config/alma/task-inbox/
+~/.config/cabinet/
   tasks.db        ← SQLite，唯一真相（WAL 模式）
   tasks.json      ← 老版本遗留，首次建库时自动迁进来，之后不再读
   images/         ← 贴进来的图
   files/          ← 附件
 ```
 
-⚠️ **不要**放到 `~/.config/alma/tasks/` —— 那是 Alma 自己的任务队列，
-写进去会被 Alma 覆盖，读回来永远是空。
+环境变量 `TASK_INBOX_DATA` 可以整个覆盖这个目录（换机器、放同步盘都用它）。
 
-用 SQLite 而不是整份 JSON 重写，是为了**多进程安全**：插件（Alma 进程内）和
-`serve.command` 起的独立服务可能同时在跑，还可能加上 CLI。JSON 全量重写会互相
-覆盖，WAL + `busy_timeout` 不会。
+用 SQLite 而不是整份 JSON 重写，是为了**多进程安全**：服务进程和 CLI 可能同时
+在跑（`cli.mjs` 每次执行都是一个新进程）。JSON 全量重写会互相覆盖，
+WAL + `busy_timeout` 不会。
 
 六张表：
 
@@ -502,28 +500,21 @@ WHERE id=? AND status='todo'
 
 ---
 
-## 部署：两种跑法
-
-### 作为 Alma 插件
-
-`install.cmd` 之后自动加载，状态栏显示待办数。
-
-### 作为独立服务
+## 部署：只有一种跑法
 
 ```cmd
-serve.cmd       探端口，没人就跑起来（开机自启用这个）
+start.cmd        起服务并开窗口（日常用这个）
+serve.cmd        只起服务，不开窗口（开机自启用这个）
+stop.cmd         停服务
 ```
 
-**为什么需要这个**：插件起的服务跑在 Alma 进程里，Alma 一关就没了。
-装过一次 `autostart.cmd` 之后，开机先起独立服务，Alma 启动时看到端口已占
-就复用 —— 谁第二谁复用，不会跑出两个实例。
+它是一个**独立应用**，宿主进程就是 `node server.mjs` 自己。早先它同时被当成
+Alma 插件：插件在 Alma 进程里起同一个 HTTP 服务、开机就抢 46001，于是「改完
+代码要重启」等于「退出整个 Alma」。现在那层壳已经拿掉了，改完代码
+`stop.cmd` + `start.cmd` 两步就生效。
 
-| Alma | 独立服务 | 页面能开吗 |
-|---|---|---|
-| 开 | 开 | ✅ |
-| 开 | 关 | ✅ |
-| 关 | 开 | ✅ |
-| 关 | 关 | ❌ |
+> 升级注意：数据目录从 `~/.config/alma/task-inbox/` 搬到了 `~/.config/cabinet/`，
+> 旧目录保留没删，确认新的能用了再自己清理。
 
 ---
 
@@ -533,8 +524,7 @@ serve.cmd       探端口，没人就跑起来（开机自启用这个）
 task-inbox/
   core.mjs       任务逻辑（纯 Node，不依赖任何宿主）
   storage.mjs    SQLite 底层：驱动探测 + 建表 + 语句包装
-  server.mjs     HTTP 服务（可独立跑，也可作插件）
-  main.mjs       Alma 插件外壳：注册工具 + 状态栏
+  server.mjs     HTTP 服务 + 命令行入口（就是主程序）
   classify.mjs   判类型 / 优先级 / 项目
   brief.mjs      整理成需求说明
   chat.mjs       卡片抽屉里的对话
@@ -616,17 +606,10 @@ node style-audit.mjs
 ### 测试
 
 ```bash
-node test-sqlite.mjs    # 存储层 + schema 迁移 + 卡片关系 + 层级 + 表格字段，362 项
+node test-sqlite.mjs    # 存储层 + schema 迁移 + 卡片关系 + 层级 + 表格字段，365 项
 node test-parsers.mjs   # classify / chat 解析层 + 队列路由，86 项，不碰真模型
 node style-audit.mjs    # 界面样式规范
 ```
-
-### Alma 插件系统本身的缺口（不是本项目的 bug）
-
-1. **状态栏点击没接线** —— 后端注册了，渲染层没监听。只能当指示器。
-2. **`contributes.components.sidebar` 是空壳** —— schema 接受，前端无消费代码。
-3. **`ui.openExternal` 在无头模式只打日志** —— 不真的开浏览器。
-4. **卸载插件不清理状态栏项** —— 要重新激活同名插件手动 dispose。
 
 ---
 

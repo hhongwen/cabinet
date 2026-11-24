@@ -366,7 +366,7 @@ console.log('\n=== 6b. chat：图片和文件（UI-3） ===');
   // CLI 通道不支持图片会抛错 —— 必须一路抛到调用方，不能被 chat 吞掉
   const be = {
     name: 'codex',
-    async chat() { throw new Error('codex 通道不支持图片，请用 magpie 或 alma'); }
+    async chat() { throw new Error('codex 通道不支持图片，请用 magpie'); }
   };
   const imgFile = path.join(tmp, 'shot2.png');
   fs.writeFileSync(imgFile, Buffer.from('png'));

@@ -111,8 +111,8 @@ console.log('\n=== 3. 设置 ===');
 const s = core.loadSettings();
 eq('backend 从 settings.json 迁入', s.backend, 'magpie');
 eq('classify 从 settings.json 迁入', s.classify, false);
-core.saveSettings({ backend: 'alma' });
-eq('saveSettings 生效', core.loadSettings().backend, 'alma');
+core.saveSettings({ backend: 'opencode' });
+eq('saveSettings 生效', core.loadSettings().backend, 'opencode');
 let threw = false;
 try { core.saveSettings({ backend: 'nope' }); } catch { threw = true; }
 ok('非法 backend 被拒', threw);
@@ -523,7 +523,7 @@ console.log('\n=== 14. revision 变更指纹（P1-1） ===');
   const r6 = core.revision();
   ok('删除会变（COUNT 起作用）', r6 !== r5);
 
-  core.saveSettings({ backend: 'magma'.replace('magma', 'alma') });
+  core.saveSettings({ backend: 'opencode' });
   const r7 = core.revision();
   ok('改设置会变', r7 !== r6);
 

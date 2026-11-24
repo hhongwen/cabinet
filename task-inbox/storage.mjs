@@ -6,7 +6,7 @@
 //   3. 提供一层统一的 prepare/run/get/all/exec —— 抹平两个驱动的差异
 //
 // 上层 core.mjs 只认这层暴露的 SQL 接口，不关心底下是哪个运行时。
-// 这样即使 Alma 哪天把插件宿主从 node 换成 bun，这里自动跟着换，业务代码不动。
+// 这样即使将来把运行时从 node 换成 bun，这里自动跟着换，业务代码不动。
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -448,7 +448,7 @@ export function applySchema(db) {
 
 // ---------- 从 tasks.json 迁移 ----------
 
-// 只认带 version 字段的对象格式。别的形状（比如 Alma 自己那个数组）
+// 只认带 version 字段的对象格式。别的形状（比如旧版那种裸数组）
 // 一律当成「不是我的文件」，绝不覆盖 —— 这是踩过的坑。
 export function looksLikeTaskInboxJson(obj) {
   return !!obj && typeof obj === 'object' && !Array.isArray(obj)
