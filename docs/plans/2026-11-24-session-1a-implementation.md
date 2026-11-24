@@ -4,7 +4,7 @@
 >
 > **状态：已实现并验收（2026-11-24，分支 `feat/session-1a`）。**
 > 验收证据：真实 OpenCode 两轮复用同一 Session；重启后未完成 Turn 变 `unknown`；
-> `test-sqlite` 406 / `test-agent` 74 / `test-agent-http` 39 / `test-parsers` 86，
+> `test-sqlite` 406 / `test-agent` 75 / `test-agent-http` 39 / `test-parsers` 86，
 > `style-audit` 0 error。实施记录见 `task-inbox/ISSUES.md` 第九批。
 >
 > **复核后的实施偏差：** Turn 恢复从 `core.init()` 移到 server 启动路径，并加

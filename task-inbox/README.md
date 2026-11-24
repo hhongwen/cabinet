@@ -659,7 +659,7 @@ node style-audit.mjs
 
 ```bash
 node test-sqlite.mjs        # 存储层 + schema 迁移 + 卡片关系 + 层级 + 表格 + 会话，406 项
-node test-agent.mjs         # 事件解析 / Turn 运行器 / CLI 解析 / 导出核对 / 超时，74 项
+node test-agent.mjs         # 事件解析 / Turn 运行器 / CLI 解析 / 导出核对 / 超时，75 项
 node test-agent-http.mjs    # Session / Turn HTTP 路由 + 409 + 删除保护 + 锁，39 项
 node test-parsers.mjs       # classify / chat 解析层 + 队列路由，86 项，不碰真模型
 node style-audit.mjs        # 界面样式规范

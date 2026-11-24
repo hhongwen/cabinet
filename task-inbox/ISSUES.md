@@ -1596,13 +1596,14 @@ limit，没有 `dev_ready` 也没有 `include_archived`。所以你在对话里�
     归档项目：抽屉项目下拉显示「X（已归档）」，不再看起来像「默认」
     PATH：裸 `opencode` 命令用 spawnSync --version 探测，Homebrew / bun / 自定义 prefix 不再误判不可用
     顺手修：resolveCliBin 优先 @opencode/cli 的真身（opencode-ai 是 479 字节壳）
+    events_file 统一用 sessions/<turn>.jsonl（POSIX 分隔符，Windows 库换到 macOS 仍能清理）
   验收
     真实 OpenCode 两轮复用同一 ses_...；重启后同一外部 Session 继续可用
     手工置 running 后重启：Turn/Session 变 unknown，任务状态仍是 todo
     浏览器实测：重新打开运行中的卡会自动轮询到结果；归档项目下拉显示已归档
     有活跃任务的项目归档被拒；空项目归档后侧栏消失、设置里可恢复
   测试
-    test-sqlite 406 / test-agent 74 / test-agent-http 39 / test-parsers 86
+    test-sqlite 406 / test-agent 75 / test-agent-http 39 / test-parsers 86
     style-audit 0 error（1 个历史遗留 warning）
   已知限制
     只有 OpenCode；Agent 会话不支持图片/文件附件；不做自动选下游和自动交接

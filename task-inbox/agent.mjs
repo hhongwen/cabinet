@@ -67,7 +67,10 @@ export function createAgentRunner(opts = {}) {
     if (!adapter) throw new Error('这个 Agent 还没有接入: ' + session.agent);
 
     const turn = core.startTurn(sessionId, clean);
-    const eventsFile = path.join('sessions', turn.id + '.jsonl');
+    // 事件文件路径是**存进数据库**的，必须用 POSIX 分隔符：
+    // Windows 的 path.join 会写成 sessions\turn.jsonl，把库换到 macOS 后
+    // path.resolve 会把反斜杠当成文件名字符，清理就找不到它了。
+    const eventsFile = 'sessions/' + turn.id + '.jsonl';
     const eventsAbs = path.join(dataDir, eventsFile);
     let stream = null;
     try {

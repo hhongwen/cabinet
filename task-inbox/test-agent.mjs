@@ -128,6 +128,9 @@ console.log('\n=== 3. 运行器：正常完成 ===');
   eq('外部 Session 已绑定', core.getSession(sess.id).external_session_id, 'ses_fake_' + sess.id);
   ok('事件文件存在且有 step_start',
     fs.readFileSync(path.join(tmp, core.getTurn(turn.id).events_file), 'utf8').includes('step_start'));
+  ok('事件文件路径用 POSIX 分隔符',
+    /^sessions\/[^\\]+\.jsonl$/.test(core.getTurn(turn.id).events_file),
+    core.getTurn(turn.id).events_file);
   ok('外部 messageID 对回这一轮', core.getTurn(turn.id).external_ref === 'msg_1');
   runner.close();
 }

@@ -366,7 +366,7 @@ context      累积的最新共识（markdown）← 待建（可更新，带来�
 | **会话** | **OpenCode 持久 Session、Turn 记录、停止 / 核对、重启恢复** |
 | **项目** | **默认 Agent / 模型、归档 / 恢复；新会话自动继承** |
 
-测试：`test-sqlite` 406 项、`test-agent` 74 项、`test-agent-http` 39 项、
+测试：`test-sqlite` 406 项、`test-agent` 75 项、`test-agent-http` 39 项、
 `test-parsers` 86 项，全绿；`style-audit` 0 error。
 
 ### 还没开始的
