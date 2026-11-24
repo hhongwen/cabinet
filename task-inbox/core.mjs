@@ -25,6 +25,14 @@ export const KINDS = ['text', 'image', 'image_text', 'link', 'file', 'mixed'];
 // 只允许建边删边，环检测和派生 status 留给第 2、3 步。
 export const LINK_KINDS = ['merge_parent', 'split_of', 'parent', 'depends_on'];
 
+// 阶段 1A：外部 Agent 的持久会话。Role 是「这张卡里的职责」，
+// Agent 是「哪个 CLI 产品」，两者分开 —— 同一个 OpenCode 可以当开发，
+// 也可以当审阅，各自有独立 Session。
+export const AGENT_ROLES = ['plan', 'dev', 'review', 'test'];
+export const AGENT_TYPES = ['opencode', 'codex'];
+export const SESSION_STATUSES = ['idle', 'busy', 'unavailable', 'unknown'];
+export const TURN_STATUSES = ['queued', 'running', 'completed', 'failed', 'interrupted', 'unknown'];
+
 export const PRIORITY_LABEL = {
   p0: 'P0 阻塞', p1: 'P1 紧急', p2: 'P2 常规', p3: 'P3 低', p4: 'P4 待定'
 };
@@ -101,6 +109,8 @@ export function createCore(dataDir) {
   const newProjectId = () => shortId('p_');
   const newId = () => shortId('t_');
   const newMessageId = () => shortId('m_');
+  const newSessionId = () => shortId('ags_');
+  const newTurnId = () => shortId('turn_');
 
   function normalizeKind(k) { return KINDS.includes(k) ? k : 'text'; }
 
@@ -200,6 +210,11 @@ export function createCore(dataDir) {
       aliases: parseJson(r.aliases, []),
       dirs: parseJson(r.dirs, []),
       sort_order: Number(r.sort_order || 0),
+      // 阶段 1A：新卡挂会话时继承这两个默认值；NULL = 用 Agent 自己的默认
+      default_agent: r.default_agent ?? null,
+      default_model: r.default_model ?? null,
+      // NULL = 未归档。归档项目不出现在侧栏和下拉里，但历史任务仍能显示项目名
+      archived_at: r.archived_at ?? null,
       // 前端不该把「默认」这个字符串写死两遍，语义从接口里给
       isDefault: r.name === DEFAULT_PROJECT_NAME,
       created_at: r.created_at,
@@ -261,6 +276,10 @@ export function createCore(dataDir) {
       done_at: r.done_at
     };
     if (r.message_count !== undefined) t.message_count = Number(r.message_count || 0);
+    // 阶段 1A：卡片上的 Agent 徽标只看这两个派生值。
+    // 不把整个会话列表塞进 /api/state —— 那会让每 3 秒的轮询跟着变大。
+    if (r.agent_session_count !== undefined) t.agent_session_count = Number(r.agent_session_count || 0);
+    if (r.agent_status !== undefined) t.agent_status = r.agent_status ?? null;
     return t;
   }
 
@@ -277,9 +296,62 @@ export function createCore(dataDir) {
     };
   }
 
+  function rowToSession(r) {
+    if (!r) return null;
+    const s = {
+      id: r.id,
+      task_id: r.task_id,
+      role: r.role,
+      agent: r.agent,
+      external_session_id: r.external_session_id ?? null,
+      working_directory: r.working_directory,
+      model: r.model ?? null,
+      status: r.status,
+      created_at: r.created_at,
+      updated_at: r.updated_at
+    };
+    // listSessions / getSession 会带上最近一轮；单条纯行没有这两个字段
+    if (r.last_turn_status !== undefined) {
+      s.last_turn = r.last_turn_id ? {
+        id: r.last_turn_id,
+        status: r.last_turn_status,
+        user_text: r.last_turn_user_text || '',
+        result_text: r.last_turn_result_text || '',
+        error: r.last_turn_error || '',
+        started_at: r.last_turn_started_at ?? null,
+        ended_at: r.last_turn_ended_at ?? null
+      } : null;
+    }
+    if (r.turn_count !== undefined) s.turn_count = Number(r.turn_count || 0);
+    return s;
+  }
+
+  function rowToTurn(r) {
+    if (!r) return null;
+    return {
+      id: r.id,
+      session_id: r.session_id,
+      status: r.status,
+      user_text: r.user_text,
+      result_text: r.result_text || '',
+      error: r.error || '',
+      events_file: r.events_file ?? null,
+      external_ref: r.external_ref ?? null,
+      exit_code: r.exit_code === null || r.exit_code === undefined ? null : Number(r.exit_code),
+      started_at: r.started_at ?? null,
+      ended_at: r.ended_at ?? null,
+      created_at: r.created_at,
+      updated_at: r.updated_at
+    };
+  }
+
   /** 任务查询统一带一个消息计数，前端不用再为了「有几条」把消息全读出来 */
   const TASK_SELECT = `
-    SELECT t.*, (SELECT COUNT(*) FROM messages m WHERE m.task_id = t.id) AS message_count
+    SELECT t.*,
+           (SELECT COUNT(*) FROM messages m WHERE m.task_id = t.id) AS message_count,
+           (SELECT COUNT(*) FROM agent_sessions s WHERE s.task_id = t.id) AS agent_session_count,
+           (SELECT s.status FROM agent_sessions s WHERE s.task_id = t.id
+             ORDER BY s.updated_at DESC LIMIT 1) AS agent_status
       FROM tasks t`;
 
   // ---------- 关系派生字段 ----------
@@ -568,7 +640,10 @@ export function createCore(dataDir) {
 
     ensureDefaultProject();
     const revived = reviveStuckPending();
-    return { dbFile, migration, revived };
+    // 上次进程退出时没跑完的 Turn：先标 unknown，等 agent runner 去核对。
+    // 放在 init 里而不是服务层，是为了 CLI、测试、服务三种入口行为一致。
+    const recoveredTurns = recoverOpenTurns();
+    return { dbFile, migration, revived, recoveredTurns };
   }
 
   // 分类进行到一半进程被杀（重启/崩溃/断电），任务会永远停在「判断中…」，
@@ -596,7 +671,7 @@ export function createCore(dataDir) {
 
   // ---------- 项目 ----------
 
-  function listProjects() {
+  function listProjects(opts = {}) {
     const d = conn();
     // 顺序 = 用户拖出来的 sort_order；同值（老库刚升上来）时退回创建时间，保证稳定
     const rows = d.all(
@@ -608,6 +683,7 @@ export function createCore(dataDir) {
                         AND t.merged_into IS NULL
                         AND COALESCE(t.dev_ready, 1) = 1) AS taskCount
          FROM projects p
+        ${opts.include_archived ? '' : 'WHERE p.archived_at IS NULL'}
         ORDER BY p.sort_order, p.created_at`
     );
     return rows.map((r) => ({ ...rowToProject(r), taskCount: Number(r.taskCount || 0) }));
@@ -670,12 +746,44 @@ export function createCore(dataDir) {
     if (fields.dirs !== undefined) {
       next.dirs = (fields.dirs || []).map(normalizeDir).filter((x) => x.path);
     }
+    if (fields.default_agent !== undefined) {
+      const a = fields.default_agent === null || fields.default_agent === ''
+        ? null : String(fields.default_agent).trim();
+      if (a !== null && !AGENT_TYPES.includes(a)) throw new Error('非法默认 Agent: ' + a);
+      next.default_agent = a;
+    }
+    if (fields.default_model !== undefined) {
+      const m = fields.default_model === null ? '' : String(fields.default_model).trim();
+      next.default_model = m || null;
+    }
+    if (fields.archived_at !== undefined) {
+      if (fields.archived_at === null) {
+        next.archived_at = null;
+      } else {
+        // 「默认」是流水线最后一道落点，归档它等于把未分配筐藏起来。
+        if (cur.name === DEFAULT_PROJECT_NAME) throw new Error('「默认」不能归档');
+        const active = Number(d.get(
+          `SELECT COUNT(*) AS c FROM tasks
+            WHERE project_id = ? AND archived_at IS NULL AND merged_into IS NULL`,
+          [id]
+        )?.c || 0);
+        // 归档不搬任务：项目一藏起来，这些任务就既不在侧栏项目里、也不在收件筐里，
+        // 等于凭空消失。先让人把它们移走或归档，再归档项目。
+        if (active > 0) throw new Error('还有 ' + active + ' 条任务没移走，不能归档项目');
+        next.archived_at = String(fields.archived_at);
+      }
+    }
     next.updated_at = nowIso();
 
     d.tx(() => {
       d.run(
-        'UPDATE projects SET name = ?, aliases = ?, dirs = ?, updated_at = ? WHERE id = ?',
-        [next.name, JSON.stringify(next.aliases), JSON.stringify(next.dirs), next.updated_at, id]
+        `UPDATE projects
+            SET name = ?, aliases = ?, dirs = ?, default_agent = ?, default_model = ?,
+                archived_at = ?, updated_at = ?
+          WHERE id = ?`,
+        [next.name, JSON.stringify(next.aliases), JSON.stringify(next.dirs),
+          next.default_agent ?? null, next.default_model ?? null, next.archived_at ?? null,
+          next.updated_at, id]
       );
       // 任务上的冗余项目名跟着改，保持「外部直接读」的那个便利
       if (next.name !== cur.name) {
@@ -683,7 +791,7 @@ export function createCore(dataDir) {
       }
     });
 
-    return next;
+    return getProject(id);
   }
 
   function deleteProject(id) {
@@ -723,7 +831,10 @@ export function createCore(dataDir) {
   function reorderProjects(ids) {
     const d = conn();
     const list = Array.isArray(ids) ? ids.map(String).filter(Boolean) : [];
-    const known = new Map(d.all('SELECT id, name FROM projects').map((r) => [r.id, r.name]));
+    // 归档项目不在侧栏里，也不参与这次排序；它的 sort_order 原样留着，
+    // 恢复时不会突然插到第一位。
+    const known = new Map(d.all('SELECT id, name FROM projects WHERE archived_at IS NULL')
+      .map((r) => [r.id, r.name]));
 
     const ordered = [];
     for (const id of list) {
@@ -734,7 +845,7 @@ export function createCore(dataDir) {
       ordered.push(id);
     }
 
-    const rest = d.all('SELECT id, name FROM projects ORDER BY sort_order, created_at')
+    const rest = d.all('SELECT id, name FROM projects WHERE archived_at IS NULL ORDER BY sort_order, created_at')
       .filter((r) => r.name !== DEFAULT_PROJECT_NAME && !ordered.includes(r.id))
       .map((r) => r.id);
 
@@ -750,16 +861,21 @@ export function createCore(dataDir) {
   }
 
   // 按 id 或名字（含别名）找项目
-  function findProject(key) {
+  function findProject(key, opts = {}) {
     if (!key) return null;
     const d = conn();
     const k = String(key);
-    const byId = d.get('SELECT * FROM projects WHERE id = ?', [k]);
+    const live = opts.include_archived ? '' : ' AND archived_at IS NULL';
+    const byId = d.get('SELECT * FROM projects WHERE id = ?' + live, [k]);
     if (byId) return rowToProject(byId);
-    const byName = d.get('SELECT * FROM projects WHERE name = ?', [k]);
+    const byName = d.get('SELECT * FROM projects WHERE name = ?' + live, [k]);
     if (byName) return rowToProject(byName);
     // 别名是 JSON 数组，用 json_each 展开匹配（SQLite 3.38+ / node:sqlite 自带）
-    const byAlias = d.get('SELECT * FROM projects, json_each(projects.aliases) WHERE json_each.value = ? LIMIT 1', [k]);
+    const byAlias = d.get(
+      'SELECT p.* FROM projects p, json_each(p.aliases) WHERE json_each.value = ?'
+      + (opts.include_archived ? '' : ' AND p.archived_at IS NULL') + ' LIMIT 1',
+      [k]
+    );
     return rowToProject(byAlias);
   }
 
@@ -770,11 +886,19 @@ export function createCore(dataDir) {
     const d = conn();
     if (projectId) {
       const hit = d.get('SELECT * FROM projects WHERE id = ?', [projectId]);
-      if (hit) return rowToProject(hit);
+      if (hit) {
+        // 按 id 命中也要拦归档：PATCH 只给 project_id 时不能绕过「归档项目
+        // 不再接新任务」这条规则。
+        if (hit.archived_at) throw new Error('项目已归档，先恢复或换一个项目');
+        return rowToProject(hit);
+      }
     }
     const n = String(name || DEFAULT_PROJECT_NAME).trim() || DEFAULT_PROJECT_NAME;
     const byName = d.get('SELECT * FROM projects WHERE name = ?', [n]);
-    if (byName) return rowToProject(byName);
+    if (byName) {
+      if (byName.archived_at) throw new Error('项目已归档，先恢复或换一个项目');
+      return rowToProject(byName);
+    }
 
     const proj = {
       id: newProjectId(),
@@ -1740,6 +1864,16 @@ export function createCore(dataDir) {
     const imgs = [...imgSet];
     const fls = [...fileSet];
 
+    // 会话事件文件也在这张任务下面。和附件一样，先记下来再删库 ——
+    // 删完 tasks 之后 CASCADE 会把 agent_sessions / session_turns 一起清掉，
+    // 那时就查不到 events_file 了。
+    const turnFiles = d.all(
+      `SELECT t.events_file FROM session_turns t
+         JOIN agent_sessions s ON s.id = t.session_id
+        WHERE s.task_id = ? AND t.events_file IS NOT NULL`,
+      [id]
+    ).map((r) => r.events_file).filter(Boolean);
+
     // messages / links 靠 ON DELETE CASCADE 一并清掉。
     // 但 merged_into 是个普通 TEXT 列（没有外键），删掉被合并的旧卡之后
     // 别处指向它的引用会悬空 —— 手工清一遍。
@@ -1780,7 +1914,28 @@ export function createCore(dataDir) {
       }
     }
 
-    return { ...t, removedFiles: removed };
+    // 事件文件只认 dataDir/sessions/ 下面的相对路径。库是唯一真相，
+    // 但「库里一个路径字段」不该变成能删任意文件的入口 —— 手工改库
+    // 塞 ../ 或绝对路径的，这里直接跳过。
+    const sessionsDir = path.join(dataDir, 'sessions');
+    let removedTurnFiles = 0;
+    for (const rel of turnFiles) {
+      const full = path.resolve(dataDir, rel);
+      if (full !== sessionsDir && !full.startsWith(sessionsDir + path.sep)) {
+        console.warn('[task-inbox] 事件文件路径不在 sessions/ 下，跳过 ' + rel);
+        continue;
+      }
+      try {
+        fs.unlinkSync(full);
+        removedTurnFiles++;
+      } catch (e) {
+        if (e.code !== 'ENOENT') {
+          console.warn('[task-inbox] 事件文件没删掉 ' + rel + '：' + e.message);
+        }
+      }
+    }
+
+    return { ...t, removedFiles: removed, removedTurnFiles };
   }
 
   // ---------- 聊天消息 ----------
@@ -1860,6 +2015,309 @@ export function createCore(dataDir) {
       [brief, briefAt, nowIso(), id]
     );
     return getTask(id);
+  }
+
+  // ---------- Agent Session / Turn（阶段 1A） ----------
+  //
+  // 这一层只管数据：不 spawn 进程、不解析 CLI、不判断「这一轮算不算成功」。
+  // 那些在 agent.mjs / opencode-agent.mjs。这样测试可以只验状态机，
+  // 不用真的拉起一个 Agent。
+
+  const SESSION_SELECT = `
+    SELECT s.*,
+           lt.id            AS last_turn_id,
+           lt.status        AS last_turn_status,
+           lt.user_text     AS last_turn_user_text,
+           lt.result_text   AS last_turn_result_text,
+           lt.error         AS last_turn_error,
+           lt.started_at    AS last_turn_started_at,
+           lt.ended_at      AS last_turn_ended_at,
+           (SELECT COUNT(*) FROM session_turns t WHERE t.session_id = s.id) AS turn_count
+      FROM agent_sessions s
+      LEFT JOIN session_turns lt ON lt.id = (
+        SELECT t.id FROM session_turns t
+         WHERE t.session_id = s.id
+         ORDER BY t.created_at DESC, t.rowid DESC LIMIT 1
+      )`;
+
+  function requireSession(id) {
+    const s = getSession(id);
+    if (!s) throw new Error('会话不存在: ' + id);
+    return s;
+  }
+
+  function requireTurn(id) {
+    const t = getTurn(id);
+    if (!t) throw new Error('Turn 不存在: ' + id);
+    return t;
+  }
+
+  function getSession(id) {
+    if (!id) return null;
+    return rowToSession(conn().get(SESSION_SELECT + ' WHERE s.id = ?', [id]));
+  }
+
+  function listSessions(taskId) {
+    if (!taskId) return [];
+    return conn().all(
+      SESSION_SELECT + ' WHERE s.task_id = ? ORDER BY s.created_at, s.rowid',
+      [taskId]
+    ).map(rowToSession);
+  }
+
+  /**
+   * 建一个会话。外部 Session ID 先留空 —— 它要等第一次发消息时由 Adapter
+   * 生成。这样「建会话」和「真的能跑」是两件事：CLI 没装好也能先把卡挂上，
+   * 失败信息在第一次发送时给，而不是在建会话时假装成功。
+   */
+  function createSession(input = {}) {
+    const d = conn();
+    const taskId = String(input.taskId || '').trim();
+    requireTask(taskId);
+
+    const role = String(input.role || 'dev').trim();
+    if (!AGENT_ROLES.includes(role)) throw new Error('非法角色: ' + role);
+    const agent = String(input.agent || 'opencode').trim();
+    if (!AGENT_TYPES.includes(agent)) throw new Error('非法 Agent: ' + agent);
+
+    const workingDirectory = String(input.workingDirectory || '').trim();
+    if (!workingDirectory) throw new Error('工作目录不能为空');
+    try {
+      if (!fs.statSync(workingDirectory).isDirectory()) throw new Error('不是目录');
+    } catch {
+      throw new Error('工作目录不存在: ' + workingDirectory);
+    }
+
+    const now = nowIso();
+    const s = {
+      id: newSessionId(),
+      task_id: taskId,
+      role,
+      agent,
+      external_session_id: null,
+      working_directory: workingDirectory,
+      model: input.model ? String(input.model).trim() : null,
+      status: 'idle',
+      created_at: now,
+      updated_at: now
+    };
+    d.run(
+      `INSERT INTO agent_sessions
+         (id, task_id, role, agent, external_session_id, working_directory, model, status, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      [s.id, s.task_id, s.role, s.agent, s.external_session_id, s.working_directory,
+        s.model, s.status, s.created_at, s.updated_at]
+    );
+    return getSession(s.id);
+  }
+
+  /**
+   * 只允许改模型和工作目录。工作目录一旦跑过至少一轮就不能改 ——
+   * 外部 Session 是按工作目录归属的，换了目录之后同一个 ID 可能根本打不开。
+   */
+  function updateSession(id, fields = {}) {
+    const d = conn();
+    const cur = requireSession(id);
+    const sets = [];
+    const args = [];
+
+    if (fields.model !== undefined) {
+      sets.push('model = ?');
+      args.push(fields.model ? String(fields.model).trim() : null);
+    }
+    if (fields.working_directory !== undefined) {
+      const dir = String(fields.working_directory || '').trim();
+      if (!dir) throw new Error('工作目录不能为空');
+      try {
+        if (!fs.statSync(dir).isDirectory()) throw new Error('不是目录');
+      } catch {
+        throw new Error('工作目录不存在: ' + dir);
+      }
+      const n = Number(d.get('SELECT COUNT(*) AS c FROM session_turns WHERE session_id = ?', [id])?.c || 0);
+      if (n > 0 && dir !== cur.working_directory) {
+        throw new Error('工作目录在首次发送后不能改');
+      }
+      if (dir !== cur.working_directory) {
+        sets.push('working_directory = ?');
+        args.push(dir);
+      }
+    }
+
+    if (!sets.length) return cur;
+    sets.push('updated_at = ?');
+    args.push(nowIso(), id);
+    d.run('UPDATE agent_sessions SET ' + sets.join(', ') + ' WHERE id = ?', args);
+    return getSession(id);
+  }
+
+  /**
+   * 绑定外部 Session ID。幂等：同一个 ID 重复写不报错，换一个 ID 拒绝。
+   * 这条约束防的是「同一个角色实例悄悄换了一个会话」—— 那会让历史 Turn
+   * 指向一个再也打不开的旧 ID。
+   */
+  function bindExternalSession(sessionId, externalSessionId) {
+    const d = conn();
+    const cur = requireSession(sessionId);
+    const ext = String(externalSessionId || '').trim();
+    if (!ext) throw new Error('外部 Session ID 不能为空');
+    if (cur.external_session_id && cur.external_session_id !== ext) {
+      throw new Error('这个会话已经绑定了外部 Session，不能更换');
+    }
+    if (!cur.external_session_id) {
+      d.run('UPDATE agent_sessions SET external_session_id = ?, updated_at = ? WHERE id = ?',
+        [ext, nowIso(), sessionId]);
+    }
+    return getSession(sessionId);
+  }
+
+  function startTurn(sessionId, userText) {
+    const d = conn();
+    requireSession(sessionId);
+    const text = String(userText || '').trim();
+    if (!text) throw new Error('说点什么再发送');
+
+    const now = nowIso();
+    const id = newTurnId();
+    try {
+      d.run(
+        `INSERT INTO session_turns
+           (id, session_id, status, user_text, result_text, error, events_file, external_ref,
+            exit_code, started_at, ended_at, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [id, sessionId, 'queued', text, '', '', null, null, null, null, null, now, now]
+      );
+    } catch (e) {
+      // 部分唯一索引负责并发拦截。把数据库错误翻成人话，别让前端看到
+      // "UNIQUE constraint failed: session_turns.session_id"。
+      if (/UNIQUE|constraint/i.test(String(e.message || ''))) {
+        throw new Error('这个会话还有一轮没结束');
+      }
+      throw e;
+    }
+    d.run('UPDATE agent_sessions SET updated_at = ? WHERE id = ?', [now, sessionId]);
+    return getTurn(id);
+  }
+
+  function markTurnRunning(turnId, opts = {}) {
+    const d = conn();
+    const cur = requireTurn(turnId);
+    if (cur.status !== 'queued' && cur.status !== 'running') {
+      throw new Error('这一轮已经结束，不能再标记为运行中');
+    }
+    const now = nowIso();
+    d.tx(() => {
+      d.run(
+        `UPDATE session_turns
+            SET status = 'running', started_at = COALESCE(started_at, ?),
+                external_ref = COALESCE(?, external_ref),
+                events_file = COALESCE(?, events_file), updated_at = ?
+          WHERE id = ?`,
+        [now, opts.externalRef ?? null, opts.eventsFile ?? null, now, turnId]
+      );
+      d.run("UPDATE agent_sessions SET status = 'busy', updated_at = ? WHERE id = ?",
+        [now, cur.session_id]);
+    });
+    return getTurn(turnId);
+  }
+
+  function finishTurn(turnId, result = {}) {
+    const d = conn();
+    const cur = requireTurn(turnId);
+    const status = String(result.status || '');
+    if (!['completed', 'failed', 'interrupted', 'unknown'].includes(status)) {
+      throw new Error('非法 Turn 终态: ' + status);
+    }
+
+    // 事件文件保留完整流；这里只截展示用正文。200 KB 已经远大于一屏，
+    // 再大只会拖慢 /api/sessions 的响应。
+    let text = String(result.resultText || '');
+    const MAX = 200 * 1024;
+    if (text.length > MAX) {
+      text = text.slice(0, MAX) + '\n[结果超过 200 KB，已截断；完整事件见 events_file]';
+    }
+
+    const now = nowIso();
+    d.tx(() => {
+      d.run(
+        `UPDATE session_turns
+            SET status = ?, result_text = ?, error = ?, exit_code = ?,
+                ended_at = ?, updated_at = ?
+          WHERE id = ?`,
+        [status, text, String(result.error || '').slice(0, 4000),
+          result.exitCode === undefined || result.exitCode === null ? null : Number(result.exitCode),
+          now, now, turnId]
+      );
+      // 一轮结束后会话本身是可用的；只有「不知道这一轮到底跑完没有」才留 unknown。
+      d.run('UPDATE agent_sessions SET status = ?, updated_at = ? WHERE id = ?',
+        [status === 'unknown' ? 'unknown' : 'idle', now, cur.session_id]);
+    });
+    return getTurn(turnId);
+  }
+
+  function getTurn(id) {
+    if (!id) return null;
+    return rowToTurn(conn().get('SELECT * FROM session_turns WHERE id = ?', [id]));
+  }
+
+  function listTurns(sessionId, limit = 20) {
+    if (!sessionId) return [];
+    const n = Math.max(1, Math.min(200, Number(limit) || 20));
+    return conn().all(
+      'SELECT * FROM session_turns WHERE session_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?',
+      [sessionId, n]
+    ).map(rowToTurn).reverse();
+  }
+
+  function openTurn(sessionId) {
+    if (!sessionId) return null;
+    return rowToTurn(conn().get(
+      "SELECT * FROM session_turns WHERE session_id = ? AND status IN ('queued','running') ORDER BY created_at LIMIT 1",
+      [sessionId]
+    ));
+  }
+
+  function refreshSessionStatus(sessionId) {
+    const d = conn();
+    const cur = requireSession(sessionId);
+    const open = openTurn(sessionId);
+    const last = d.get(
+      'SELECT status FROM session_turns WHERE session_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1',
+      [sessionId]
+    );
+    let next = 'idle';
+    if (open) next = 'busy';
+    else if (last && last.status === 'unknown') next = 'unknown';
+    else if (cur.status === 'unavailable' && !last) next = 'unavailable';
+    if (next !== cur.status) {
+      d.run('UPDATE agent_sessions SET status = ?, updated_at = ? WHERE id = ?', [next, nowIso(), sessionId]);
+      return getSession(sessionId);
+    }
+    return cur;
+  }
+
+  /**
+   * 服务启动时把所有没结束的 Turn 收成 unknown。不能收成 failed ——
+   * 进程退出不等于执行失败，可能 CLI 已经跑完了只是 Cabinet 没来得及写回。
+   * 收成 completed 更不行，那是把「不知道」说成「成功」。
+   */
+  function recoverOpenTurns() {
+    const d = conn();
+    const rows = d.all("SELECT id, session_id FROM session_turns WHERE status IN ('queued','running')");
+    if (!rows.length) return 0;
+    const now = nowIso();
+    d.tx(() => {
+      for (const r of rows) {
+        d.run(
+          `UPDATE session_turns
+              SET status = 'unknown', error = ?, ended_at = ?, updated_at = ?
+            WHERE id = ?`,
+          ['Cabinet 重启，执行状态待核对', now, now, r.id]
+        );
+        d.run("UPDATE agent_sessions SET status = 'unknown', updated_at = ? WHERE id = ?",
+          [now, r.session_id]);
+      }
+    });
+    return rows.length;
   }
 
   // ---------- 列表 / 看板 ----------
@@ -2181,6 +2639,10 @@ export function createCore(dataDir) {
     // 服务端和测试要能单独验它们。
     childrenOf, childCount, subtreeStats, recomputeStatus, deriveStatus, MAX_DEPTH,
     mergeTasks, splitTask, revertMerge,
+    // 阶段 1A：持久 Agent Session / Turn
+    createSession, listSessions, getSession, updateSession, bindExternalSession,
+    startTurn, markTurnRunning, finishTurn, getTurn, listTurns, openTurn,
+    recoverOpenTurns, refreshSessionStatus,
     pushMessage, listMessages, recentMessages, clearMessages, setBrief,
     listProjects, getProject, addProject, updateProject, deleteProject, findProject, ensureProject,
     reorderProjects,

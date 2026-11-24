@@ -154,7 +154,7 @@ export function openSqlite(file) {
 // ---------- schema ----------
 
 // 版本号存在 meta 里。加字段时：把 SCHEMA_VERSION +1，在 MIGRATIONS 里补一条。
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -163,13 +163,16 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 
 CREATE TABLE IF NOT EXISTS projects (
-  id         TEXT PRIMARY KEY,
-  name       TEXT NOT NULL UNIQUE,
-  aliases    TEXT NOT NULL DEFAULT '[]',   -- JSON array
-  dirs       TEXT NOT NULL DEFAULT '[]',   -- JSON array of {path,note,primary}
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  sort_order INTEGER NOT NULL DEFAULT 0    -- 侧栏拖拽顺序，「默认」永远是 0
+  id            TEXT PRIMARY KEY,
+  name          TEXT NOT NULL UNIQUE,
+  aliases       TEXT NOT NULL DEFAULT '[]',   -- JSON array
+  dirs          TEXT NOT NULL DEFAULT '[]',   -- JSON array of {path,note,primary}
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL,
+  sort_order    INTEGER NOT NULL DEFAULT 0,   -- 侧栏拖拽顺序，「默认」永远是 0
+  default_agent TEXT,                          -- opencode | codex | NULL
+  default_model TEXT,                          -- NULL = 用 Agent 默认模型
+  archived_at   TEXT                           -- NULL = 未归档
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -247,6 +250,48 @@ CREATE TABLE IF NOT EXISTS links (
 );
 CREATE INDEX IF NOT EXISTS idx_links_from ON links(kind, from_id);
 CREATE INDEX IF NOT EXISTS idx_links_to   ON links(kind, to_id);
+
+-- 一张卡下挂的外部 Agent 会话。一个角色实例一条，external_session_id
+-- 在首次发送时绑定；在那之前为 NULL（前端显示「待首次消息绑定」）。
+CREATE TABLE IF NOT EXISTS agent_sessions (
+  id                  TEXT PRIMARY KEY,
+  task_id             TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  role                TEXT NOT NULL DEFAULT 'dev',
+  agent               TEXT NOT NULL DEFAULT 'opencode',
+  external_session_id TEXT,
+  working_directory   TEXT NOT NULL,
+  model               TEXT,
+  status              TEXT NOT NULL DEFAULT 'idle',
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL
+);
+
+-- 每一轮实际执行。status 是 Turn 的状态，不是 Task 的状态；
+-- 一轮完成不等于任务验收通过。
+CREATE TABLE IF NOT EXISTS session_turns (
+  id            TEXT PRIMARY KEY,
+  session_id    TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+  status        TEXT NOT NULL DEFAULT 'queued',
+  user_text     TEXT NOT NULL,
+  result_text   TEXT NOT NULL DEFAULT '',
+  error         TEXT NOT NULL DEFAULT '',
+  events_file   TEXT,                          -- 相对 dataDir，如 sessions/turn_x.jsonl
+  external_ref  TEXT,                          -- 外部 messageID，核对时用来对回这一轮
+  exit_code     INTEGER,
+  started_at    TEXT,
+  ended_at      TEXT,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+
+-- 同一会话同时只能有一轮没结束。部分唯一索引比「先查再插」可靠：
+-- 两个请求同时进来时，数据库自己保证只有一个成功。
+CREATE UNIQUE INDEX IF NOT EXISTS idx_turns_one_open
+  ON session_turns(session_id)
+  WHERE status IN ('queued', 'running');
+
+CREATE INDEX IF NOT EXISTS idx_turns_session ON session_turns(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_task  ON agent_sessions(task_id, updated_at);
 
 CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
@@ -410,6 +455,58 @@ CREATE INDEX IF NOT EXISTS idx_links_to   ON links(kind, to_id);`);
       )
       UPDATE tasks SET seq_no = (SELECT rn FROM numbered WHERE numbered.id = tasks.id)
        WHERE seq_no IS NULL`);
+  },
+
+  // v8 → v9：持久 Agent Session
+  //
+  // 项目三列 + 两张会话表一次加完，理由和 v2/v8 一样：分开升版本时，
+  // 后落地的那条会被 `fromVersion < SCHEMA_VERSION` 跳过，字段永远补不上。
+  //
+  // 两张表的 CREATE 不写进 SCHEMA 常量之外的迁移号里会重复，但这里必须再写一遍：
+  // `db.exec(SCHEMA)` 在迁移之前跑，老库能靠 IF NOT EXISTS 建出来；
+  // 写在这里是给「迁移单独重跑」和未来手工降级兜底，保持幂等。
+  8: (db) => {
+    const addColumn = (table, column, ddl) => {
+      const cols = db.all('PRAGMA table_info(' + table + ')').map((c) => c.name);
+      if (!cols.includes(column)) db.exec('ALTER TABLE ' + table + ' ADD COLUMN ' + ddl);
+    };
+
+    addColumn('projects', 'default_agent', 'default_agent TEXT');
+    addColumn('projects', 'default_model', 'default_model TEXT');
+    addColumn('projects', 'archived_at', 'archived_at TEXT');
+
+    db.exec(`
+CREATE TABLE IF NOT EXISTS agent_sessions (
+  id                  TEXT PRIMARY KEY,
+  task_id             TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  role                TEXT NOT NULL DEFAULT 'dev',
+  agent               TEXT NOT NULL DEFAULT 'opencode',
+  external_session_id TEXT,
+  working_directory   TEXT NOT NULL,
+  model               TEXT,
+  status              TEXT NOT NULL DEFAULT 'idle',
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS session_turns (
+  id            TEXT PRIMARY KEY,
+  session_id    TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+  status        TEXT NOT NULL DEFAULT 'queued',
+  user_text     TEXT NOT NULL,
+  result_text   TEXT NOT NULL DEFAULT '',
+  error         TEXT NOT NULL DEFAULT '',
+  events_file   TEXT,
+  external_ref  TEXT,
+  exit_code     INTEGER,
+  started_at    TEXT,
+  ended_at      TEXT,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_turns_one_open
+  ON session_turns(session_id) WHERE status IN ('queued', 'running');
+CREATE INDEX IF NOT EXISTS idx_turns_session ON session_turns(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_task  ON agent_sessions(task_id, updated_at);`);
   }
 };
 

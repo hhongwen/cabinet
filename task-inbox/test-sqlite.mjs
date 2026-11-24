@@ -1044,8 +1044,10 @@ console.log('\n=== 21. 表格字段（v8：seq_no / plan_* / owner / *_hours） 
   const v8 = createCore(tmp);
   v8.init();
   ok('tasks 的 6 个列回来了', DROP8.every((c) => colsOf(v8).includes(c)));
-  eq('版本升到 8', v8.conn().get("SELECT value FROM meta WHERE key='schema_version'").value, '8');
-  eq('SCHEMA_VERSION 就是 8', SCHEMA_VERSION, 8);
+  // v7 老库会被一路升到当前版本（现在包含 v9）；这一节只验 v8 那 6 个列，
+  // 版本号跟着 SCHEMA_VERSION 走，别再写死。
+  eq('版本升到当前版本', v8.conn().get("SELECT value FROM meta WHERE key='schema_version'").value, String(SCHEMA_VERSION));
+  eq('SCHEMA_VERSION 就是 9', SCHEMA_VERSION, 9);
   eq('迁移不动任务条数', Number(v8.conn().get('SELECT COUNT(*) AS c FROM tasks').c), totalBefore);
 
   // ---- 21.2 老任务的 seq_no 回填 ----
@@ -1213,6 +1215,106 @@ console.log('\n=== 21. 表格字段（v8：seq_no / plan_* / owner / *_hours） 
   b.close();
 }
 
+console.log('\n=== 22. Agent Session（v9） ===');
+{
+  // 22.1 v8 -> v9 迁移
+  core.conn().exec('DROP TABLE IF EXISTS session_turns');
+  core.conn().exec('DROP TABLE IF EXISTS agent_sessions');
+  for (const c of ['default_agent', 'default_model', 'archived_at']) {
+    try { core.conn().exec('ALTER TABLE projects DROP COLUMN ' + c); } catch { /* 已经没有 */ }
+  }
+  core.conn().run("UPDATE meta SET value='8' WHERE key='schema_version'");
+  const v9 = createCore(tmp);
+  v9.init();
+  const cols = (t) => v9.conn().all('PRAGMA table_info(' + t + ')').map((x) => x.name);
+  ok('agent_sessions 表回来了', !!v9.conn().get("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_sessions'"));
+  ok('session_turns 表回来了', !!v9.conn().get("SELECT name FROM sqlite_master WHERE type='table' AND name='session_turns'"));
+  ok('projects 三个列回来了', ['default_agent', 'default_model', 'archived_at'].every((c) => cols('projects').includes(c)));
+  eq('SCHEMA_VERSION 就是 9', SCHEMA_VERSION, 9);
+  v9.close();
+
+  // 22.2 项目默认 Agent / 模型与归档
+  const p = core.addProject('临时归档项目');
+  core.updateProject(p.id, { default_agent: 'opencode', default_model: 'provider/model-a' });
+  eq('默认 Agent 落库', core.getProject(p.id).default_agent, 'opencode');
+  eq('默认模型落库', core.getProject(p.id).default_model, 'provider/model-a');
+
+  const t = core.add({ title: '归档项目里的任务', project: '临时归档项目' });
+  let refused = false;
+  try { core.updateProject(p.id, { archived_at: '2026-01-01T00:00:00.000Z' }); } catch { refused = true; }
+  ok('有活跃任务时拒绝归档', refused, '归档不应把任务一起藏起来');
+
+  core.patch(t.id, { status: 'done' });
+  core.patch(t.id, { archived_at: '2026-01-01T00:00:00.000Z' });
+  core.updateProject(p.id, { archived_at: '2026-01-01T00:00:00.000Z' });
+  ok('默认列表看不到已归档项目', !core.listProjects().some((x) => x.id === p.id));
+  ok('include_archived 能看到', core.listProjects({ include_archived: true }).some((x) => x.id === p.id));
+
+  let assign = false;
+  try { core.add({ title: '不该落进归档项目', project: '临时归档项目' }); } catch { assign = true; }
+  ok('已归档项目不能再接新任务', assign);
+
+  core.updateProject(p.id, { archived_at: null });
+  ok('恢复后重新出现在列表', core.listProjects().some((x) => x.id === p.id));
+
+  // 22.3 Session / Turn 生命周期
+  const host = core.add({ title: '会话宿主', project: 'Cabinet' });
+  const sess = core.createSession({
+    taskId: host.id, role: 'dev', agent: 'opencode',
+    workingDirectory: tmp, model: 'provider/model-a'
+  });
+  eq('外部 Session ID 先为空', sess.external_session_id, null);
+  eq('会话初始 idle', sess.status, 'idle');
+  eq('任务行带会话数', core.getTask(host.id).agent_session_count, 1);
+
+  const bound = core.bindExternalSession(sess.id, 'ses_test_1');
+  eq('外部 Session ID 能绑定', bound.external_session_id, 'ses_test_1');
+  ok('绑定后不允许换成另一个外部 ID', (() => {
+    try { core.bindExternalSession(sess.id, 'ses_other'); return false; } catch { return true; }
+  })());
+
+  const turn = core.startTurn(sess.id, '第一轮');
+  eq('新 Turn 是 queued', turn.status, 'queued');
+  ok('同一会话不能再开第二个未完成 Turn', (() => {
+    try { core.startTurn(sess.id, '并发第二条'); return false; } catch { return true; }
+  })());
+
+  core.markTurnRunning(turn.id, { externalRef: 'msg_1', eventsFile: 'sessions/' + turn.id + '.jsonl' });
+  eq('会话变 busy', core.getSession(sess.id).status, 'busy');
+  eq('事件文件落库', core.getTurn(turn.id).events_file, 'sessions/' + turn.id + '.jsonl');
+  core.finishTurn(turn.id, { status: 'completed', resultText: '收到', exitCode: 0 });
+  eq('会话回 idle', core.getSession(sess.id).status, 'idle');
+  eq('结果落库', core.getTurn(turn.id).result_text, '收到');
+
+  const turn2 = core.startTurn(sess.id, '第二轮');
+  eq('第二轮复用同一个 Session', turn2.session_id, sess.id);
+  core.finishTurn(turn2.id, { status: 'failed', error: '模拟失败', exitCode: 1 });
+  eq('失败 Turn 记录错误', core.getTurn(turn2.id).error, '模拟失败');
+  eq('失败后会话仍是 idle', core.getSession(sess.id).status, 'idle');
+
+  // 22.4 重启恢复：running 变 unknown，不冒充 completed
+  const turn3 = core.startTurn(sess.id, '第三轮');
+  core.markTurnRunning(turn3.id, {
+    externalRef: 'msg_3',
+    eventsFile: 'sessions/' + turn3.id + '.jsonl'
+  });
+  const recovered = core.recoverOpenTurns();
+  eq('恢复只收未完成 Turn', recovered, 1);
+  eq('未完成 Turn 变 unknown', core.getTurn(turn3.id).status, 'unknown');
+  eq('会话也变 unknown', core.getSession(sess.id).status, 'unknown');
+
+  // 22.5 删除任务清事件文件
+  const evFile = path.join(tmp, 'sessions', turn3.id + '.jsonl');
+  fs.mkdirSync(path.dirname(evFile), { recursive: true });
+  fs.writeFileSync(evFile, '{"type":"step_start"}\n');
+  core.remove(host.id);
+  ok('删任务时事件文件一起清掉', !fs.existsSync(evFile));
+  eq('会话跟着任务删掉', core.getSession(sess.id), null);
+}
+
+// Windows 上 SQLite 文件被打开时 rmSync 会 EPERM。第 1 节建的 core
+// 一直用到第 22 节，最后统一关掉再删临时目录。
+core.close();
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log('\n────────────────────────');
 console.log(`通过 ${pass} / 共 ${pass + fail}` + (fail ? `  失败 ${fail}` : '  全绿'));
