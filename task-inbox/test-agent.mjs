@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createCore } from './core.mjs';
-import { createAgentRunner } from './agent.mjs';
+import { createAgentRunner, buildTaskContext } from './agent.mjs';
 import { createOpenCodeAdapter, parseEventLine, summarizeExport } from './opencode-agent.mjs';
 import { resolveCliBin } from './backend.mjs';
 
@@ -474,6 +474,67 @@ console.log('\n=== 18. PATH 上的裸 opencode 命令 ===');
   } finally {
     process.env.PATH = old;
   }
+}
+
+console.log('\n=== 19. 首轮任务上下文：新会话带、老会话补一次 ===');
+{
+  const ctxTask = core.add({ title: '上下文任务', project: 'Cabinet' });
+  core.patch(ctxTask.id, { payload: { text: '原始需求 A' } });
+  core.setBrief(ctxTask.id, '## 目标\n把 A 改成 B\n\n## 验收\n刷新后仍是 B');
+  const ctxSess = core.createSession({
+    taskId: ctxTask.id, role: 'dev', agent: 'opencode', workingDirectory: tmp
+  });
+
+  const ctx = buildTaskContext(core.getTask(ctxTask.id), ctxSess);
+  ok('上下文含标题', ctx.includes('上下文任务'), ctx.slice(0, 120));
+  ok('上下文含原始描述', ctx.includes('原始需求 A'));
+  ok('上下文含 brief', ctx.includes('把 A 改成 B'));
+  ok('上下文含角色', ctx.includes('dev'));
+
+  const longCtx = buildTaskContext({
+    title: '长需求', project: 'P',
+    payload: { text: 'x'.repeat(20000) }, brief: ''
+  }, { role: 'dev', working_directory: tmp });
+  ok('超长上下文被截断', longCtx.length < 14000 && /已截断/.test(longCtx), String(longCtx.length));
+
+  const seen = [];
+  const promptAdapter = {
+    ...fakeAdapter('ok'),
+    async runTurn({ text, onEvent }) {
+      seen.push(text);
+      onEvent({ type: 'step_start', sessionID: 'ses_ctx', part: { messageID: 'msg_ctx' } });
+      onEvent({ type: 'text', text: '收到', part: {} });
+      onEvent({ type: 'step_finish', part: { reason: 'stop' } });
+      return { externalRef: 'msg_ctx', resultText: '收到', exitCode: 0, finalReason: 'stop' };
+    }
+  };
+  const runner = createAgentRunner({ core, dataDir: tmp, adapters: [promptAdapter], timeoutMs: 2000 });
+
+  const first = runner.start({ sessionId: ctxSess.id, text: '第一轮用户话' });
+  await first.done;
+  ok('首轮 prompt 含任务标题', seen[0].includes('上下文任务'), seen[0].slice(0, 160));
+  ok('首轮 prompt 含原始描述', seen[0].includes('原始需求 A'));
+  ok('首轮 prompt 含 brief', seen[0].includes('把 A 改成 B'));
+  ok('首轮 prompt 含用户原话', seen[0].includes('第一轮用户话'));
+  ok('首轮后标记 context_seeded_at', !!core.getSession(ctxSess.id).context_seeded_at);
+
+  const second = runner.start({ sessionId: ctxSess.id, text: '第二轮用户话' });
+  await second.done;
+  eq('第二轮只发用户原话', seen[1], '第二轮用户话');
+
+  // 模拟本次补丁之前就存在的会话：有历史 turn，但 context_seeded_at 为空
+  const oldSess = core.createSession({
+    taskId: ctxTask.id, role: 'dev', agent: 'opencode', workingDirectory: tmp
+  });
+  const oldTurn = core.startTurn(oldSess.id, '历史一轮');
+  core.finishTurn(oldTurn.id, { status: 'completed', resultText: '旧结果' });
+  eq('老会话默认未 seed', core.getSession(oldSess.id).context_seeded_at, null);
+  const third = runner.start({ sessionId: oldSess.id, text: '补上下文' });
+  await third.done;
+  ok('老会话下一条自动补上下文', seen[2].includes('上下文任务') && seen[2].includes('补上下文'));
+  ok('老会话补完也标记', !!core.getSession(oldSess.id).context_seeded_at);
+
+  runner.close();
 }
 
 core.close();

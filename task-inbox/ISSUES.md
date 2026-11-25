@@ -1603,8 +1603,24 @@ limit，没有 `dev_ready` 也没有 `include_archived`。所以你在对话里�
     浏览器实测：重新打开运行中的卡会自动轮询到结果；归档项目下拉显示已归档
     有活跃任务的项目归档被拒；空项目归档后侧栏消失、设置里可恢复
   测试
-    test-sqlite 406 / test-agent 75 / test-agent-http 39 / test-parsers 86
+    test-sqlite 412 / test-agent 89 / test-agent-http 47 / test-parsers 86
     style-audit 0 error（1 个历史遗留 warning）
+
+1A 补丁：任务上下文随首轮发送（2026-11-25）  ✅
+  起因
+    1A 只把输入框文本交给 OpenCode，任务卡的标题 / 原文 / brief 没带过去，
+    Agent 看到的是一句孤立指令，用户还得在输入框里重抄需求。
+  改动
+    schema v10：agent_sessions.context_seeded_at
+    agent.mjs：buildTaskContext 拼标题 / 编号 / 项目 / 角色 / 工作目录 / 原始描述 / brief
+    首轮或未 seed 的 Session 自动带上；step_start 后才标记，早退/参数错误下一轮会补
+    已有 Session（补丁前创建、context_seeded_at 为空）下一条消息自动补一次
+    UI：会话区显示「下一条会自动带任务需求 / 已随某一轮发送」
+  测试
+    新增上下文截断、首轮带、第二轮不带、老会话补一次、HTTP 首轮/第二轮断言
+    test-sqlite 412 / test-agent 89 / test-agent-http 47 / test-parsers 86
+  已知
+    brief 改了不会自动重发；需要重新挂会话（1B TaskContext 解决持续更新）
   已知限制
     只有 OpenCode；Agent 会话不支持图片/文件附件；不做自动选下游和自动交接
     UI 暂不暴露显式绑定已有 ses_ 和 force:true 新建第二条（API 支持 force）

@@ -123,10 +123,12 @@ export function createOpenCodeAdapter(opts = {}) {
       // ~/.bun/bin、自定义 npm prefix 都在 PATH 上，不能因为不在已知目录
       // 就直接判「不可用」；真探测一次 --version 才准。
       if (base.command === 'opencode') {
-        const r = spawnSync('opencode', ['--version'], {
+        // 命令名是固定常量，没有用户输入；用字符串形式避免 shell + args
+        // 的 DEP0190 警告（Windows 的 .cmd shim 需要 shell 才能找到）。
+        const r = spawnSync('opencode --version', {
           timeout: 5000,
           windowsHide: true,
-          shell: process.platform === 'win32'
+          shell: true
         });
         return !r.error && r.status === 0;
       }

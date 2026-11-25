@@ -1,6 +1,6 @@
 # Cabinet Session 与 Agent 协作实施规划
 
-> **状态：1A 已实现（OpenCode，2026-11-24）；1B / 1C / 2 仍为规划。**
+> **状态：1A 已实现（OpenCode，2026-11-24；2026-11-25 补首轮任务上下文）；1B / 1C / 2 仍为规划。**
 > 1A 的实施与验收见 [docs/plans/2026-11-24-session-1a-implementation.md](plans/2026-11-24-session-1a-implementation.md)。
 > 本文继续细化 [ROADMAP.md](../ROADMAP.md) 的阶段 1A / 1B / 1C / 2；1B / 1C 部分不是上线声明。
 > 现有问题由 [ISSUES.md](../task-inbox/ISSUES.md) 维护。

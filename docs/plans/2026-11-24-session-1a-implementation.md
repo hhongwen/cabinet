@@ -4,8 +4,12 @@
 >
 > **状态：已实现并验收（2026-11-24，分支 `feat/session-1a`）。**
 > 验收证据：真实 OpenCode 两轮复用同一 Session；重启后未完成 Turn 变 `unknown`；
-> `test-sqlite` 406 / `test-agent` 75 / `test-agent-http` 39 / `test-parsers` 86，
+> `test-sqlite` 412 / `test-agent` 89 / `test-agent-http` 47 / `test-parsers` 86，
 > `style-audit` 0 error。实施记录见 `task-inbox/ISSUES.md` 第九批。
+>
+> **1A 补丁（2026-11-25）：** schema v10 增加 `agent_sessions.context_seeded_at`；
+> 新 Session 首轮自动带任务上下文，补丁前的老 Session 下一条消息自动补一次，
+> 之后只发用户新写的内容。计划正文仍按 v9 记录，v10 以这里为准。
 >
 > **复核后的实施偏差：** Turn 恢复从 `core.init()` 移到 server 启动路径，并加
 > 数据目录单实例锁（避免 `cli init` 或第二个实例抢跑正在执行的 Turn）；

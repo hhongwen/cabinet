@@ -360,13 +360,13 @@ context      累积的最新共识（markdown）← 待建（可更新，带来�
 | 看 | 看板（三列）+ 表格（11 列、层级缩进、排序、5 列行内编辑）两种画法 |
 | 收尾 | 已完成 30 天自动归档，不删数据，可取回 |
 | 谈 | 卡片抽屉里对话，模型返回结构化补丁直接改卡片字段 |
-| 存 | SQLite（WAL），schema v9，老 `tasks.json` 自动迁移 |
+| 存 | SQLite（WAL），schema v10，老 `tasks.json` 自动迁移 |
 | 接 | 三条模型通道自动降级：magpie → opencode → codex |
 | 跑 | 独立服务，Windows + macOS |
 | **会话** | **OpenCode 持久 Session、Turn 记录、停止 / 核对、重启恢复** |
 | **项目** | **默认 Agent / 模型、归档 / 恢复；新会话自动继承** |
 
-测试：`test-sqlite` 406 项、`test-agent` 75 项、`test-agent-http` 39 项、
+测试：`test-sqlite` 412 项、`test-agent` 89 项、`test-agent-http` 47 项、
 `test-parsers` 86 项，全绿；`style-audit` 0 error。
 
 ### 还没开始的
@@ -391,6 +391,7 @@ ui          抽屉「Agent 会话」区、卡片 Agent 徽标、项目默认 Age
 | 验收项 | 证据 |
 |---|---|
 | 两轮复用同一个外部 Session | 临时库实测：同一 `ses_...` 连续两轮，第一轮「只回复两个字：收到」→「收到」，第二轮问「刚才的两个字是什么」→「收到」 |
+| 任务上下文自动带上 | 新 Session 首轮把标题 / 编号 / 项目 / 角色 / 原始描述 / `brief` 拼进 prompt；补丁前的老 Session 下一条自动补一次，之后只发用户新写的内容（`context_seeded_at` 标记） |
 | 重启后仍能定位原 Session | 停服务再起，同一 `external_session_id` 保留；第二、三轮继续在原 Session 上跑 |
 | 未完成 Turn 不误报完成 | 手工把 Turn 置 `running` 后重启：Turn 和 Session 都变 `unknown`；`session export` 核对不到时保持 `unknown`，任务状态仍是 `todo` |
 | 同会话不并行 | 运行中再发返回 `409`；数据库部分唯一索引兜底 |

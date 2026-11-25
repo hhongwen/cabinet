@@ -29,8 +29,11 @@ core.updateProject(project.id, {
   default_model: 'provider/model-http'
 });
 const task = core.add({ title: 'HTTP 会话宿主', project: 'HTTP 测试项目' });
+core.patch(task.id, { payload: { text: 'HTTP 原始需求' } });
+core.setBrief(task.id, '## 目标\nHTTP 上下文验证');
 
 // 假 Adapter：第一轮故意慢 150ms，好让「运行中再发」稳定撞到 409。
+const seenTexts = [];
 const fake = {
   kind: 'opencode',
   async available() { return true; },
@@ -40,7 +43,8 @@ const fake = {
       created: !session.external_session_id
     };
   },
-  async runTurn({ onEvent }) {
+  async runTurn({ text, onEvent }) {
+    seenTexts.push(text);
     await new Promise((r) => setTimeout(r, 150));
     onEvent({ type: 'step_start', sessionID: 'ses_http_1', part: { messageID: 'msg_http_1' } });
     onEvent({ type: 'text', text: '收到', part: {} });
@@ -132,6 +136,11 @@ console.log('\n=== 4. 轮询状态与核对 ===');
   eq('Turn completed', r.data.turns[0].status, 'completed');
   eq('结果正文', r.data.turns[0].result_text, '收到');
   eq('外部 Session 已绑定', r.data.session.external_session_id, 'ses_http_1');
+  ok('首轮 prompt 含任务标题', seenTexts[0]?.includes('HTTP 会话宿主'), seenTexts[0]?.slice(0, 160));
+  ok('首轮 prompt 含原始需求', seenTexts[0]?.includes('HTTP 原始需求'));
+  ok('首轮 prompt 含 brief', seenTexts[0]?.includes('HTTP 上下文验证'));
+  ok('首轮 prompt 含用户原话', seenTexts[0]?.includes('只回复收到'));
+  ok('首轮后 context_seeded_at 有值', !!r.data.session.context_seeded_at);
 
   const rec = await call('POST', '/api/sessions/' + sid + '/reconcile');
   eq('核对 200', rec.status, 200);
@@ -142,6 +151,17 @@ console.log('\n=== 4. 轮询状态与核对 ===');
 
   const noTurn = await call('POST', '/api/turns/nope/interrupt');
   eq('不存在的 Turn 404', noTurn.status, 404);
+}
+
+console.log('\n=== 4b. 第二轮不再重复带上下文 ===');
+{
+  const before = seenTexts.length;
+  const r = await call('POST', '/api/sessions/' + sid + '/turns', { text: '第二轮只发这句' });
+  eq('第二轮 202', r.status, 202);
+  await new Promise((r2) => setTimeout(r2, 300));
+  ok('第二轮 prompt 不带上下文', !seenTexts[before].includes('【Cabinet 任务上下文】'),
+    seenTexts[before].slice(0, 160));
+  eq('第二轮 prompt 是用户原话', seenTexts[before], '第二轮只发这句');
 }
 
 console.log('\n=== 5. 项目归档参数 ===');

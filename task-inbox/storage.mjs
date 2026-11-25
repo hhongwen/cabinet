@@ -154,7 +154,7 @@ export function openSqlite(file) {
 // ---------- schema ----------
 
 // 版本号存在 meta 里。加字段时：把 SCHEMA_VERSION +1，在 MIGRATIONS 里补一条。
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -262,6 +262,7 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
   working_directory   TEXT NOT NULL,
   model               TEXT,
   status              TEXT NOT NULL DEFAULT 'idle',
+  context_seeded_at   TEXT,                          -- 任务上下文已随首轮发送的时间
   created_at          TEXT NOT NULL,
   updated_at          TEXT NOT NULL
 );
@@ -485,6 +486,7 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
   working_directory   TEXT NOT NULL,
   model               TEXT,
   status              TEXT NOT NULL DEFAULT 'idle',
+  context_seeded_at   TEXT,                          -- 任务上下文已随首轮发送的时间
   created_at          TEXT NOT NULL,
   updated_at          TEXT NOT NULL
 );
@@ -507,6 +509,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_turns_one_open
   ON session_turns(session_id) WHERE status IN ('queued', 'running');
 CREATE INDEX IF NOT EXISTS idx_turns_session ON session_turns(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_task  ON agent_sessions(task_id, updated_at);`);
+  },
+
+  // v9 → v10：任务上下文只随首轮发送，用时间戳标记是否已经发过。
+  //
+  // 老库（包括当前真实库）这一列为空，所以已有 Session 的下一条消息会自动
+  // 补一次任务上下文；补过之后只发用户新写的内容。新库由 SCHEMA 直接建列。
+  9: (db) => {
+    const cols = db.all('PRAGMA table_info(agent_sessions)').map((c) => c.name);
+    if (!cols.includes('context_seeded_at')) {
+      db.exec('ALTER TABLE agent_sessions ADD COLUMN context_seeded_at TEXT');
+    }
   }
 };
 

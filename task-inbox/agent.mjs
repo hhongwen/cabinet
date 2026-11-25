@@ -14,6 +14,39 @@ import path from 'node:path';
 import { createOpenCodeAdapter } from './opencode-agent.mjs';
 
 const DEFAULT_TIMEOUT = 30 * 60 * 1000;
+// 任务上下文只随首轮发送，但 brief 可能很长；截断避免一次 prompt 过大。
+const MAX_CONTEXT_FIELD = 12000;
+
+function clipContext(text) {
+  const s = String(text || '').trim();
+  if (s.length <= MAX_CONTEXT_FIELD) return s;
+  return s.slice(0, MAX_CONTEXT_FIELD) + '\n[已截断]';
+}
+
+/**
+ * 把任务卡拼成一段给 Agent 看的背景。只放「它需要知道的任务事实」：
+ * 标题 / 编号 / 项目 / 角色 / 工作目录 / 原始描述 / 整理后的需求。
+ * 不把优先级、状态这些 Cabinet 自己的字段塞进去 —— 那会让 prompt 变成
+ * 任务管理器的 UI 文本，而不是一条可执行的需求。
+ */
+export function buildTaskContext(task, session) {
+  const t = task || {};
+  const lines = ['【Cabinet 任务上下文】'];
+  if (t.title) lines.push('标题：' + t.title);
+  if (t.no) lines.push('编号：' + t.no);
+  if (t.project) lines.push('项目：' + t.project);
+  if (session && session.role) lines.push('角色：' + session.role);
+  if (session && session.working_directory) lines.push('工作目录：' + session.working_directory);
+
+  const original = clipContext(t.payload && t.payload.text);
+  if (original) lines.push('原始描述：\n' + original);
+  const brief = clipContext(t.brief);
+  if (brief) lines.push('整理后的需求：\n' + brief);
+  if (!original && !brief && t.note) lines.push('备注：\n' + clipContext(t.note));
+
+  lines.push('【以上是任务背景。下面是我这一轮要你做的事】');
+  return lines.join('\n');
+}
 
 function timeoutFromEnv() {
   const n = Number(process.env.AGENT_TURN_TIMEOUT_MS || 0);
@@ -63,6 +96,14 @@ export function createAgentRunner(opts = {}) {
     if (!clean) throw new Error('说点什么再发送');
     ensureDir(session.working_directory);
 
+    // 首轮（或补丁前创建、还没 seed 的 Session）把任务卡背景拼进 prompt；
+    // 之后只发用户这一轮写的内容，避免每轮重复几千字。
+    const task = core.getTask(session.task_id);
+    const needsContext = !session.context_seeded_at;
+    const prompt = needsContext
+      ? buildTaskContext(task, session) + '\n\n---\n\n' + clean
+      : clean;
+
     const adapter = adapterFor(session.agent);
     if (!adapter) throw new Error('这个 Agent 还没有接入: ' + session.agent);
 
@@ -101,6 +142,7 @@ export function createAgentRunner(opts = {}) {
     });
 
     let stderrText = '';
+    let contextMarked = !!session.context_seeded_at;
     const onEvent = (ev) => {
       if (streamClosed) return;
       try { stream.write(JSON.stringify(ev) + '\n'); } catch { /* 文件已关，不阻断执行 */ }
@@ -110,6 +152,14 @@ export function createAgentRunner(opts = {}) {
         try {
           core.markTurnRunning(turn.id, { externalRef: ev.part.messageID, eventsFile });
         } catch { /* 状态已经被别的路径改掉，不阻断本轮 */ }
+      }
+      // step_start 说明 CLI 已经真的开始跑了，这时才敢把「上下文已发」记下来。
+      // 早退 / 参数错误时不会到这一步，下一轮还会补。
+      if (!contextMarked && ev && ev.type === 'step_start') {
+        try {
+          core.markContextSeeded(sessionId);
+          contextMarked = true;
+        } catch { /* 标记失败不影响执行 */ }
       }
     };
 
@@ -146,7 +196,7 @@ export function createAgentRunner(opts = {}) {
         result = controller.signal.aborted ? { aborted: true } : await Promise.race([
           adapter.runTurn({
             session: core.getSession(sessionId),
-            text: clean,
+            text: prompt,
             onEvent,
             signal: controller.signal
           }),

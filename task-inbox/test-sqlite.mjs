@@ -1047,7 +1047,7 @@ console.log('\n=== 21. 表格字段（v8：seq_no / plan_* / owner / *_hours） 
   // v7 老库会被一路升到当前版本（现在包含 v9）；这一节只验 v8 那 6 个列，
   // 版本号跟着 SCHEMA_VERSION 走，别再写死。
   eq('版本升到当前版本', v8.conn().get("SELECT value FROM meta WHERE key='schema_version'").value, String(SCHEMA_VERSION));
-  eq('SCHEMA_VERSION 就是 9', SCHEMA_VERSION, 9);
+  eq('SCHEMA_VERSION 就是 10', SCHEMA_VERSION, 10);
   eq('迁移不动任务条数', Number(v8.conn().get('SELECT COUNT(*) AS c FROM tasks').c), totalBefore);
 
   // ---- 21.2 老任务的 seq_no 回填 ----
@@ -1230,7 +1230,7 @@ console.log('\n=== 22. Agent Session（v9） ===');
   ok('agent_sessions 表回来了', !!v9.conn().get("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_sessions'"));
   ok('session_turns 表回来了', !!v9.conn().get("SELECT name FROM sqlite_master WHERE type='table' AND name='session_turns'"));
   ok('projects 三个列回来了', ['default_agent', 'default_model', 'archived_at'].every((c) => cols('projects').includes(c)));
-  eq('SCHEMA_VERSION 就是 9', SCHEMA_VERSION, 9);
+  eq('SCHEMA_VERSION 就是 10', SCHEMA_VERSION, 10);
   v9.close();
 
   // 22.2 项目默认 Agent / 模型与归档
@@ -1352,8 +1352,34 @@ console.log('\n=== 23. 删除会话 / 运行中任务保护 ===');
   core.remove(host.id);
 }
 
+console.log('\n=== 24. 任务上下文种子（v10） ===');
+{
+  // v9 → v10：只加 agent_sessions.context_seeded_at
+  try { core.conn().exec('ALTER TABLE agent_sessions DROP COLUMN context_seeded_at'); } catch { /* 已经没有 */ }
+  core.conn().run("UPDATE meta SET value='9' WHERE key='schema_version'");
+  const v10 = createCore(tmp);
+  v10.init();
+  const cols = v10.conn().all('PRAGMA table_info(agent_sessions)').map((x) => x.name);
+  ok('agent_sessions.context_seeded_at 回来了', cols.includes('context_seeded_at'));
+  eq('版本升到当前版本', v10.conn().get("SELECT value FROM meta WHERE key='schema_version'").value, String(SCHEMA_VERSION));
+  v10.close();
+
+  const host = core.add({ title: '上下文种子任务', project: 'Cabinet' });
+  core.patch(host.id, { payload: { text: '原始描述：把 A 改成 B' } });
+  core.setBrief(host.id, '## 目标\n把 A 改成 B\n\n## 验收\n刷新后仍是 B');
+  const sess = core.createSession({
+    taskId: host.id, role: 'dev', agent: 'opencode', workingDirectory: tmp
+  });
+  eq('context_seeded_at 初始为空', sess.context_seeded_at, null);
+  const marked = core.markContextSeeded(sess.id);
+  ok('标记后有时间戳', !!marked.context_seeded_at);
+  eq('getSession 带标记', core.getSession(sess.id).context_seeded_at, marked.context_seeded_at);
+  eq('listSessions 带标记', core.listSessions(host.id)[0].context_seeded_at, marked.context_seeded_at);
+  core.remove(host.id);
+}
+
 // Windows 上 SQLite 文件被打开时 rmSync 会 EPERM。第 1 节建的 core
-// 一直用到第 23 节，最后统一关掉再删临时目录。
+// 一直用到第 24 节，最后统一关掉再删临时目录。
 core.close();
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log('\n────────────────────────');

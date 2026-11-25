@@ -307,6 +307,8 @@ export function createCore(dataDir) {
       working_directory: r.working_directory,
       model: r.model ?? null,
       status: r.status,
+      // 任务上下文是否已经随某一轮发过；空 = 下一条消息要补一次
+      context_seeded_at: r.context_seeded_at ?? null,
       created_at: r.created_at,
       updated_at: r.updated_at
     };
@@ -2202,6 +2204,19 @@ export function createCore(dataDir) {
   }
 
   /**
+   * 标记任务上下文已经随某一轮发出。只用时间戳，不存正文 ——
+   * 正文可以从当前任务卡重建；这里只回答「下一条消息还要不要补上下文」。
+   */
+  function markContextSeeded(sessionId) {
+    const d = conn();
+    requireSession(sessionId);
+    const now = nowIso();
+    d.run('UPDATE agent_sessions SET context_seeded_at = ?, updated_at = ? WHERE id = ?',
+      [now, now, sessionId]);
+    return getSession(sessionId);
+  }
+
+  /**
    * 删一个会话。运行中的先拒绝；历史 Turn 和事件文件跟着清掉。
    * 删除后可以重新挂一个（同一角色/Agent 的旧会话已经没了，不会再被复用）。
    */
@@ -2701,6 +2716,7 @@ export function createCore(dataDir) {
     mergeTasks, splitTask, revertMerge,
     // 阶段 1A：持久 Agent Session / Turn
     createSession, listSessions, getSession, updateSession, bindExternalSession, deleteSession,
+    markContextSeeded,
     startTurn, markTurnRunning, finishTurn, getTurn, listTurns, openTurn,
     recoverOpenTurns, refreshSessionStatus, setSessionStatus, openTurnsForTask,
     pushMessage, listMessages, recentMessages, clearMessages, setBrief,

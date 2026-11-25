@@ -4628,6 +4628,10 @@ function agentActiveHTML(s) {
     out.push('<button type="button" class="mini-btn" data-agent-del="' + esc(s.id) + '">删除会话</button>');
   }
   out.push('</div>');
+  out.push('<div class="agent-hint">' + (s.context_seeded_at
+    ? '任务需求已随某一轮发送；这里只发你这一轮写的内容。'
+    : '下一条消息会自动带上任务需求（标题 / 原文 / 需求说明）。')
+    + '</div>');
   out.push('<div class="agent-hint">Agent 会在 <code>' + esc(s.working_directory || '') + '</code> '
     + '直接执行命令（自动批准权限）。会话建立后工作目录不能改。</div>');
   return out.join('');
@@ -4818,7 +4822,7 @@ async function drStartAgent(t) {
 
   const dlg = relDialog({
     title: '挂一个 Agent 会话',
-    hint: '会话建立后工作目录不能改。Agent 会在这个目录直接执行命令（自动批准权限）。',
+    hint: '首轮发送会自动带上任务需求；已有会话下一条补一次。会话建立后工作目录不能改，Agent 会在这个目录直接执行命令（自动批准权限）。',
     submitLabel: '挂上',
     bodyHTML: '<div class="agent-form">'
       + '<label><span>角色</span><select class="agent-role sel-native" data-sel="field">' + roleOpts + '</select></label>'

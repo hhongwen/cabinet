@@ -329,11 +329,17 @@ node cli.mjs backup [文件]            热备份成 .db（服务在跑也能备
 5. 服务重启后如果这一轮没跑完，会显示 **待核对**，点 **核对状态** 让 Cabinet
    用 `opencode session export` 对回原 Session
 
+> **任务需求会自动带上**：每个 Session 的第一轮会把任务卡的标题、编号、项目、
+> 角色、原始描述和 `brief` 拼进 prompt；补丁前创建的老 Session 会在下一条消息
+> 自动补一次，之后只发你在输入框里写的内容。`context_seeded_at` 记录是否已经发过。
+
 ### 几条硬规则
 
 - **工作目录在首次发送后不能改**。OpenCode 的 Session 按工作目录归属，换了目录同一个 ID 可能打不开。
 - **同一会话同时只跑一轮**。运行中再发会得到 `409`，不会排两个 Turn 抢同一个会话。
 - **Turn 完成 ≠ 任务完成**。Cabinet 不会因为 Agent 说完成就把卡片改成已完成。
+- **任务上下文只随首轮发送一次**。之后只发你这一轮写的内容；`brief` 改了不会自动重发，
+  需要重新挂一个会话（1B 的 `TaskContext` 会解决持续更新）。
 - **重启不猜结果**。未完成的 Turn 一律先标 `unknown`；只有导出明确证明完成时才改 `completed`。
 - **Agent 以 `--auto` 运行**，会在工作目录直接执行命令（自动批准权限）。这是非交互模式的必要前提，工作目录要自己选对。
 - **默认 30 分钟超时**，超时会中止并落 `failed`；`AGENT_TURN_TIMEOUT_MS` 可覆盖。
@@ -512,12 +518,12 @@ WAL + `busy_timeout` 不会。
 | `messages` | 卡片抽屉里「与 Cabinet 对话」的消息，`ON DELETE CASCADE`；`attachments` 是 JSON（images / files） |
 | `projects` | 项目，`aliases` / `dirs` 是 JSON，`sort_order` 是侧栏顺序（「默认」永远是 0）；`default_agent` / `default_model` 给新会话继承，`archived_at` 归档但不删 |
 | `links` | 卡片之间的关系边：`kind` + `from_id` + `to_id`，`UNIQUE(kind,from,to)`，两端都 `ON DELETE CASCADE` |
-| `agent_sessions` | 一张卡下的外部 Agent 会话：角色 / Agent / 外部 Session ID / 工作目录 / 模型 / 状态 |
+| `agent_sessions` | 一张卡下的外部 Agent 会话：角色 / Agent / 外部 Session ID / 工作目录 / 模型 / 状态 / `context_seeded_at`（任务上下文是否已随首轮发送） |
 | `session_turns` | 每一轮的输入、结果、错误、事件文件、外部 messageID、起止时间；同一会话用部分唯一索引保证只有一轮没结束 |
 | `settings` | 通道、模型、`archive_after_days` 这类键值 |
 | `meta` | 库版本号，迁移用 |
 
-**schema 版本**：现在 **v9**。加字段时 `SCHEMA_VERSION +1` 并在 `MIGRATIONS` 里补一条，
+**schema 版本**：现在 **v10**。加字段时 `SCHEMA_VERSION +1` 并在 `MIGRATIONS` 里补一条，
 **一次改动只占一个号** —— 分两次加字段时，后落地的那条会被
 `fromVersion < SCHEMA_VERSION` 跳过，字段永远补不上。
 
@@ -530,6 +536,7 @@ v6  tasks.link_warn（前置断开时给下游留一句提示）
 v7  tasks.parent_id + idx_tasks_parent（层级）
 v8  seq_no / plan_start_at / plan_end_at / owner / estimate_hours / actual_hours（表格）
 v9  agent_sessions / session_turns + projects.default_agent / default_model / archived_at（1A 会话）
+v10 agent_sessions.context_seeded_at（任务上下文随首轮发送一次）
 ```
 
 老数据自动迁移：建库时如果目录里还有 `tasks.json` 而且 `tasks` 表是空的，
@@ -661,9 +668,9 @@ node style-audit.mjs
 ### 测试
 
 ```bash
-node test-sqlite.mjs        # 存储层 + schema 迁移 + 卡片关系 + 层级 + 表格 + 会话，406 项
-node test-agent.mjs         # 事件解析 / Turn 运行器 / CLI 解析 / 导出核对 / 超时，75 项
-node test-agent-http.mjs    # Session / Turn HTTP 路由 + 409 + 删除保护 + 锁，39 项
+node test-sqlite.mjs        # 存储层 + schema 迁移 + 卡片关系 + 层级 + 表格 + 会话，412 项
+node test-agent.mjs         # 事件解析 / Turn 运行器 / CLI 解析 / 导出核对 / 上下文，89 项
+node test-agent-http.mjs    # Session / Turn HTTP 路由 + 409 + 删除保护 + 锁，47 项
 node test-parsers.mjs       # classify / chat 解析层 + 队列路由，86 项，不碰真模型
 node style-audit.mjs        # 界面样式规范
 ```
