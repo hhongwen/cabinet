@@ -504,7 +504,7 @@ h1{
    规则：所有 textarea / input / select 的材质只在这里定义一次，
    组件里只写宽高、内边距和字号。新增输入框时直接沿用选择器列表。
    ========================================================================== */
-.dock textarea, .dr-foot textarea, .agent-input,
+.dock textarea, .dr-foot textarea,
 .dlg select, .dlg input[type=text], .dlg input:not([type]), .dlg textarea,
 .rel-dlg input, .rel-dlg select,
 .pick-bar input, .dir-row input, .dr-title-in, .sect-edit, .picker-in, .rel-split,
@@ -517,7 +517,7 @@ h1{
   box-shadow:var(--ctl-inset-shadow);
   transition:border-color .16s, background .16s, box-shadow .16s;
 }
-.dock textarea:focus, .dr-foot textarea:focus, .agent-input:focus,
+.dock textarea:focus, .dr-foot textarea:focus,
 .dlg select:focus, .dlg input:focus, .dlg textarea:focus,
 .rel-dlg input:focus, .rel-dlg select:focus,
 .pick-bar input:focus, .dir-row input:focus, .dr-title-in:focus, .sect-edit:focus,
@@ -526,7 +526,7 @@ h1{
   border-color:var(--orange);
   box-shadow:var(--ctl-inset-shadow), var(--ctl-focus-ring);
 }
-.dock textarea::placeholder, .dr-foot textarea::placeholder, .agent-input::placeholder,
+.dock textarea::placeholder, .dr-foot textarea::placeholder,
 .dlg input::placeholder, .rel-dlg input::placeholder {color:var(--text-4)}
 
 /* ---------- 筛选条：一个整体工具条，每段都是自定义下拉 ---------- */
@@ -797,9 +797,6 @@ body select.sel-native{
 .agent-form label{display:flex;flex-direction:column;gap:3px;font:10px var(--font-mono);color:var(--text-3)}
 .agent-dir-row{display:flex;gap:5px}
 .agent-dir-row input{flex:1;min-width:0}
-/* Agent 输入框：材质走输入框总则，这里只写尺寸 */
-.agent-input{width:100%;min-height:64px;resize:vertical;font-size:12px;line-height:1.6;padding:8px 10px}
-
 /* 被合并的卡：头部一行灰字，说清"为什么改不动"。只读闸门在后端，
    这行只是让人别白点 —— 灰字而不是报错色，它不是错误。 */
 .dr-lock{font:11px/1.55 var(--font-mono);color:var(--text-3);margin-top:6px}
@@ -1567,8 +1564,32 @@ body.col-resizing .drawer{transition:none}
 /* 抽屉里的快捷下拉：走行内档，比弹窗里的更紧凑一点 */
 .dr-fields .sel--inline .sel-btn{height:27px;font-size:11px;border-radius:8px}
 .dr-fields .sel--inline .sel-btn .lbl{max-width:120px}
+/* 详情页页签：固定不滚，内容区各自滚动。页签沿用 .doc-tab 的按钮材质，
+   只在激活态加橙色底，避免又造一套 tab 样式。 */
+.dr-tabs{
+  flex:0 0 auto;display:flex;gap:4px;padding:8px 16px;overflow-x:auto;
+  border-bottom:1px solid rgba(120,136,142,.18);
+  background:rgba(255,255,255,.18);
+}
+.dr-tab-cnt{margin-left:4px;font:10px var(--font-mono);color:var(--text-4)}
+.doc-tab.on .dr-tab-cnt{color:var(--accent-text)}
+.dr-tab-dot{
+  display:none;width:5px;height:5px;border-radius:50%;background:var(--doing);
+  margin-left:5px;vertical-align:middle;
+}
+.dr-tabbody{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.dr-agents{
+  flex:1;min-height:0;overflow:auto;padding:13px 16px;
+  display:flex;flex-direction:column;gap:8px;
+}
+/* Agent 页的顶部只是标题 + 「挂一个」，不是折叠区，别给可点的错觉 */
+.dr-agents-top .sect-h{cursor:default}
+.dr-talk-cnt{font:10px var(--font-mono);color:var(--text-4)}
+/* 讨论行固定在需求内容与聊天面板之间：聊天展开后仍能点回去收起 */
+.dr-talk{flex:0 0 auto;background:var(--ctl-inset)}
+#drDetail[hidden],#drAgents[hidden],#drTalk[hidden],#drBody[hidden],#drFoot[hidden]{display:none!important}
 .dr-detail{
-  flex:0 0 auto;max-height:44vh;overflow:auto;
+  flex:1;min-height:0;overflow:auto;
   border-bottom:1px solid rgba(120,136,142,.18);
   padding:11px 16px 13px;display:flex;flex-direction:column;gap:8px;
 }
@@ -1617,7 +1638,7 @@ body.col-resizing .drawer{transition:none}
 .sect-b .files a{color:var(--orange);text-decoration:none;font:11px var(--font-mono)}
 .sect-b .files a:hover{text-decoration:underline}
 
-.dr-body{flex:1;min-height:0;overflow:auto;padding:13px 16px;display:flex;flex-direction:column;gap:10px}
+.dr-body{flex:0 0 34vh;min-height:150px;max-height:360px;overflow:auto;padding:13px 16px;display:flex;flex-direction:column;gap:10px}
 .dr-empty{
   color:var(--text-3);font:11px/1.9 var(--font-mono);text-align:center;padding:24px 10px;
   border:1px dashed rgba(120,136,142,.30);border-radius:12px;
@@ -2087,9 +2108,22 @@ body.solo #collapseBtn{display:none}
       <button class="icon-btn" id="drClose" title="关闭">✕</button>
     </div>
     <div class="dr-fields" id="drFields"></div>
-    <div class="dr-detail" id="drDetail"></div>
-    <div class="dr-body" id="drBody"></div>
-    <div class="dr-foot">
+    <div class="dr-tabs" id="drTabs">
+      <button type="button" class="doc-tab on" data-dr-tab="req">需求整理</button>
+      <button type="button" class="doc-tab" data-dr-tab="agents">挂载 AGENTS<span class="dr-tab-dot" id="drAgentDot"></span><span class="dr-tab-cnt" id="drAgentsCnt"></span></button>
+    </div>
+    <div class="dr-tabbody" id="drTabBody" data-tab="req">
+      <div class="dr-detail" id="drDetail"></div>
+      <div class="sect dr-talk" id="drTalk" hidden>
+        <div class="sect-h" role="button" tabindex="0" data-talk-toggle="1">
+          <span class="arw">▶</span><span>讨论</span><span class="spacer"></span>
+          <span class="dr-talk-cnt" id="drTalkCnt"></span>
+        </div>
+      </div>
+      <div class="dr-agents" id="drAgents" hidden></div>
+      <div class="dr-body" id="drBody" hidden></div>
+    </div>
+    <div class="dr-foot" id="drFoot" hidden>
       <div class="dr-thumbs" id="drThumbs"></div>
       <textarea id="drInput" rows="1" placeholder="说点什么：改优先级、换项目、讨论方案…"></textarea>
       <div class="dr-row">
@@ -4033,18 +4067,35 @@ let drSessions = { sessions: [] };
 let drActiveSessionId = null;
 let drAgentTimer = null;
 let drAgentFailures = 0;
+// 详情页页签与底部输入框状态：讨论并进「需求整理」页，默认折叠；
+// 底部永远只有一个输入框，按页签在 Cabinet / Agent 两种模式间切换。
+let drTab = 'req';
+let drChatOpen = false;
+let drFootMode = 'chat';
+let drChatDraft = '';
+let drAgentDraft = '';
+let drMessages = [];
 
 function drOpen(id){
   drTaskId = id;
   drLinks = { asFrom: [], asTo: [] };
   drSessions = { sessions: [] };
   drActiveSessionId = null;
+  drMessages = [];
+  drTab = 'req';
+  drChatOpen = false;
+  drFootMode = 'chat';
+  drChatDraft = '';
+  drAgentDraft = '';
   clearInterval(drAgentTimer);
   drAgentTimer = null;
   drAgentFailures = 0;
+  const drInput = $('#drInput');
+  if (drInput) drInput.value = '';
   drRestoreWidth();
   $('#drMask').classList.add('on');
   $('#drawer').classList.add('on');
+  drSyncTabs();
   drLoad();
 }
 
@@ -4063,6 +4114,12 @@ function drClose(){
   drLinks = { asFrom: [], asTo: [] };
   drSessions = { sessions: [] };
   drActiveSessionId = null;
+  drMessages = [];
+  drTab = 'req';
+  drChatOpen = false;
+  drFootMode = 'chat';
+  drChatDraft = '';
+  drAgentDraft = '';
   clearInterval(drAgentTimer);
   drAgentTimer = null;
   drAgentFailures = 0;
@@ -4073,7 +4130,6 @@ function drClose(){
 
 async function drLoad(){
   if (!drTaskId) return;
-  const body = $('#drBody');
   const id = drTaskId;
   try {
     const r = await api('GET', '/api/tasks/' + encodeURIComponent(id));
@@ -4088,6 +4144,7 @@ async function drLoad(){
     if (drTaskId !== id) return;         // 期间换了卡，这份结果作废
     drLinks = links;
     drSessions = sessions;
+    drMessages = r.messages || [];
     // 默认打开最近一条会话；没有就保持空态，让「挂一个」自己说话
     if (!drActiveSessionId && drSessions.sessions.length) {
       drActiveSessionId = drSessions.sessions[0].id;
@@ -4095,7 +4152,10 @@ async function drLoad(){
     const t = r.task || r;
     drRenderHead(t);
     drRenderDetail(t);
-    drRenderThread(r.messages || []);
+    drRenderThread(drMessages);
+    drRenderAgents(t);
+    drRenderTabs();
+    drSyncTabs();
     drDocRender();          // 预览栏开着就跟着换文档；关着时这里是空操作
 
     // 抽屉可能是在一轮执行中重新打开的。轮询不能只由「发送」启动，
@@ -4105,7 +4165,10 @@ async function drLoad(){
       || (active.last_turn && ['queued', 'running'].includes(active.last_turn.status)));
     if (busy) pollAgentSession(active.id);
   } catch (e) {
-    body.innerHTML = '<div class="dr-empty">读不到任务：' + esc(e.message) + '</div>';
+    // 错误要落在可见的需求区；#drBody 是对话面板，默认折叠时看不见
+    const host = $('#drDetail');
+    if (host) host.innerHTML = '<div class="dr-empty">读不到任务：' + esc(e.message) + '</div>';
+    toast('读不到任务：' + e.message);
   }
 }
 
@@ -4430,14 +4493,7 @@ function buildSections(t){
     secs.push({ key: 'files', title: '附件 ' + t.payload.files.length, body: '<div class="files">' + links + '</div>' });
   }
 
-  // 4. 关系（合并 / 拆分）：只在真的有关系时出现。
-  //    合并出来的卡看「合并来源」，被拆过的原卡看「拆出去的」。
-  //    两个动作按钮也挂在这儿 —— 它们是「这张卡和其他卡的关系」这件事的一部分，
-  //    塞进头部主按钮区会和「确认可以开工」抢位置。
-  const rel = relSection(t);
-  if (rel) secs.push(rel);
-
-  // 5. 需求说明
+  // 4. 需求说明
   secs.push({
     key: 'brief',
     title: '整理后的需求',
@@ -4449,15 +4505,11 @@ function buildSections(t){
       : '<span style="color:var(--text-3)">还没有整理。点右上角生成一份能直接派给 agent 的需求说明。</span>'
   });
 
-  // 6. Agent 会话：和「与 Cabinet 对话」分开的一块。
-  //    它不在卡片上展开，只在这里；卡片上只留一个状态徽标。
-  const nAgent = (drSessions.sessions || []).length;
-  secs.push({
-    key: 'agent',
-    title: 'Agent 会话' + (nAgent ? ' ' + nAgent : ''),
-    action: '<button class="mini-btn" data-agent-new="1">挂一个</button>',
-    body: '<div id="agentBody">' + agentSectionHTML(t) + '</div>'
-  });
+  // 5. 关系（合并 / 拆分 / 依赖 / 层级）放在需求后面：
+  //    原文 → 需求 → 关系，是一条从「要什么」到「怎么组织」的顺序；
+  //    以前夹在原文和需求之间，读需求时会被整块关系打断。
+  const rel = relSection(t);
+  if (rel) secs.push(rel);
 
   return secs;
 }
@@ -4615,19 +4667,17 @@ function agentActiveHTML(s) {
     if (last.error) out.push('<div class="agent-error">' + esc(last.error) + '</div>');
     out.push('</div>');
   }
-  out.push('<textarea class="agent-input" placeholder="给这个 Agent 发一条消息…（Ctrl+Enter 发送）"></textarea>');
   out.push('<div class="agent-act">');
   if (busy) {
     const turnId = (s.running && s.running.id) || (last && last.id) || '';
     out.push('<button type="button" class="mini-btn" data-agent-stop="' + esc(turnId) + '">停止</button>');
-  } else {
-    out.push('<button type="button" class="primary" data-agent-send="' + esc(s.id) + '">发送</button>');
   }
   out.push('<button type="button" class="mini-btn" data-agent-reconcile="' + esc(s.id) + '">核对状态</button>');
   if (!busy) {
     out.push('<button type="button" class="mini-btn" data-agent-del="' + esc(s.id) + '">删除会话</button>');
   }
   out.push('</div>');
+  out.push('<div class="agent-hint">在抽屉底部的输入框发消息。</div>');
   out.push('<div class="agent-hint">' + (s.context_seeded_at
     ? '任务需求已随某一轮发送；这里只发你这一轮写的内容。'
     : '下一条消息会自动带上任务需求（标题 / 原文 / 需求说明）。')
@@ -4654,16 +4704,107 @@ async function refreshAgentSession(id) {
 }
 
 /* 只重绘 Agent 区，不重绘整个抽屉：否则轮询会把用户正在打的字清掉。 */
-function drRenderAgent() {
+function drRenderAgents() {
   if (!drTask) return;
-  const host = $('#agentBody');
+  const host = $('#drAgents');
   if (!host) return;
-  const input = host.querySelector('.agent-input');
-  const draft = input ? input.value : '';
-  host.innerHTML = agentSectionHTML(drTask);
-  const next = host.querySelector('.agent-input');
-  if (next && draft) next.value = draft;
+  const n = (drSessions.sessions || []).length;
+  host.innerHTML = '<div class="sect dr-agents-top"><div class="sect-h">'
+    + '<span>AGENT 会话' + (n ? ' ' + n : '') + '</span><span class="spacer"></span>'
+    + '<button type="button" class="mini-btn" data-agent-new="1">挂一个</button>'
+    + '</div></div>'
+    + '<div id="agentBody">' + agentSectionHTML(drTask) + '</div>';
+  const newBtn = host.querySelector('[data-agent-new]');
+  if (newBtn) newBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    drStartAgent(drTask);
+  });
   bindAgentEvents(drTask);
+  drRenderTabs();
+  drFootSync();
+}
+
+function drRenderAgent() { drRenderAgents(); }
+
+function drRenderTabs() {
+  const host = $('#drTabs');
+  if (!host) return;
+  host.querySelectorAll('[data-dr-tab]').forEach(b => {
+    b.classList.toggle('on', b.dataset.drTab === drTab);
+  });
+  const n = (drSessions.sessions || []).length;
+  const cnt = $('#drAgentsCnt');
+  if (cnt) cnt.textContent = n ? String(n) : '';
+  const dot = $('#drAgentDot');
+  if (dot) {
+    dot.style.display = (drSessions.sessions || [])
+      .some(s => s.status === 'busy' || s.running) ? 'inline-block' : 'none';
+  }
+  const talkCnt = $('#drTalkCnt');
+  if (talkCnt) talkCnt.textContent = drMessages.length ? String(drMessages.length) : '';
+}
+
+function drSyncTabs() {
+  const detail = $('#drDetail');
+  if (!detail) return;
+  const req = drTab === 'req';
+  const agents = $('#drAgents');
+  const chat = $('#drBody');
+  const foot = $('#drFoot');
+  detail.hidden = !req;
+  if (agents) agents.hidden = req;
+  if (chat) chat.hidden = !(req && drChatOpen);
+  if (foot) foot.hidden = !(req ? drChatOpen : true);
+  const talk = $('#drTalk');
+  if (talk) {
+    talk.hidden = !req;
+    talk.classList.toggle('open', drChatOpen);
+  }
+  drRenderTabs();
+  drFootSync();
+}
+
+function drFootSync() {
+  const foot = $('#drFoot');
+  const input = $('#drInput');
+  if (!foot || !input) return;
+  const mode = drTab === 'agents' ? 'agent' : 'chat';
+  if (drFootMode !== mode) {
+    if (drFootMode === 'chat') drChatDraft = input.value;
+    else drAgentDraft = input.value;
+    input.value = mode === 'chat' ? drChatDraft : drAgentDraft;
+    drFootMode = mode;
+  }
+  const active = (drSessions.sessions || []).find(s => s.id === drActiveSessionId);
+  input.placeholder = mode === 'agent'
+    ? (active ? '给这个 Agent 发一条消息…（Ctrl+Enter 发送）' : '先在上方挂一个 Agent 会话')
+    : '说点什么：改优先级、换项目、讨论方案…';
+  const attach = $('#drAttachBtn');
+  if (attach) attach.style.display = mode === 'agent' ? 'none' : '';
+  const clear = $('#drClear');
+  if (clear) clear.style.display = mode === 'agent' ? 'none' : '';
+  const thumbs = $('#drThumbs');
+  if (thumbs) thumbs.style.display = mode === 'agent' ? 'none' : '';
+  const hint = foot.querySelector('.dr-row .hint');
+  if (hint) {
+    hint.textContent = mode === 'agent'
+      ? 'Ctrl+Enter 发送 · 只发这一轮的内容'
+      : 'Enter 发送 · Shift+Enter 换行 · 可贴图 / 拖文件';
+  }
+  const send = $('#drSend');
+  if (send) {
+    send.disabled = mode === 'agent' ? (!active || agentSessionBusy(active)) : drBusy;
+  }
+  autoGrow();
+}
+
+function drFootSend() {
+  if (drTab === 'agents') {
+    if (!drActiveSessionId) { toast('先挂一个 Agent 会话'); return; }
+    drSendAgent(drActiveSessionId, $('#drInput').value);
+    return;
+  }
+  drSend();
 }
 
 function bindAgentEvents(t) {
@@ -4674,24 +4815,9 @@ function bindAgentEvents(t) {
       e.stopPropagation();
       drActiveSessionId = btn.dataset.agentOpen;
       drRenderAgent();
+      drFootSync();
     });
   });
-  const input = host.querySelector('.agent-input');
-  const send = host.querySelector('[data-agent-send]');
-  if (send) {
-    send.addEventListener('click', (e) => {
-      e.stopPropagation();
-      drSendAgent(send.dataset.agentSend, input ? input.value : '');
-    });
-  }
-  if (input) {
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        if (send) send.click();
-      }
-    });
-  }
   const stop = host.querySelector('[data-agent-stop]');
   if (stop) {
     stop.addEventListener('click', (e) => {
@@ -4726,17 +4852,19 @@ function bindAgentEvents(t) {
 async function drSendAgent(sessionId, text) {
   const clean = String(text || '').trim();
   if (!clean) { toast('说点什么再发送'); return; }
+  if (!sessionId) { toast('先挂一个 Agent 会话'); return; }
   const s = (drSessions.sessions || []).find(x => x.id === sessionId);
+  if (!s) { toast('会话不存在，刷新后再试'); return; }
   try {
     const r = await api('POST', '/api/sessions/' + encodeURIComponent(sessionId) + '/turns', { text: clean });
-    if (s) {
-      s.running = r.turn;
-      s.status = 'busy';
-      s.last_turn = { ...(s.last_turn || {}), ...r.turn };
-    }
-    const input = $('#agentBody .agent-input');
+    s.running = r.turn;
+    s.status = 'busy';
+    s.last_turn = { ...(s.last_turn || {}), ...r.turn };
+    const input = $('#drInput');
     if (input) input.value = '';
+    drAgentDraft = '';
     drRenderAgent();
+    drFootSync();
     pollAgentSession(sessionId);
   } catch (e) {
     toast('发送失败：' + e.message);
@@ -4891,7 +5019,7 @@ function drRenderDetail(t){
   host.querySelectorAll('.sect-h').forEach(h => {
     h.addEventListener('click', (e) => {
       if (e.target.closest('[data-brief]') || e.target.closest('[data-doc-open]')
-        || e.target.closest('[data-raw-edit]') || e.target.closest('[data-agent-new]')) return;
+        || e.target.closest('[data-raw-edit]') || e.target.closest('[data-talk-toggle]')) return;
       h.parentElement.classList.toggle('open');
     });
   });
@@ -4903,13 +5031,6 @@ function drRenderDetail(t){
   // 原文就地编辑：「编辑」把正文换成 textarea，保存走 PATCH payload.text
   const rawBtn = host.querySelector('[data-raw-edit]');
   if (rawBtn) rawBtn.addEventListener('click', (e) => { e.stopPropagation(); drEditRaw(); });
-
-  // Agent 会话区：新建入口在 section 头上，其余按钮在 #agentBody 里
-  const agentNew = host.querySelector('[data-agent-new]');
-  if (agentNew) {
-    agentNew.addEventListener('click', (e) => { e.stopPropagation(); drStartAgent(drTask); });
-  }
-  bindAgentEvents(drTask);
 
   // 关系区的两个动作。挂在这里而不是 document 委托，因为它们只在这一屏幕里存在，
   // 而且要拿 drTask（当前这张卡的完整数据）去拼请求。
@@ -5007,6 +5128,8 @@ function drRenderDetail(t){
       }
     });
   }
+
+  drRenderTabs();
 }
 
 function drRenderHead(t){
@@ -5189,8 +5312,10 @@ function attsHTML(att){
 }
 
 function drRenderThread(list){
+  drMessages = Array.isArray(list) ? list : [];
+  drRenderTabs();
   const body = $('#drBody');
-  if (!list.length) {
+  if (!drMessages.length) {
     body.innerHTML = '<div class="dr-empty">这里可以补充信息、纠正判断、讨论方案。<br>'
       + '说的每句话都会直接改动这条任务。</div>';
     return;
@@ -5269,6 +5394,7 @@ async function drSend(){
   drBusy = true;
   $('#drSend').disabled = true;
   input.value = '';
+  drChatDraft = '';
   input.style.height = 'auto';
   const pendingImgs = imgs.slice();
   const pendingFiles = fls.slice();
@@ -5305,7 +5431,7 @@ async function drSend(){
     drRenderThumbs();
   } finally {
     drBusy = false;
-    $('#drSend').disabled = false;
+    drFootSync();
     input.focus();
   }
 }
@@ -5707,7 +5833,25 @@ $('#drDelete')?.addEventListener('click', async () => {
     toast(n ? '已删除，同时清掉 ' + n + ' 个附件' : '已删除');
   } catch (e) { toast('删不掉：' + e.message); }
 });
-$('#drSend')?.addEventListener('click', drSend);
+$('#drSend')?.addEventListener('click', drFootSend);
+$('#drTabs')?.addEventListener('click', e => {
+  const btn = e.target.closest('[data-dr-tab]');
+  if (!btn) return;
+  drTab = btn.dataset.drTab;
+  drSyncTabs();
+});
+$('#drTalk')?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  drChatOpen = !drChatOpen;
+  drSyncTabs();
+});
+$('#drTalk .sect-h')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    drChatOpen = !drChatOpen;
+    drSyncTabs();
+  }
+});
 $('#drClear')?.addEventListener('click', async () => {
   if (!drTaskId) return;
   if (!confirm('清空这条任务的对话？')) return;
@@ -5716,12 +5860,20 @@ $('#drClear')?.addEventListener('click', async () => {
 });
 
 $('#drInput')?.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); drSend(); }
+  if (drTab === 'agents') {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      drFootSend();
+    }
+    return;
+  }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); drFootSend(); }
 });
 $('#drInput')?.addEventListener('input', e => {
   const ta = e.target;
-  ta.style.height = 'auto';
-  ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+  if (drFootMode === 'agent') drAgentDraft = ta.value;
+  else drChatDraft = ta.value;
+  autoGrow();
 });
 
 /* 抽屉对话的附件入口：按钮点文件、Ctrl+V 贴图、拖文件进来。
@@ -5737,6 +5889,11 @@ $('#drInput')?.addEventListener('paste', async e => {
   const imgs = items.filter(i => i.type.startsWith('image/')).map(i => i.getAsFile()).filter(Boolean);
   const other = [...(e.clipboardData?.files || [])].filter(f => !f.type.startsWith('image/'));
   if (!imgs.length && !other.length) return;      // 纯文字粘贴走浏览器默认行为
+  if (drTab === 'agents') {
+    e.preventDefault();
+    toast('Agent 会话暂不支持图片 / 文件附件');
+    return;
+  }
   e.preventDefault();
   for (const f of [...imgs, ...other]) await drUpload(f);
 });
@@ -5745,7 +5902,7 @@ $('#drInput')?.addEventListener('dragover', e => {
   if (!e.dataTransfer?.types?.includes('Files')) return;
   e.preventDefault();
   e.stopPropagation();          // 别让全页那个「松手就收进来」的遮罩接管
-  $('#drInput').classList.add('drop-hot');
+  if (drTab !== 'agents') $('#drInput').classList.add('drop-hot');
 });
 $('#drInput')?.addEventListener('dragleave', () => $('#drInput').classList.remove('drop-hot'));
 $('#drInput')?.addEventListener('drop', async e => {
@@ -5754,6 +5911,10 @@ $('#drInput')?.addEventListener('drop', async e => {
   e.preventDefault();
   e.stopPropagation();
   $('#drInput').classList.remove('drop-hot');
+  if (drTab === 'agents') {
+    toast('Agent 会话暂不支持图片 / 文件附件');
+    return;
+  }
   for (const f of dropped) await drUpload(f);
 });
 
