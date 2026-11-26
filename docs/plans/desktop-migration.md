@@ -330,7 +330,7 @@ flowchart TD
 | 编号 | 验收标准 | 状态（2026-11-26） |
 | --- | --- | --- |
 | D0-01 | 不依赖系统 Node.js/Chrome 启动 Cabinet；外部 Agent 依赖另行检查 | Windows 通过：打包 exe 内置 Node v24.22.3；PATH 剥离 node 后冒烟仍通过；未在真正无 Node 的机器复测 |
-| D0-02 | Windows、macOS 安装、启动、关闭正常 | Windows 通过；macOS 待 Mac 上构建 DMG 后验收 |
+| D0-02 | Windows、macOS 安装、启动、关闭正常 | Windows 通过；macOS 通过（2026-11-26 本机构建 DMG、安装到 /Applications、Finder 启动与退出验收；未签名/未公证） |
 | D0-03 | 旧任务、附件、项目、配置、Session/Turn 无丢失 | 通过（2026-11-26 只读拷贝核对）：29 条任务、5 个任务图片全部 HTTP 200 且字节一致；1 个 Session/1 个 Turn/1 个事件文件存在且非空；该库无消息附件与文件附件，未覆盖到这两类 |
 | D0-04 | 新增任务并通过 Magpie 分类 | Windows 打包通过：`--smoke-classify` |
 | D0-05 | OpenCode 完成两轮对话，复用外部 Session ID | Windows 打包通过：两轮 `completed`，`turn_count=2`，外部 ID 存在 |
@@ -370,10 +370,20 @@ flowchart TD
 - 打包后的图标改由 `extraResources` 输出到 `resources/icons`：asar 内的路径 `nativeImage` 读不到，托盘会静默缺失；`electron-builder.yml` 已同步。
 - D1A 契约已落盘：[docs/architecture/desktop-runtime-contracts.md](../architecture/desktop-runtime-contracts.md)，五份契约都带代码位置与测试映射。
 
+macOS 实施与验收（2026-11-26，macOS 27.0.1 / Apple Silicon）：
+
+- `npm run build:mac` 在本机产出 `release/Cabinet-0.2.0-arm64.dmg`（115 MB，arm64），构建命令已与 `build:win` 一起固化到 `package.json`。
+- DMG 内为 `Cabinet.app` + `/Applications` 链接，`ditto` 安装到 `/Applications/Cabinet.app` 后可直接启动；未签名（adhoc），未公证。
+- 安装后把 PATH 剥到 `/usr/bin:/bin:/usr/sbin:/sbin`（无 node）跑 `--smoke --smoke-window --smoke-picker`：Runtime ready、`/api/ping` 200、`bridge=pick`、`picker=OK`、关窗只隐藏再显示恢复、退出码 0。D0-01 的 macOS 代理场景成立。
+- 走 LaunchServices 启动（`open -a /Applications/Cabinet.app`）：页面 200、未带凭据的 `/api/ping` 401；再次启动仍只有 1 个桌面进程；AppleScript `quit` 后无残留进程，数据锁正常释放。
+- 图标：由 `cabinet-pixel-dark.svg` 渲染出 1024×1024 的 `task-inbox/icons/cabinet-1024.png`，electron-builder 转成 `Contents/Resources/icon.icns`；`CFBundleIconFile=icon.icns`、`CFBundleIdentifier=app.cabinet.task-inbox`。
+- 菜单栏托盘改用 16/32 px 模板图（`trayTemplate.png` + `@2x`，纯黑 + alpha、去掉深色底），`setTemplateImage(true)` 让系统按明暗自动反色；Windows 仍用彩色 `dark.png`。
+- 顺带修掉 macOS 上 `NPM_GLOBAL_DIR` 语义与 Windows 不一致导致的 `test-agent` 失败（原 88/89）；现在 `npm test` 各套件全绿、`test:e2e` 15/15。
+
 仍待验收：
 
 - 桌面「还有任务在跑」退出确认框、真实 Agent 结束通知，尚未人工点过一次。
-- 原生目录选择的实际点选、macOS DMG、代码签名未做。
+- 原生目录选择的真实系统对话框、macOS 代码签名与公证未做。
 - IPC 目前只有凭据与选目录两项；开机自启、全局快捷键未新增。
 - 消息附件与文件附件在当前真实库中没有样本，未覆盖到。
 - D0-09 未做渗透式验证。

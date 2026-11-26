@@ -64,6 +64,17 @@ cd task-inbox
 
 装完点桌面快捷方式，或者直接开 http://127.0.0.1:46001/
 
+**桌面客户端（Electron）**
+
+```bash
+npm install
+npm run build:mac   # Windows 上用 npm run build:win
+```
+
+产物在 `release/`：macOS 是 `Cabinet-0.2.0-arm64.dmg`（挂载后拖进 Applications），
+Windows 是 `Cabinet Setup 0.2.0.exe`。桌面版自带 Node 与 Chromium，不需要预装；
+外部 Agent（OpenCode / Codex）的运行依赖仍要自己满足。当前安装包未签名、未公证。
+
 > 需要 Node 22.5+（用到内置 `node:sqlite`）。平台差异只在启动脚本和
 > 系统对话框上，核心代码两边跑的是同一份 —— 详见
 > [task-inbox/README.md 的跨平台章节](task-inbox/README.md#跨平台)。
