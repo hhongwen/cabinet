@@ -335,12 +335,19 @@ const INPUT_POOL = ['.dock textarea', '.dr-foot textarea', '.dr-fields select', 
   const declared = new Set(
     rootRule ? [...rootRule.body.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]) : []
   );
-  // JS / 内联 style 里现写的变量（比如卡片上的 --bar）也算"已声明"
+  // JS / 内联 style 里现写的变量（比如卡片上的 --bar）也算"已声明"。
+  // 三种写法都要认，否则运行期写进去的变量会被误判成"没声明"：
+  //   style="--bar:…"            模板字符串
+  //   setProperty('--boot-h', …) 运行时按实测值写
+  //   style.setProperty("--x", …)
   const inlineDeclared = new Set([...body.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
+  for (const m of body.matchAll(/setProperty\(\s*['"](--[\w-]+)['"]/g)) inlineDeclared.add(m[1]);
 
   const missing = new Set();
-  for (const m of (css + body).matchAll(/var\(\s*(--[\w-]+)/g)) {
+  for (const m of (css + body).matchAll(/var\(\s*(--[\w-]+)\s*(,)?/g)) {
     if (declared.has(m[1]) || inlineDeclared.has(m[1])) continue;
+    // var(--x, fallback) 有兜底值，颜色不会"整个失效"，不按 error 算
+    if (m[2] === ',') { warn('token-fallback', `var(${m[1]}) 没有声明，靠 fallback 兜着——建议补上声明`, 0); continue; }
     missing.add(m[1]);
   }
   for (const v of missing) {
@@ -353,7 +360,9 @@ const INPUT_POOL = ['.dock textarea', '.dr-foot textarea', '.dr-fields select', 
 {
   // 72 是项目选择浮层：它要盖过抽屉（71），从抽屉里点徽章也得看得见。
   // 改这里必须同时改 STYLE.md 第五节的表，两边是同一份约定的两处抄写。
-  const ALLOWED = new Set([1, 2, 3, 5, 60, 70, 71, 72, 80, 90, 95, 99]);
+  // 69 是顶部横幅：压在顶栏/看板头之上，但必须在抽屉遮罩(70)之下。
+  // 95 已废弃 —— 它比抽屉高，会盖住抽屉标题栏的按钮。
+  const ALLOWED = new Set([1, 2, 3, 5, 60, 69, 70, 71, 72, 80, 90, 99]);
   for (const r of rules) {
     const m = r.body.match(/(?:^|[;\s])z-index\s*:\s*(-?\d+)/i);
     if (!m) continue;
@@ -391,23 +400,124 @@ const INPUT_POOL = ['.dock textarea', '.dr-foot textarea', '.dr-fields select', 
 // ---------- 检查 6：:root 之外写死颜色 ----------
 
 {
-  const rootRule = topRules.find((r) => r.sel.trim() === ':root');
-  const rootEnd = rootRule ? rootRule.start + rootRule.body.length : 0;
-  const restStart = rootEnd;
-  const rest = css.slice(restStart);
+  // 「:root 之外」指的是**主 :root 块之外**。文件里还有第二个 :root——
+  // 深色模式那条 `@media (prefers-color-scheme: dark){ :root{--lg-*:…} }`，
+  // 它同样是变量声明层，不该算写死颜色。只在主块之后截一段就会把它判成违规。
+  // 注意用 rules 而不是 topRules：深色模式那条 :root 嵌在 @media 里，
+  // topRules 会按「不带 @ 的顶层规则」把它过滤掉。
+  const rootRules = rules.filter((r) => r.sel.trim() === ':root');
+  const rootSpans = rootRules.map((r) => [r.start, r.start + r.body.length]);
+  const inRoot = (i) => rootSpans.some(([a, b]) => i >= a && i <= b);
+  // 注释里提到的历史色值（"原来 #cbd2d4 上只有 2.4:1"）不是样式，
+  // 用等长空格把注释抹掉再扫，行号不受影响。
+  const restStart = 0;
+  const rest = cssNoComment;
 
   // 允许清单：纯白/纯黑高光、以及 @supports 里的透明色
   const ALLOW = new Set(['#fff', '#ffffff', '#000', '#000000']);
   const bad = [];
   for (const m of rest.matchAll(/#[0-9a-fA-F]{3,8}\b/g)) {
     const v = m[0].toLowerCase();
-    if (ALLOW.has(v)) continue;
+    if (ALLOW.has(v) || inRoot(m.index)) continue;
     bad.push({ v, line: lineOf(restStart + m.index) });
   }
   if (bad.length) {
     // 只报总数 + 前几个，避免刷屏
     const uniq = [...new Set(bad.map((b) => b.v))];
     warn('hardcoded-color', `:root 之外有 ${bad.length} 处写死颜色（${uniq.length} 种）：${uniq.slice(0, 6).join(' ')}${uniq.length > 6 ? ' …' : ''}`, bad[0].line);
+  }
+}
+
+// ---------- 检查 7：var() 后面直接拼十六进制透明度 ----------
+//
+// `'var(--p3)' + '22'` 拼出来是 `var(--p3)22` —— 这不是合法颜色，浏览器整条
+// 声明丢掉。结果优先级标签全是透明底，浅灰字直接压在卡片上，几乎看不见。
+// 这类错**不会报错、不会崩**，只是颜色静默消失，所以必须上硬门禁。
+
+{
+  // 十六进制透明度必须"紧贴"var() 且后面不能再跟 % 或字母 ——
+  // 否则 `var(--side-mid) 72%` 这种渐变色标位置会被误判。
+  const BAD = /var\(\s*--[\w-]+\s*\)\s*[0-9a-fA-F]{2}(?![0-9a-zA-Z%.])/g;
+  const hits = [];
+  for (const m of (css + body).matchAll(BAD)) {
+    hits.push({ at: m.index, s: m[0] });
+  }
+  // 反向：'22' + 'var(...)' 之类拼接不合法，但最常见的是上面那种
+  if (hits.length) {
+    err('token-hex-concat',
+      `${hits.length} 处把十六进制透明度直接拼在 var() 后面（如 ${hits[0].s}）——不是合法颜色，整条声明会被丢弃。改成成对的顶层 token（见 --p*-soft）`,
+      0);
+  }
+}
+
+// ---------- 检查 8：橙色不许当字色 ----------
+//
+// STYLE.md 只写了"白字必须配深橙"，漏了另一半：--orange 自己当字色也只有
+// 3.53:1。橙色两头都不能碰文字 —— 不能当白字的底，也不能自己当字色。
+
+{
+  for (const r of rules) {
+    if (r.atRule) continue;
+    const m = r.body.match(/(?:^|[;\s])color\s*:\s*var\(\s*--orange\s*\)/i);
+    if (!m) continue;
+    err('orange-as-text',
+      `"${r.sel.split(',')[0].trim()}" 用 --orange 当字色（3.53:1，不过 AA）——用 --accent-text 或 --danger-text`,
+      lineOf(r.start));
+  }
+}
+
+// ---------- 检查 9：圆角只能走阶梯 ----------
+
+{
+  // 阶梯在 :root 里；这里只认 token 和两个语义固定值。
+  const LADDER = /^var\(--radius-(2|4|xs|sm|md|lg|xl)\)$/;
+  const FIXED = /^(999px|50%|0)$/;
+  const ALLOWED_IN_MULTI = /^(0|var\(--radius-(2|4|xs|sm|md|lg|xl)\))$/;
+  const bad = [];
+  for (const r of rules) {
+    if (r.atRule) continue;
+    for (const m of r.body.matchAll(/border-radius\s*:\s*([^;}]+)/g)) {
+      const v = m[1].trim();
+      if (LADDER.test(v) || FIXED.test(v)) continue;
+      // 「0 0 lg lg」这种四角写法：每一段都得是 0 或阶梯值
+      const parts = v.split(/\s+(?![^(]*\))/).map((x) => x.trim()).filter(Boolean);
+      if (parts.length > 1 && parts.every((p) => ALLOWED_IN_MULTI.test(p))) continue;
+      bad.push({ sel: r.sel.split(',')[0].trim(), v, line: lineOf(r.start) });
+    }
+  }
+  for (const b of bad) {
+    // error 而不是 warn：阶梯外的半径一定要清掉，否则"6/7/8/9/10 五个档"
+    // 会一夜之间长回来。已经收敛过一次（21 种 → 6 档），别让它反弹。
+    err('radius-ladder',
+      `"${b.sel}" 写了 border-radius:${b.v}——圆角只走 :root 的 6 档阶梯（见 STYLE.md 第四节）`, b.line);
+  }
+}
+
+// ---------- 检查 10：投影只走 --shadow-* / 已知语义层 ----------
+//
+// 55 条各写一遍的 box-shadow 是"同一块玻璃贴了 55 种胶"。真正需要自己写
+// 阴影的只有两类：结构层的内高光/内阴影（拟态），以及浮动层的投影。
+// 两者都用同一套 --shadow-*-* 变量，散写的一律报出来。
+
+{
+  const ok = /var\(--(shadow-[0-9]|shadow-halo|raise-hi|ctl-inset-shadow|ctl-focus-ring)/;
+  const semantic = /inset|var\(--(draft|rel|dep|table|ctl|banner)/;
+  const bad = [];
+  for (const r of rules) {
+    if (r.atRule) continue;
+    if (/^(:root|body|html)$/.test(r.sel.trim())) continue;
+    for (const m of r.body.matchAll(/(?:^|[;\s])box-shadow\s*:\s*([^;}]+)/g)) {
+      const v = m[1].trim();
+      if (v === 'none' || ok.test(v) || semantic.test(v)) continue;
+      bad.push({ sel: r.sel.split(',')[0].trim(), v: v.slice(0, 60), line: lineOf(r.start) });
+    }
+  }
+  if (bad.length) {
+    warn('shadow-offscale',
+      `${bad.length} 条 box-shadow 没走 token（首例 "~{SEL}"）——见下`.replace('~{SEL}', bad[0].sel), bad[0].line);
+    for (const b of bad.slice(0, 8)) {
+      console.log(`    · ${b.line} ${b.sel}  ${b.v}`);
+    }
   }
 }
 
