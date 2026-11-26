@@ -24,6 +24,15 @@ async function boot(token) {
   try {
     rt = await openRuntime({ authToken: token, log: (line) => send({ type: 'log', line }) });
     send({ type: 'ready', port: rt.port, url: rt.url, dataDir: rt.dataDir });
+    // Turn 终态事件：桌面通知只认真实事件，不让渲染层自己触发。
+    rt.core.onTurnFinished((e) => send({
+      type: 'turn-finished',
+      status: e.turn ? e.turn.status : '',
+      error: e.turn ? String(e.turn.error || '') : '',
+      preview: e.turn ? String(e.turn.result_text || '').replace(/\s+/g, ' ').slice(0, 120) : '',
+      task: e.task ? e.task.title : '',
+      role: e.session ? e.session.role : ''
+    }));
   } catch (e) {
     send({ type: 'fatal', message: e.message, code: e.code || '' });
   }

@@ -114,31 +114,58 @@ function pidAlive(pid) {
 export function acquireDataLock(dataDir) {
   fs.mkdirSync(dataDir, { recursive: true });
   const file = path.join(dataDir, 'server.lock');
-  try {
-    const info = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const id = crypto.randomBytes(12).toString('hex');
+  const payload = JSON.stringify({
+    pid: process.pid,
+    id,
+    started_at: new Date().toISOString()
+  }) + '\n';
+
+  // 先检查再写会有窗口：两个进程可能同时看到「没有锁」然后都写。
+  // 用 wx（O_CREAT|O_EXCL）创建才是原子的；已存在时再判断是活锁还是过期锁。
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      fs.writeFileSync(file, payload, { flag: 'wx' });
+      let released = false;
+      return {
+        file,
+        id,
+        release() {
+          if (released) return;
+          released = true;
+          // 只删自己的锁：如果这里已经被别的实例接管，删了就是删别人的锁。
+          try {
+            const now = JSON.parse(fs.readFileSync(file, 'utf8'));
+            if (now && now.id === id) fs.unlinkSync(file);
+          } catch { /* 文件没了或读不懂，不动它 */ }
+        }
+      };
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+    }
+
+    let info = null;
+    try { info = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* 坏锁当过期 */ }
     if (info && info.pid && pidAlive(info.pid)) {
       const err = new Error('这个数据目录已经有一个 Cabinet 在跑（pid ' + info.pid + '）');
       err.code = 'ELOCKED';
       throw err;
     }
-  } catch (e) {
-    if (e.code === 'ELOCKED') throw e;
-    // 锁文件坏了 / 进程已经没了：当作过期锁，下面覆盖
+
+    // 过期锁：用 rename 抢占而不是直接 unlink。rename 只有一个进程能成功，
+    // 输的那个会拿到 ENOENT 再重试，不会把别人的新锁误删。
+    const stale = file + '.stale-' + process.pid + '-' + id;
+    try {
+      fs.renameSync(file, stale);
+      try { fs.unlinkSync(stale); } catch { /* 删不掉也不影响抢锁 */ }
+    } catch (e) {
+      if (e.code !== 'ENOENT') throw e;
+    }
   }
 
-  fs.writeFileSync(file, JSON.stringify({
-    pid: process.pid,
-    started_at: new Date().toISOString()
-  }) + '\n');
-  let released = false;
-  return {
-    file,
-    release() {
-      if (released) return;
-      released = true;
-      try { fs.unlinkSync(file); } catch { /* 已经没了 */ }
-    }
-  };
+  const err = new Error('抢数据目录锁失败：多次重试仍被占用');
+  err.code = 'ELOCK_FAILED';
+  throw err;
 }
 
 // 请求体上限。要跟 core.mjs 里 saveFile 的 25MB 对得上：

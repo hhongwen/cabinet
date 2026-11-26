@@ -6,7 +6,7 @@
 //   不在这里实现任何任务规则或数据库操作。
 
 import {
-  app, BrowserWindow, Tray, Menu, nativeImage, utilityProcess, shell, ipcMain, dialog
+  app, BrowserWindow, Tray, Menu, nativeImage, utilityProcess, shell, ipcMain, dialog, Notification
 } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -62,6 +62,18 @@ function log(...args) {
   console.log('[cabinet]', ...args);
 }
 
+// 通知只由 Runtime 的真实 Turn 事件触发，渲染层不能自己弹通知（§7.3）。
+function notifyTurn(msg) {
+  const ok = msg.status === 'completed';
+  const title = 'Cabinet · ' + (ok ? 'Agent 一轮完成' : 'Agent 执行未完成');
+  const detail = [msg.task, msg.role, msg.error || msg.preview].filter(Boolean).join(' · ').slice(0, 200);
+  log('NOTIFY', title, detail);
+  if (SMOKE || !Notification.isSupported()) return;
+  const n = new Notification({ title, body: detail || '打开窗口查看结果' });
+  n.on('click', () => { win?.show(); win?.focus(); });
+  n.show();
+}
+
 function startRuntime() {
   return new Promise((resolve, reject) => {
     const env = { ...process.env };
@@ -75,6 +87,7 @@ function startRuntime() {
       if (!msg || typeof msg !== 'object') return;
       if (msg.type === 'hello') { runtime?.postMessage({ type: 'init', token: AUTH_TOKEN }); return; }
       if (msg.type === 'log') { log('[runtime]', msg.line); return; }
+      if (msg.type === 'turn-finished') { notifyTurn(msg); return; }
       if (msg.type === 'ready') { done(resolve, msg); return; }
       if (msg.type === 'fatal') { done(reject, new Error(msg.message)); return; }
       if (msg.type === 'stopped') { done(() => {}, null); }

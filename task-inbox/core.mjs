@@ -71,6 +71,21 @@ export function createCore(dataDir) {
 
   let db = null;
 
+  // Turn 终态事件：只给宿主（桌面通知、日志）订阅，不改变业务行为。
+  // 用 Set 而不是 EventEmitter，避免给 core 引入额外的错误传播语义：
+  // 监听器抛错不能影响这一轮的结果落库。
+  const turnFinishListeners = new Set();
+  function onTurnFinished(fn) {
+    if (typeof fn !== 'function') return () => {};
+    turnFinishListeners.add(fn);
+    return () => turnFinishListeners.delete(fn);
+  }
+  function emitTurnFinished(payload) {
+    for (const fn of turnFinishListeners) {
+      try { fn(payload); } catch (e) { console.warn('[task-inbox] Turn 事件监听器失败：' + e.message); }
+    }
+  }
+
   // 懒打开：createCore() 只算配置，第一次真正用的时候才建文件。
   function conn() {
     if (db) return db;
@@ -2313,7 +2328,15 @@ export function createCore(dataDir) {
       d.run('UPDATE agent_sessions SET status = ?, updated_at = ? WHERE id = ?',
         [status === 'unknown' ? 'unknown' : 'idle', now, cur.session_id]);
     });
-    return getTurn(turnId);
+    const finished = getTurn(turnId);
+    try {
+      const session = getSession(cur.session_id);
+      const task = session ? getTask(session.task_id) : null;
+      emitTurnFinished({ turn: finished, session, task });
+    } catch (e) {
+      console.warn('[task-inbox] Turn 事件组装失败：' + e.message);
+    }
+    return finished;
   }
 
   function getTurn(id) {
@@ -2706,6 +2729,7 @@ export function createCore(dataDir) {
     dataFile: dbFile,   // 兼容旧调用方的命名，指向的已经是 .db
     imagesDir, filesDir, settingsFile,
     conn, init, close,
+    onTurnFinished,
     add, getTask, patch, move, remove, list, state, count, revision, archiveStale,
     linkTasks, unlinkTasks, deleteLink, listLinks, linksOf,
     blockedBy, reachable,

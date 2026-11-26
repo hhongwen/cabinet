@@ -355,11 +355,14 @@ flowchart TD
 - D0-04 已在桌面包内跑通：`--smoke-classify` 真收一条任务、经 Magpie 分类落库后删除，`classify=OK`。
 - D0-05/06 已跑通（Runtime 同一入口，Node 模式）：OpenCode 两轮都返回预期原文，`turn_count=2`；强杀进程重启后 `external_session_id` 不变，`reconcile` 能对回原 Session 且末轮为 `completed`。
 - 原生目录选择已接入：`preload` 暴露 `pickDirectory()`，Main 用 `dialog.showOpenDialog`，页面优先走 IPC、失败再退回 `/api/pickdir`；冒烟确认 bridge 存在，真实点选仍需人工一次。
+- D1A Instance Contract 起步：数据锁改为 `wx` 原子创建，过期锁用 rename 抢占，释放只删自己 `id` 的锁；`test-lock` 12 项覆盖并发/过期/坏锁/误删。
+- Turn 终态事件：`core.onTurnFinished` 只读通知，监听器抛错不影响落库（`test-events` 6 项）；`runtime-host` 转发给 Main，由 Main 发系统通知，渲染层不能自己触发。
 
 仍待验收：
 
+- 真实 Agent 结束时的系统通知尚未人工确认一次（代码路径已通）。
 - 原生目录选择的实际点选、macOS DMG、代码签名未做。
-- IPC 目前只有凭据与选目录两项；通知、开机自启等能力未新增。
+- IPC 目前只有凭据与选目录两项；开机自启、全局快捷键未新增。
 - 附件与 `sessions/` 事件文件只验证了随目录迁移，未逐项打开核对。
 
 
