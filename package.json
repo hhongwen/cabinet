@@ -7,6 +7,8 @@
   "scripts": {
     "desktop": "electron .",
     "desktop:smoke": "electron . --smoke",
+    "build:mac": "electron-builder --mac --arm64",
+    "build:win": "electron-builder --win --x64",
     "server": "node task-inbox/server.mjs",
     "test": "node task-inbox/test-sqlite.mjs && node task-inbox/test-agent.mjs && node task-inbox/test-agent-http.mjs && node task-inbox/test-parsers.mjs && node task-inbox/test-lock.mjs && node task-inbox/test-events.mjs && node task-inbox/test-runtime.mjs && node task-inbox/test-auth.mjs && node task-inbox/style-audit.mjs",
     "test:e2e": "playwright test"

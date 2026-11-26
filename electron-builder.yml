@@ -27,4 +27,5 @@ nsis:
 mac:
   target:
     - dmg
+  icon: task-inbox/icons/cabinet-1024.png
   category: public.app-category.productivity

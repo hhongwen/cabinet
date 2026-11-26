@@ -7,6 +7,9 @@ cabinet-light.ico   浅色（默认用这个）
 cabinet-dark.ico    深色
 light.png           256×256 原图
 dark.png
+cabinet-1024.png    1024×1024，macOS 图标源（由 cabinet-pixel-dark.svg 渲染）
+trayTemplate.png    macOS 菜单栏模板图 16×16（纯黑 + alpha，去掉深色底）
+trayTemplate@2x.png 同上 32×32
 ```
 
 ## 换 logo 时怎么重新生成

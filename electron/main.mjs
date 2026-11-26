@@ -24,7 +24,10 @@ const ICON_DIR = app.isPackaged
   ? path.join(process.resourcesPath, 'icons')
   : path.join(ROOT, 'task-inbox', 'icons');
 const ICON_ICO = path.join(ICON_DIR, 'cabinet-dark.ico');
-const TRAY_PNG = path.join(ICON_DIR, 'dark.png');
+// macOS 菜单栏用模板图（纯 alpha，系统按明暗自动反色）；Windows 托盘用彩色 PNG。
+const TRAY_IMG = process.platform === 'darwin'
+  ? path.join(ICON_DIR, 'trayTemplate.png')
+  : path.join(ICON_DIR, 'dark.png');
 
 let win = null;
 let tray = null;
@@ -258,8 +261,10 @@ async function smokeRecover(w, taskId) {
 
 function createTray() {
   if (SMOKE && !SMOKE_WINDOW) return;
-  if (!fs.existsSync(TRAY_PNG)) return;
-  tray = new Tray(nativeImage.createFromPath(TRAY_PNG));
+  if (!fs.existsSync(TRAY_IMG)) return;
+  const img = nativeImage.createFromPath(TRAY_IMG);
+  if (process.platform === 'darwin') img.setTemplateImage(true);
+  tray = new Tray(img);
   tray.setToolTip('Cabinet');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '显示 Cabinet', click: () => { win?.show(); win?.focus(); } },
