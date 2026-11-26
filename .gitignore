@@ -12,6 +12,8 @@ cabinet.local.json
 
 # 依赖与系统文件
 node_modules/
+release/
+dist/
 .DS_Store
 Thumbs.db
 *.log
