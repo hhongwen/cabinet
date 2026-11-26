@@ -117,6 +117,34 @@ function createWindow(url) {
   return win;
 }
 
+// D0 验收用：真实收一条任务 → 等模型分类落库 → 删掉。不改变产品行为。
+async function smokeClassify(w) {
+  const run = (js) => w.webContents.executeJavaScript(js);
+  const token = "(window.cabinet && window.cabinet.authToken) || ''";
+  const created = await run(
+    "fetch('/api/tasks', { method: 'POST', headers: { 'content-type': 'application/json', 'x-cabinet-token': " + token + " },"
+    + " body: JSON.stringify({ title: '冒烟：分类通道验证', text: '冒烟验证用，完成后自动删除。' }) })"
+    + ".then(r => r.json()).catch(e => ({ error: String(e) }))"
+  );
+  if (!created || !created.id) return { ok: false, why: '创建任务失败：' + JSON.stringify(created) };
+
+  const deadline = Date.now() + 60000;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 1500));
+    const state = await run(
+      "fetch('/api/state?include_archived=1', { headers: { 'x-cabinet-token': " + token + " } })"
+      + ".then(r => r.json()).catch(() => null)"
+    );
+    const t = state && (state.tasks || []).find((x) => x.id === created.id);
+    if (t && t.classify_state === 'failed') return { ok: false, why: '分类失败' };
+    if (t && t.classify_state === 'done') {
+      await run("fetch('/api/tasks/" + created.id + "', { method: 'DELETE', headers: { 'x-cabinet-token': " + token + " } }).catch(() => {})");
+      return { ok: true, priority: t.priority, project: t.project };
+    }
+  }
+  return { ok: false, why: '60 秒内未完成分类' };
+}
+
 function createTray() {
   if (SMOKE || !fs.existsSync(TRAY_PNG)) return;
   tray = new Tray(nativeImage.createFromPath(TRAY_PNG));
@@ -169,9 +197,19 @@ app.whenReady().then(async () => {
         "fetch('/api/ping', { headers: { 'x-cabinet-token': (window.cabinet && window.cabinet.authToken) || '' } })"
         + ".then(r => r.status === 200 ? r.json() : null).then(j => Boolean(j && j.ok)).catch(() => false)"
       );
-      log('SMOKE ' + (ok ? 'OK' : 'FAILED') + ' port=' + runtimeReady.port + ' data=' + runtimeReady.dataDir);
+
+      // --smoke-classify：用真实模型通道收一条任务，等分类落库，再删掉。
+      // 只用于 D0 验收，不改变产品行为。
+      let cls = null;
+      if (ok && process.argv.includes('--smoke-classify')) {
+        cls = await smokeClassify(win);
+      }
+
+      const allOk = ok && (!cls || cls.ok);
+      log('SMOKE ' + (allOk ? 'OK' : 'FAILED') + ' port=' + runtimeReady.port + ' data=' + runtimeReady.dataDir
+        + (cls ? ' classify=' + (cls.ok ? 'OK' : 'FAILED:' + (cls.why || '')) : ''));
       await shutdownRuntime();
-      app.exit(ok ? 0 : 1);
+      app.exit(allOk ? 0 : 1);
     });
     win.webContents.once('did-fail-load', (_e, code, desc) => {
       clearTimeout(failTimer);
