@@ -41,6 +41,12 @@ async function boot(token) {
 parentPort?.on('message', async (e) => {
   const msg = e?.data;
   if (msg?.type === 'init' && !booted) { await boot(msg.token); return; }
+  if (msg?.type === 'query-active') {
+    let count = 0;
+    try { count = rt ? rt.core.countOpenTurns() : 0; } catch { /* 读不到就当 0 */ }
+    send({ type: 'active', count });
+    return;
+  }
   if (msg?.type === 'shutdown' && rt) {
     try { await rt.stop(); } catch (err) { send({ type: 'shutdown-error', message: err.message }); }
     send({ type: 'stopped' });

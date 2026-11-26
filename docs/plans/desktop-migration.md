@@ -271,7 +271,7 @@ Cabinet/
 | --- | --- | --- |
 | `runtime.mjs` | 数据锁、初始化/迁移、归档扫描、恢复核对、start/shutdown 顺序与释放锁 | HTTP 路由、界面 |
 | `server.mjs` | `createHandler` + `start(core, opts)`（监听、端口回退） | 数据锁、初始化、恢复、收尾 |
-| `cli.mjs` / 独立运行入口 | 解析参数 → 调 `runtime.mjs` | 自己实现生命周期 |
+| `cli.mjs` | 普通读写直接走 `core` + SQLite（WAL 多进程）；`init`/迁移先拿数据锁 | Turn 执行、恢复、迁移的独占权（归 Runtime） |
 
 `node server.mjs` 仍要可用：入口就是 `runtime.start()`。这样 D1A 的 Runtime Contract 固化的只是已有形态，不是新造一套。
 
@@ -327,18 +327,18 @@ flowchart TD
 - [ ] 构建 Windows x64 EXE、macOS ARM64 DMG。
 - [ ] 验证 Magpie 分类、OpenCode 多轮会话与原 Session 恢复。
 
-| 编号 | 验收标准 | 状态 |
+| 编号 | 验收标准 | 状态（2026-11-26） |
 | --- | --- | --- |
-| D0-01 | 不依赖系统 Node.js/Chrome 启动 Cabinet；外部 Agent 依赖另行检查 | 待验收 |
-| D0-02 | Windows、macOS 安装、启动、关闭正常 | 待验收 |
-| D0-03 | 旧任务、附件、项目、配置、Session/Turn 无丢失 | 待验收 |
-| D0-04 | 新增任务并通过 Magpie 分类 | 待验收 |
-| D0-05 | OpenCode 完成两轮对话，复用外部 Session ID | 待验收 |
-| D0-06 | 重启后仍能定位原 Session | 待验收 |
-| D0-07 | 重复打开不启动第二个 Runtime；原独立服务冲突时安全拒绝 | 待验收 |
-| D0-08 | 完全退出不遗留非预期子进程，不误杀无关进程 | 待验收 |
-| D0-09 | 未授权本地 HTTP 请求不能触发 Agent；不可信页面不能访问通用系统能力 | 待验收 |
-| D0-10 | 原 Node 启动、CLI、测试可用 | 待验收 |
+| D0-01 | 不依赖系统 Node.js/Chrome 启动 Cabinet；外部 Agent 依赖另行检查 | Windows 通过：打包 exe 内置 Node v24.22.3；未在无 Node 的干净机器复测 |
+| D0-02 | Windows、macOS 安装、启动、关闭正常 | Windows 通过；macOS 待 Mac 上构建 DMG 后验收 |
+| D0-03 | 旧任务、附件、项目、配置、Session/Turn 无丢失 | 部分：热备份老库 29 条任务一致；附件与 Session 事件文件未逐项打开 |
+| D0-04 | 新增任务并通过 Magpie 分类 | Windows 打包通过：`--smoke-classify` |
+| D0-05 | OpenCode 完成两轮对话，复用外部 Session ID | Windows 打包通过：两轮 `completed`，`turn_count=2`，外部 ID 存在 |
+| D0-06 | 重启后仍能定位原 Session | Windows 打包通过：重启后外部 ID 不变，`reconcile` 末轮 `completed` |
+| D0-07 | 重复打开不启动第二个 Runtime；原独立服务冲突时安全拒绝 | 通过：单实例 + `ELOCKED` 拒绝；`test-lock` 6 进程并发抢锁仅 1 成功 |
+| D0-08 | 完全退出不遗留非预期子进程，不误杀无关进程 | 部分：普通退出无遗留；运行中 Turn 的退出确认已实现，未实测 |
+| D0-09 | 未授权本地 HTTP 请求不能触发 Agent；不可信页面不能访问通用系统能力 | 部分：token+Cookie、Host/Origin、CSP、导航/权限/IPC 来源校验已补齐；未做渗透式验证 |
+| D0-10 | 原 Node 启动、CLI、测试可用 | 通过：`npm test` 全绿（412+89+47+86+15+8+10+14），`node server.mjs` 冒烟正常 |
 
 补充实测：从 Windows 桌面图标、macOS Finder/Dock 启动的 PATH；中文路径、带空格路径；JS CLI 与二进制；数据目录中旧库与附件的真实备份/恢复；应用自身在没有系统 Node 的机器运行。D0 未通过不进行前端框架迁移、目录大搬迁或业务重写。
 
@@ -355,12 +355,18 @@ flowchart TD
 - D0-04 已在桌面包内跑通：`--smoke-classify` 真收一条任务、经 Magpie 分类落库后删除，`classify=OK`。
 - D0-05/06 已跑通（Runtime 同一入口，Node 模式）：OpenCode 两轮都返回预期原文，`turn_count=2`；强杀进程重启后 `external_session_id` 不变，`reconcile` 能对回原 Session 且末轮为 `completed`。
 - 原生目录选择已接入：`preload` 暴露 `pickDirectory()`，Main 用 `dialog.showOpenDialog`，页面优先走 IPC、失败再退回 `/api/pickdir`；冒烟确认 bridge 存在，真实点选仍需人工一次。
-- D1A Instance Contract 起步：数据锁改为 `wx` 原子创建，过期锁用 rename 抢占，释放只删自己 `id` 的锁；`test-lock` 12 项覆盖并发/过期/坏锁/误删。
-- Turn 终态事件：`core.onTurnFinished` 只读通知，监听器抛错不影响落库（`test-events` 6 项）；`runtime-host` 转发给 Main，由 Main 发系统通知，渲染层不能自己触发。
+- D1A Instance Contract 起步：数据锁改为 `wx` 原子创建，过期锁用 rename 抢占，释放只删自己 `id` 的锁；`test-lock` 15 项覆盖并发/过期/坏锁/误删，含 6 进程同时抢锁仅 1 成功。
+- Turn 终态事件：`core.onTurnFinished` 只读通知，监听器抛错不影响落库（`test-events` 8 项）；`runtime-host` 转发给 Main，由 Main 发系统通知，渲染层不能自己触发。
+- 认证改为「Header + HttpOnly Cookie」：URL 不再接受凭据（`?t=` 已移除），图片/附件靠 Cookie；服务端校验 Host/Origin；页面下发 CSP；桌面附件改为认证拉取后下载。
+- IPC 加固：token 与选目录 handler 校验 sender 必须是本窗口；`will-navigate` 限死在 Runtime 地址；页面权限一律拒绝；禁止 webview。
+- 启动失败不再是空引用：`ELOCKED` / `EPORTS` / `ETIMEOUT` 分别给出人话提示并退出。
+- 退出流程：先问 Runtime 还有几轮在跑；有任务时可选「继续后台 / 停止并退出 / 取消」。
+- CLI 契约对齐：`init`/迁移先拿数据锁，服务在跑时明确拒绝；普通读写仍走 SQLite WAL。删除任务仍由 core 拦截有活跃 Turn 的卡。
+- 打包环境 Agent 验证：`--smoke-session` 在安装包里连发两轮 OpenCode 成功（`turn_count=2`）；重启后用 `--smoke-recover <taskId>` 核对，外部 Session ID 不变、末轮 `completed`。
 
 仍待验收：
 
-- 真实 Agent 结束时的系统通知尚未人工确认一次（代码路径已通）。
+- 真实 Agent 结束时的系统通知、运行中任务的退出选项尚未人工确认一次（代码路径已通）。
 - 原生目录选择的实际点选、macOS DMG、代码签名未做。
 - IPC 目前只有凭据与选目录两项；开机自启、全局快捷键未新增。
 - 附件与 `sessions/` 事件文件只验证了随目录迁移，未逐项打开核对。
@@ -561,7 +567,7 @@ Renderer 使用 nodeIntegration: false、contextIsolation: true、sandbox: true�
 
 Runtime 默认绑定回环地址；应用实例认证使用高熵随机凭据、安全传递、Host/Origin 校验及必要 CSRF 防护；避免在 URL、日志或不可信页面中暴露凭据。认证不能依赖端口或仅靠 CORS。独立 Node HTTP 模式也需相应保护，CLI/浏览器调试方式需定义兼容机制。
 
-凭据下发只有一条路径：Main 进程启动时生成高熵随机 token → 经 preload 的有限 IPC（或一次性启动参数）交给 Renderer → Renderer 只在统一封装 `api()`（board.html:3781）里附加请求头。不把 token 写进 URL、持久化到 localStorage 文件或打进日志。现有页面只有一个 `fetch` 封装，所以认证接入必然改动 board.html 这一处；D0 清单里的“不修改布局、样式、任务规则”**不涵盖**认证接入，实施时单独提交、单独验收。
+凭据下发只有一条路径：Main 进程启动时生成高熵随机 token → 经 preload 的有限 IPC 交给 Renderer → Renderer 只在统一封装 `api()`（board.html:3781）里附加请求头。**URL 里永不出现凭据**，服务端已移除 `?t=` 认证方式。`<img src>` 和附件下载这类带不了 Header 的请求，靠第一次 Header 认证后服务端下发的 `HttpOnly; SameSite=Strict` Cookie；桌面模式的附件点击改为带 Header 拉取后下载，不再开新窗口。服务端同时校验 Host 与 Origin（端口参与身份判定），挡住 DNS rebinding 与跨站请求。IPC 只接受本应用窗口发起的调用（sender 校验），窗口内导航被限制在 Runtime 地址，页面权限一律拒绝，并下发 CSP。
 
 对外链、导航、新窗口、下载、附件路径进行限制；安全处理 Agent 输出、Markdown、HTML、链接、项目文件；设置适当 CSP，拒绝不可信脚本和任意权限请求。不使用关闭 webSecurity 的方式绕过开发问题。--auto Agent 权限是高影响能力，应明确工作目录与授权边界，不能让网页通过通用 IPC 执行任意命令。
 

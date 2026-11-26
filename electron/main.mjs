@@ -32,11 +32,20 @@ app.setName('Cabinet');
 // 本地接口凭据：每个进程一份，只经 preload 交给本应用的渲染层。
 // 不下发到 URL、日志，也不传给 Runtime 的子进程。
 const AUTH_TOKEN = crypto.randomBytes(32).toString('hex');
-ipcMain.on('cabinet:token', (e) => { e.returnValue = AUTH_TOKEN; });
+
+// IPC 来源校验：只认本应用的窗口。渲染层即使被注入脚本，也不能凭空拿到凭据
+// 或调用原生能力（来源是 process 级 sender，伪造不了）。
+function trustedSender(e) {
+  return !!win && !win.isDestroyed() && e.sender === win.webContents;
+}
+
+ipcMain.on('cabinet:token', (e) => {
+  e.returnValue = trustedSender(e) ? AUTH_TOKEN : '';
+});
 
 // 白名单能力：选一个本地目录。参数只做长度与类型收敛，不接收任意路径语义。
 ipcMain.handle('cabinet:pick-directory', async (e, initial) => {
-  if (!win) return null;
+  if (!trustedSender(e)) return null;
   const defaultPath = (typeof initial === 'string' && initial.length < 260) ? initial : undefined;
   const r = await dialog.showOpenDialog(win, {
     title: '选择项目目录',
@@ -80,7 +89,9 @@ function startRuntime() {
 
     runtime = utilityProcess.fork(HOST, [], { env, serviceName: 'cabinet-runtime' });
 
-    const timer = setTimeout(() => reject(new Error('Runtime 启动超时（15 秒）')), 15000);
+    const timer = setTimeout(() => reject(Object.assign(
+      new Error('Runtime 启动超时（15 秒）'), { code: 'ETIMEOUT' }
+    )), 15000);
     const done = (fn, arg) => { clearTimeout(timer); fn(arg); };
 
     runtime.on('message', (msg) => {
@@ -89,7 +100,12 @@ function startRuntime() {
       if (msg.type === 'log') { log('[runtime]', msg.line); return; }
       if (msg.type === 'turn-finished') { notifyTurn(msg); return; }
       if (msg.type === 'ready') { done(resolve, msg); return; }
-      if (msg.type === 'fatal') { done(reject, new Error(msg.message)); return; }
+      if (msg.type === 'fatal') {
+        const err = new Error(msg.message);
+        err.code = msg.code || '';
+        done(reject, err);
+        return;
+      }
       if (msg.type === 'stopped') { done(() => {}, null); }
     });
 
@@ -133,6 +149,19 @@ function createWindow(url) {
     return { action: 'deny' };
   });
 
+  // 应用内只允许停在 Runtime 自己的地址：任何页面发起的导航都拦下。
+  win.webContents.on('will-navigate', (e, target) => {
+    if (!target.startsWith(url)) {
+      e.preventDefault();
+      log('已阻止导航到', target);
+    }
+  });
+
+  // 不加载 webview，也不授予任何系统权限（通知由 Main 发，不走页面权限）。
+  win.webContents.on('will-attach-webview', (e) => e.preventDefault());
+  win.webContents.session.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
+  win.webContents.session.setPermissionCheckHandler(() => false);
+
   win.on('close', (e) => {
     if (SMOKE || quitting || !tray) return;
     e.preventDefault();
@@ -170,6 +199,55 @@ async function smokeClassify(w) {
   return { ok: false, why: '60 秒内未完成分类' };
 }
 
+// D0 验收用：在打包环境里连发两轮 OpenCode 消息，确认 Session 可复用。
+// 成功后不删任务：下一次启动用 --smoke-recover <taskId> 验证重启后仍能定位。
+async function smokeSession(w) {
+  const work = process.env.CABINET_SMOKE_WORK || '';
+  if (!work) return { ok: false, why: '缺 CABINET_SMOKE_WORK' };
+  const js = `(async () => {
+    const h = { 'content-type': 'application/json', 'x-cabinet-token': (window.cabinet && window.cabinet.authToken) || '' };
+    const post = (u, b) => fetch(u, { method: 'POST', headers: h, body: JSON.stringify(b) }).then(r => r.json());
+    const get = (u) => fetch(u, { headers: h }).then(r => r.json());
+    const proj = await post('/api/projects', { name: 'D0 packaged smoke', dirs: [{ path: ${JSON.stringify(work)}, primary: true }] });
+    const task = await post('/api/tasks', { title: 'D0 packaged session', project: 'D0 packaged smoke', text: 'Smoke only.' });
+    const s = await post('/api/tasks/' + task.id + '/sessions', { role: 'dev', agent: 'opencode', working_directory: ${JSON.stringify(work)} });
+    if (!s || !s.session) return { ok: false, why: '会话创建失败：' + JSON.stringify(s) };
+    const sid = s.session.id;
+    const wait = async (pred) => {
+      const end = Date.now() + 180000;
+      while (Date.now() < end) {
+        await new Promise(r => setTimeout(r, 1500));
+        const list = await get('/api/tasks/' + task.id + '/sessions');
+        const cur = (list.sessions || []).find(x => x.id === sid);
+        if (cur && pred(cur)) return cur;
+      }
+      return null;
+    };
+    await post('/api/sessions/' + sid + '/turns', { text: 'Reply with exactly: packaged turn one ok. Do not modify files.' });
+    const one = await wait(c => c.last_turn && c.last_turn.status === 'completed');
+    if (!one) return { ok: false, why: '第一轮未完成', task: task.id, session: sid };
+    await post('/api/sessions/' + sid + '/turns', { text: 'Reply with exactly: packaged turn two ok. Do nothing else.' });
+    const two = await wait(c => c.last_turn && c.last_turn.status === 'completed' && c.turn_count === 2);
+    if (!two) return { ok: false, why: '第二轮未完成', task: task.id, session: sid };
+    return { ok: true, task: task.id, session: sid, external: two.external_session_id, turns: two.turn_count, reply: two.last_turn.result_text };
+  })()`;
+  return await w.webContents.executeJavaScript(js);
+}
+
+// 重启后核对：会话和外部 Session ID 是否还在，reconcile 能否对回。
+async function smokeRecover(w, taskId) {
+  const js = `(async () => {
+    const h = { 'content-type': 'application/json', 'x-cabinet-token': (window.cabinet && window.cabinet.authToken) || '' };
+    const list = await fetch('/api/tasks/${taskId}/sessions', { headers: h }).then(r => r.json());
+    const s = (list.sessions || [])[0];
+    if (!s) return { ok: false, why: '重启后找不到会话' };
+    const rec = await fetch('/api/sessions/' + s.id + '/reconcile', { method: 'POST', headers: h }).then(r => r.json());
+    return { ok: Boolean(s.external_session_id), external: s.external_session_id, status: s.status,
+      last: rec && rec.session && rec.session.last_turn ? rec.session.last_turn.status : '' };
+  })()`;
+  return await w.webContents.executeJavaScript(js);
+}
+
 function createTray() {
   if (SMOKE || !fs.existsSync(TRAY_PNG)) return;
   tray = new Tray(nativeImage.createFromPath(TRAY_PNG));
@@ -193,13 +271,55 @@ async function shutdownRuntime(timeoutMs = 5000) {
   });
 }
 
+// 退出前问 Runtime「还有几轮在跑」。拿不到就按 0 处理，不阻塞退出。
+function queryActiveCount(timeoutMs = 2000) {
+  return new Promise((resolve) => {
+    const child = runtime;
+    if (!child) return resolve(0);
+    const timer = setTimeout(() => { child.removeListener('message', onMsg); resolve(0); }, timeoutMs);
+    function onMsg(msg) {
+      if (!msg || msg.type !== 'active') return;
+      clearTimeout(timer);
+      child.removeListener('message', onMsg);
+      resolve(Number(msg.count) || 0);
+    }
+    child.on('message', onMsg);
+    try { child.postMessage({ type: 'query-active' }); } catch {
+      clearTimeout(timer);
+      child.removeListener('message', onMsg);
+      resolve(0);
+    }
+  });
+}
+
+let quitPending = false;
+
 app.on('before-quit', (e) => {
   if (quitting) return;
-  quitting = true;
-  if (runtime) {
-    e.preventDefault();
-    shutdownRuntime().finally(() => app.exit(0));
-  }
+  if (!runtime) { quitting = true; return; }
+  if (quitPending) { e.preventDefault(); return; }
+  quitPending = true;
+  e.preventDefault();
+
+  (async () => {
+    const active = await queryActiveCount();
+    if (active > 0 && !SMOKE) {
+      const r = dialog.showMessageBoxSync(win || undefined, {
+        type: 'question',
+        buttons: ['继续后台运行', '停止任务并退出', '取消'],
+        defaultId: 0,
+        cancelId: 2,
+        title: '还有任务在跑',
+        message: '有 ' + active + ' 轮 Agent 正在执行。',
+        detail: '关闭窗口只会隐藏到托盘；这里退出会中止这些任务。'
+      });
+      if (r === 2) { quitPending = false; return; }
+      if (r === 0) { quitPending = false; win?.hide(); return; }
+    }
+    quitting = true;
+    await shutdownRuntime();
+    app.exit(0);
+  })();
 });
 
 app.whenReady().then(async () => {
@@ -209,6 +329,15 @@ app.whenReady().then(async () => {
   } catch (e) {
     log('Runtime 启动失败：', e.message);
     if (SMOKE) { app.exit(1); return; }
+    const hints = {
+      ELOCKED: '这个数据目录已经有一个 Cabinet 在运行。请先正常关闭原来的服务（或用 stop.cmd 停掉），再启动桌面端。',
+      EPORTS: '端口 46001–46005 都被占用。先关闭占用这些端口的程序，再重试。',
+      ETIMEOUT: 'Runtime 启动超时。检查数据目录权限与杀毒软件拦截，或重试。'
+    };
+    dialog.showErrorBox('Cabinet 启动失败',
+      e.message + '\n\n' + (hints[e.code] || '请重试；若问题持续，从命令行启动查看完整日志。'));
+    app.quit();
+    return;
   }
 
   createWindow(runtimeReady.url);
@@ -230,13 +359,28 @@ app.whenReady().then(async () => {
         cls = await smokeClassify(win);
       }
 
-      const allOk = ok && (!cls || cls.ok);
+      // --smoke-session：打包环境连发两轮 OpenCode 消息。
+      // --smoke-recover <taskId>：重启后核对会话与外部 Session 仍在。
+      let sess = null;
+      if (ok && process.argv.includes('--smoke-session')) sess = await smokeSession(win);
+      const ri = process.argv.indexOf('--smoke-recover');
+      if (ok && ri > -1) sess = await smokeRecover(win, process.argv[ri + 1] || '');
+
+      const allOk = ok && (!cls || cls.ok) && (!sess || sess.ok);
       const bridge = await win.webContents.executeJavaScript(
         "Boolean(window.cabinet && typeof window.cabinet.pickDirectory === 'function')"
       );
       log('SMOKE ' + (allOk ? 'OK' : 'FAILED') + ' port=' + runtimeReady.port + ' data=' + runtimeReady.dataDir
         + ' bridge=' + (bridge ? 'pick' : 'missing')
-        + (cls ? ' classify=' + (cls.ok ? 'OK' : 'FAILED:' + (cls.why || '')) : ''));
+        + (cls ? ' classify=' + (cls.ok ? 'OK' : 'FAILED:' + (cls.why || '')) : '')
+        + (sess ? ' session=' + (sess.ok ? 'OK task=' + sess.task + ' turns=' + sess.turns + ' ext=' + sess.external
+          : 'FAILED:' + (sess.why || '')) : ''));
+      // 打包后的 GUI 进程没有可读的控制台，冒烟结果写一个临时文件给验收脚本读。
+      try {
+        fs.writeFileSync(path.join(app.getPath('temp'), 'cabinet-smoke.json'),
+          JSON.stringify({ at: new Date().toISOString(), ok: allOk, port: runtimeReady.port,
+            dataDir: runtimeReady.dataDir, classify: cls, session: sess, bridge }));
+      } catch { /* 写不了文件不影响退出码 */ }
       await shutdownRuntime();
       app.exit(allOk ? 0 : 1);
     });
