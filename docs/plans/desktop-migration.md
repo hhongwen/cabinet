@@ -366,6 +366,7 @@ flowchart TD
 - 旧数据核对（D0-03）：热备份 + 目录拷贝后跑只读核对，29 条任务、5 张任务图片经 HTTP 读取全部 200 且字节与源一致；1 个 Session / 1 个 Turn / 1 个事件文件存在且非空。该库没有消息附件与文件附件，这两类当前无样本。
 - 无 Node 环境（D0-01 代理）：PATH 剥离到只剩 System32（`where node` 失败）后，安装包冒烟仍通过；真正无 Node 的机器未复测。
 - 运行中退出（D0-08）：Runtime 在 Turn 运行中调用 `stop()`，Turn 落为 `interrupted`、`openTurns=0`、停止耗时 39ms、无后代进程残留。桌面「还有任务在跑」确认框未人工点过。
+- D1A 契约已落盘：[docs/architecture/desktop-runtime-contracts.md](../architecture/desktop-runtime-contracts.md)，五份契约都带代码位置与测试映射。
 
 仍待验收：
 
@@ -621,7 +622,7 @@ Runtime 默认绑定回环地址；应用实例认证使用高熵随机凭据、
 | README.md | 产品定位、安装方式、状态与文档入口 | 补充入口，功能未实现前不改状态 |
 | ROADMAP.md | 产品路线 | 保持原路线，实施时可少量补桌面里程碑入口 |
 | docs/plans/desktop-migration.md（本文） | 当前完整桌面方案与验收 | 新增 |
-| docs/desktop-architecture.md | 长期稳定架构与契约 | 按需从本文提取，不重复 |
+| docs/architecture/desktop-runtime-contracts.md | D1A 的 Runtime / Data / Instance / Agent / Security 五份契约 | 已完成（2026-11-26） |
 | docs/frontend-engineering.md | ESM 拆分与框架触发条件 | 按需提取 |
 | AGENTS.md | 开发规则、重构限制 | 实施阶段按需新增/完善 |
 | task-inbox/STYLE.md | 现有视觉标准 | 保留 |

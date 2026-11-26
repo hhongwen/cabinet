@@ -10,6 +10,7 @@
 
 - 路线图与技术判断 → [ROADMAP.md](ROADMAP.md)
 - Electron 桌面客户端重构规划（B′）→ [docs/plans/desktop-migration.md](docs/plans/desktop-migration.md)
+- 桌面运行时契约（D1A：Runtime / Data / Instance / Agent / Security）→ [docs/architecture/desktop-runtime-contracts.md](docs/architecture/desktop-runtime-contracts.md)
 - 阶段 1A 实施计划（持久 Agent Session）→ [docs/plans/2026-11-24-session-1a-implementation.md](docs/plans/2026-11-24-session-1a-implementation.md)
 - Session / 交接 / 协作实施规划 → [docs/session-collaboration.md](docs/session-collaboration.md)
 - 卡片关系（合/拆/层级/依赖）与表格视图 → [docs/relations-and-table.md](docs/relations-and-table.md)
