@@ -199,7 +199,7 @@ UtilityProcess 是首选隔离方式，不等于独立于 Electron 主程序的�
 
 | 技术层 | 选型 | 决策 |
 | --- | --- | --- |
-| 桌面框架 | Electron | 新增 |
+| 桌面框架 | Electron | 新增；版本下限 ≥ 35.0.2（自带 Node 22.14，`node:sqlite` 默认可用），实施时取 npm 当前稳定版并在双平台安装包内实测 |
 | 前端 | HTML / CSS / JS | 保留 |
 | 前端模块化 | ES Modules | 渐进新增 |
 | 前端构建工具 / UI 框架 | 无 | 暂不引入 |
@@ -264,6 +264,16 @@ Cabinet/
 ├── electron-builder.yml
 └── ROADMAP.md
 ```
+
+`runtime.mjs` 与 `server.mjs` 的职责在 D0 就写死，不允许两处都管生命周期：
+
+| 文件 | 负责 | 不负责 |
+| --- | --- | --- |
+| `runtime.mjs` | 数据锁、初始化/迁移、归档扫描、恢复核对、start/shutdown 顺序与释放锁 | HTTP 路由、界面 |
+| `server.mjs` | `createHandler` + `start(core, opts)`（监听、端口回退） | 数据锁、初始化、恢复、收尾 |
+| `cli.mjs` / 独立运行入口 | 解析参数 → 调 `runtime.mjs` | 自己实现生命周期 |
+
+`node server.mjs` 仍要可用：入口就是 `runtime.start()`。这样 D1A 的 Runtime Contract 固化的只是已有形态，不是新造一套。
 
 保留原 .cmd、.command、CLI、Node 测试及原有调试方式；只有桌面版本稳定后才评估废弃脚本。静态文件拆分时同步维护服务路径、打包资源、安装复制清单、样式检查、代码版本识别与热更新行为。
 
@@ -473,15 +483,17 @@ D0 已包含可安装的手工构建；D3 是分发体系完善。
 
 ```text
 ~/.config/cabinet/
-├── tasks.db
-├── attachments/
-├── sessions/
-├── logs/
-├── backups/
-└── server.lock
+├── tasks.db              # 业务真相（WAL），已存在
+├── tasks.json            # 仅旧版本遗留，首次建库后改名留档，已存在
+├── images/               # 贴进来的图（core.mjs:68），已存在
+├── files/                # 其他附件（core.mjs:69），已存在
+├── sessions/             # 每轮 Agent 事件 JSONL（core.mjs:1872），已存在
+├── server.lock          # Runtime 数据锁，已存在
+├── logs/                 # 桌面模式新增，当前不存在
+└── backups/              # 桌面模式新增，当前不存在
 ```
 
-以上是目标示意，附件、日志等实际路径以代码和迁移契约为准。Windows 为用户 home 下的 .config/cabinet；macOS 同理。Electron userData（例如 Windows %APPDATA%/Cabinet、macOS ~/Library/Application Support/Cabinet）仅保存桌面配置和 Chromium 缓存。
+叶子目录必须与代码一致：实际是 `images/` 和 `files/`，**没有 `attachments/`**。`logs/`、`backups/` 是桌面模式要新增的目录，实施时先建目录再写日志/备份，不能假设它已存在。Windows 为用户 home 下的 .config/cabinet；macOS 同理。Electron userData（例如 Windows %APPDATA%/Cabinet、macOS ~/Library/Application Support/Cabinet）仅保存桌面配置和 Chromium 缓存。
 
 迁移前对 SQLite 做一致性热备份或在正常关库后备份，并包含附件、Session 日志及必要配置；不能直接复制活跃 WAL 数据库的单个文件。验证恢复后才升级。检查历史 Alma 目录数据与现行目录，禁止静默新建空库造成数据“消失”。
 
@@ -524,6 +536,8 @@ Main 与 Runtime 有内部生命周期和事件通道，和 Renderer 白名单 I
 Renderer 使用 nodeIntegration: false、contextIsolation: true、sandbox: true。Preload 每个 IPC 只暴露明确语义、校验参数及调用来源。
 
 Runtime 默认绑定回环地址；应用实例认证使用高熵随机凭据、安全传递、Host/Origin 校验及必要 CSRF 防护；避免在 URL、日志或不可信页面中暴露凭据。认证不能依赖端口或仅靠 CORS。独立 Node HTTP 模式也需相应保护，CLI/浏览器调试方式需定义兼容机制。
+
+凭据下发只有一条路径：Main 进程启动时生成高熵随机 token → 经 preload 的有限 IPC（或一次性启动参数）交给 Renderer → Renderer 只在统一封装 `api()`（board.html:3781）里附加请求头。不把 token 写进 URL、持久化到 localStorage 文件或打进日志。现有页面只有一个 `fetch` 封装，所以认证接入必然改动 board.html 这一处；D0 清单里的“不修改布局、样式、任务规则”**不涵盖**认证接入，实施时单独提交、单独验收。
 
 对外链、导航、新窗口、下载、附件路径进行限制；安全处理 Agent 输出、Markdown、HTML、链接、项目文件；设置适当 CSP，拒绝不可信脚本和任意权限请求。不使用关闭 webSecurity 的方式绕过开发问题。--auto Agent 权限是高影响能力，应明确工作目录与授权边界，不能让网页通过通用 IPC 执行任意命令。
 
@@ -626,7 +640,7 @@ flowchart TB
 | 是否对外分发 | 首期自用，保留未来可能性 | 使用者明确需求后进入 D3 |
 | 前端是否持续做大 | 不预设一定换框架 | D2 后评估真实维护成本 |
 | Apple Developer 账号 | 未确认 | 对外分发前确认 |
-| Electron 具体稳定版本 | 未锁定 | 以打包兼容、安全支持与双平台测试选择 |
+| Electron 具体稳定版本 | 下限 ≥35.0.2（`node:sqlite` 可用性由它决定）；D0 内锁定一个具体版本 | 在 `package.json` 记录版本，并在双平台安装包内实测 `node:sqlite` 读写、UtilityProcess 与重启 |
 | node:sqlite / UtilityProcess | 尚未实际验证 | 双平台安装包中读写及重启 |
 | 图标启动 PATH / macOS launch 环境 | 尚未实际验证 | Finder、Dock、桌面快捷方式启动真实 CLI |
 | 现有本地 dev 与远端 main 是否一致 | 未确认 | 实施前比对本地分支及最新提交 |
