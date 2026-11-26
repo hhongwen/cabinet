@@ -329,14 +329,14 @@ flowchart TD
 
 | 编号 | 验收标准 | 状态（2026-11-26） |
 | --- | --- | --- |
-| D0-01 | 不依赖系统 Node.js/Chrome 启动 Cabinet；外部 Agent 依赖另行检查 | Windows 通过：打包 exe 内置 Node v24.22.3；未在无 Node 的干净机器复测 |
+| D0-01 | 不依赖系统 Node.js/Chrome 启动 Cabinet；外部 Agent 依赖另行检查 | Windows 通过：打包 exe 内置 Node v24.22.3；PATH 剥离 node 后冒烟仍通过；未在真正无 Node 的机器复测 |
 | D0-02 | Windows、macOS 安装、启动、关闭正常 | Windows 通过；macOS 待 Mac 上构建 DMG 后验收 |
-| D0-03 | 旧任务、附件、项目、配置、Session/Turn 无丢失 | 部分：热备份老库 29 条任务一致；附件与 Session 事件文件未逐项打开 |
+| D0-03 | 旧任务、附件、项目、配置、Session/Turn 无丢失 | 通过（2026-11-26 只读拷贝核对）：29 条任务、5 个任务图片全部 HTTP 200 且字节一致；1 个 Session/1 个 Turn/1 个事件文件存在且非空；该库无消息附件与文件附件，未覆盖到这两类 |
 | D0-04 | 新增任务并通过 Magpie 分类 | Windows 打包通过：`--smoke-classify` |
 | D0-05 | OpenCode 完成两轮对话，复用外部 Session ID | Windows 打包通过：两轮 `completed`，`turn_count=2`，外部 ID 存在 |
 | D0-06 | 重启后仍能定位原 Session | Windows 打包通过：重启后外部 ID 不变，`reconcile` 末轮 `completed` |
 | D0-07 | 重复打开不启动第二个 Runtime；原独立服务冲突时安全拒绝 | 通过：单实例 + `ELOCKED` 拒绝；`test-lock` 6 进程并发抢锁仅 1 成功 |
-| D0-08 | 完全退出不遗留非预期子进程，不误杀无关进程 | 部分：普通退出无遗留；运行中 Turn 的退出确认已实现，未实测 |
+| D0-08 | 完全退出不遗留非预期子进程，不误杀无关进程 | Runtime 优雅关停通过：运行中 Turn 被中止为 `interrupted`，停止耗时 39ms，无后代进程残留；桌面「还有任务在跑」确认框未人工点过 |
 | D0-09 | 未授权本地 HTTP 请求不能触发 Agent；不可信页面不能访问通用系统能力 | 部分：token+Cookie、Host/Origin、CSP、导航/权限/IPC 来源校验已补齐；未做渗透式验证 |
 | D0-10 | 原 Node 启动、CLI、测试可用 | 通过：`npm test` 全绿（412+89+47+86+15+8+10+14），`node server.mjs` 冒烟正常 |
 
@@ -363,13 +363,17 @@ flowchart TD
 - 退出流程：先问 Runtime 还有几轮在跑；有任务时可选「继续后台 / 停止并退出 / 取消」。
 - CLI 契约对齐：`init`/迁移先拿数据锁，服务在跑时明确拒绝；普通读写仍走 SQLite WAL。删除任务仍由 core 拦截有活跃 Turn 的卡。
 - 打包环境 Agent 验证：`--smoke-session` 在安装包里连发两轮 OpenCode 成功（`turn_count=2`）；重启后用 `--smoke-recover <taskId>` 核对，外部 Session ID 不变、末轮 `completed`。
+- 旧数据核对（D0-03）：热备份 + 目录拷贝后跑只读核对，29 条任务、5 张任务图片经 HTTP 读取全部 200 且字节与源一致；1 个 Session / 1 个 Turn / 1 个事件文件存在且非空。该库没有消息附件与文件附件，这两类当前无样本。
+- 无 Node 环境（D0-01 代理）：PATH 剥离到只剩 System32（`where node` 失败）后，安装包冒烟仍通过；真正无 Node 的机器未复测。
+- 运行中退出（D0-08）：Runtime 在 Turn 运行中调用 `stop()`，Turn 落为 `interrupted`、`openTurns=0`、停止耗时 39ms、无后代进程残留。桌面「还有任务在跑」确认框未人工点过。
 
 仍待验收：
 
-- 真实 Agent 结束时的系统通知、运行中任务的退出选项尚未人工确认一次（代码路径已通）。
+- 桌面「还有任务在跑」退出确认框、真实 Agent 结束通知，尚未人工点过一次。
 - 原生目录选择的实际点选、macOS DMG、代码签名未做。
 - IPC 目前只有凭据与选目录两项；开机自启、全局快捷键未新增。
-- 附件与 `sessions/` 事件文件只验证了随目录迁移，未逐项打开核对。
+- 消息附件与文件附件在当前真实库中没有样本，未覆盖到。
+- D0-09 未做渗透式验证。
 
 
 ### 6.2 D1A：桌面运行时基础契约
