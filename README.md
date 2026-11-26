@@ -76,7 +76,8 @@ Cabinet/
   task-inbox/          ← 在用的东西
     core.mjs           任务逻辑（纯 Node，不依赖任何宿主）
     storage.mjs        SQLite 底层：驱动探测 + 建表 + 迁移
-    server.mjs         HTTP 服务（可独立跑，也可作 Alma 插件）
+    runtime.mjs        共享启动/关闭入口：锁、初始化、恢复、退出顺序
+    server.mjs         HTTP 服务（createHandler + listen）
     main.mjs           Alma 插件外壳
     classify.mjs       判类型 / 优先级 / 项目 / 够不够开工
     brief.mjs          整理成需求说明

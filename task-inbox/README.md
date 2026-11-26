@@ -590,8 +590,9 @@ Alma 插件：插件在 Alma 进程里起同一个 HTTP 服务、开机就抢 46
 ```
 task-inbox/
   core.mjs       任务逻辑（纯 Node，不依赖任何宿主）
+  runtime.mjs    共享启动/关闭入口：数据锁、初始化、归档、恢复、退出顺序
   storage.mjs    SQLite 底层：驱动探测 + 建表 + 语句包装
-  server.mjs     HTTP 服务 + 命令行入口（就是主程序）
+  server.mjs     HTTP 服务（createHandler + listen），命令行入口调 runtime.mjs
   classify.mjs   判类型 / 优先级 / 项目
   brief.mjs      整理成需求说明
   chat.mjs       卡片抽屉里的对话

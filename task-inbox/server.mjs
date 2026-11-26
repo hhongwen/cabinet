@@ -1169,7 +1169,7 @@ export function start(core, opts = {}) {
   });
   const recoveredTurns = runner.recover();
   const handler = createHandler(core, { ...opts, queue, runner });
-  const portQueue = [preferred, ...FALLBACK_PORTS.filter((x) => x !== preferred)];
+  const portQueue = opts.ports || [preferred, ...FALLBACK_PORTS.filter((x) => x !== preferred)];
 
   return new Promise((resolve) => {
     const tryNext = (i) => {
@@ -1187,79 +1187,25 @@ export function start(core, opts = {}) {
 }
 
 // ---------- 命令行入口 ----------
+//
+// 入口只把参数交给 runtime.mjs：锁、初始化、归档扫描、恢复和退出顺序
+// 都在 Runtime 里，Node 独立模式与 Electron 桌面模式共用同一份。
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
 if (isMain) {
-  const argPort = (() => {
-    const i = process.argv.indexOf('--port');
-    return i > -1 ? Number(process.argv[i + 1]) : DEFAULT_PORT;
-  })();
-
-  const dataDir = process.env.TASK_INBOX_DATA || DEFAULT_DATA_DIR;
-  // 同一数据目录只允许一个服务实例。端口回退会让第二份代码占到 46002，
-  // 两个实例共享 WAL 时，一个实例的启动恢复会把另一个正在跑的 Turn 标 unknown。
-  let dataLock;
   try {
-    dataLock = acquireDataLock(dataDir);
+    const { main } = await import('./runtime.mjs');
+    await main(process.argv, {
+      acquireDataLock,
+      start,
+      DEFAULT_DATA_DIR,
+      DEFAULT_PORT,
+      FALLBACK_PORTS,
+      buildInfo
+    });
   } catch (e) {
     console.error('[task-inbox] ' + e.message);
     process.exit(1);
   }
-  const releaseLock = () => {
-    try { dataLock.release(); } catch { /* 已经没了 */ }
-  };
-  process.on('exit', releaseLock);
-
-  const core = createCore(dataDir);
-
-  // 建库建表；目录里如果有老的 tasks.json，顺手迁进来
-  const initResult = core.init();
-  if (initResult.migration?.migrated) {
-    const mg = initResult.migration;
-    console.log('[task-inbox] 已从 tasks.json 迁移：'
-      + mg.tasks + ' 个任务 / ' + mg.messages + ' 条消息 / ' + mg.projects + ' 个项目'
-      + (mg.backup ? '，原文件改名为 ' + path.basename(mg.backup) : ''));
-  } else if (initResult.migration?.reason && !/没有 tasks\.json/.test(initResult.migration.reason)) {
-    console.log('[task-inbox] 迁移跳过：' + initResult.migration.reason);
-  }
-  if (initResult.revived) {
-    console.log('[task-inbox] ' + initResult.revived + ' 条任务的判断被上次退出打断，已标成失败，可以重新判断');
-  }
-  try {
-    const archived = core.archiveStale(core.loadSettings().archive_after_days);
-    if (archived) console.log('[task-inbox] 已归档 ' + archived + ' 条超期的已完成任务');
-  } catch (e) {
-    console.log('[task-inbox] 归档扫描失败：' + e.message);
-  }
-
-  const started = await start(core, { port: argPort });
-  if (!started) {
-    // 端口都被占了：锁也要放掉，否则下一次启动会被自己的过期锁挡住
-    releaseLock();
-    console.error('[task-inbox] 端口都被占用了：' + [argPort, ...FALLBACK_PORTS].join(', '));
-    process.exit(1);
-  }
-
-  const base = 'http://127.0.0.1:' + started.port;
-  console.log('[task-inbox] 已启动  v' + VERSION + '  pid ' + process.pid);
-  console.log('  看板：' + base + '/');
-  console.log('  随手记：' + base + '/quick');
-  console.log('  数据：' + core.dbFile);
-  if (started.recoveredTurns) {
-    console.log('[task-inbox] ' + started.recoveredTurns + ' 轮 Agent 执行被上次退出打断，已标成待核对');
-  }
-
-  const stop = async () => {
-    try { started.server.close(); } catch {}
-    // 先把子进程收掉，再关库：反过来的话，正在跑的 Agent 收尾时会写一个
-    // 已经关掉的连接，日志里全是「database is closed」。
-    try { await started.runner.close(); } catch {}
-    // 关库时把 WAL 收回去，不留一个几 MB 的 -wal 文件在目录里
-    try { core.close(); } catch {}
-    releaseLock();
-    process.exit(0);
-  };
-  process.on('SIGINT', stop);
-  process.on('SIGTERM', stop);
 }
