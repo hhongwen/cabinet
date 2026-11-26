@@ -366,6 +366,8 @@ flowchart TD
 - 旧数据核对（D0-03）：热备份 + 目录拷贝后跑只读核对，29 条任务、5 张任务图片经 HTTP 读取全部 200 且字节与源一致；1 个 Session / 1 个 Turn / 1 个事件文件存在且非空。该库没有消息附件与文件附件，这两类当前无样本。
 - 无 Node 环境（D0-01 代理）：PATH 剥离到只剩 System32（`where node` 失败）后，安装包冒烟仍通过；真正无 Node 的机器未复测。
 - 运行中退出（D0-08）：Runtime 在 Turn 运行中调用 `stop()`，Turn 落为 `interrupted`、`openTurns=0`、停止耗时 39ms、无后代进程残留。桌面「还有任务在跑」确认框未人工点过。
+- 桌面层冒烟（2026-11-26）：`--smoke-picker` 走通 renderer → preload → sender 校验 → 返回路径（系统对话框按冒烟桩跳过，`got=C:\Windows`）；`--smoke-window` 建托盘后 `win.close()` 只隐藏、再显示恢复（`hidden=true, shown=true`）。**真实系统对话框仍需人工点一次。**
+- 打包后的图标改由 `extraResources` 输出到 `resources/icons`：asar 内的路径 `nativeImage` 读不到，托盘会静默缺失；`electron-builder.yml` 已同步。
 - D1A 契约已落盘：[docs/architecture/desktop-runtime-contracts.md](../architecture/desktop-runtime-contracts.md)，五份契约都带代码位置与测试映射。
 
 仍待验收：
@@ -517,8 +519,8 @@ D1B 验收：关窗再开、Renderer 崩溃、杀壳、杀 Runtime、系统休�
 
 尚未覆盖（属桌面层或已有其它验证）：
 
-- 原生目录选择（`dialog.showOpenDialog`，只能在桌面窗口里人工验证）
-- 桌面窗口关闭/恢复
+- 原生目录选择的**真实系统对话框**（需人工点一次；IPC/桥接链路已由 `--smoke-picker` 覆盖）
+- 桌面窗口关闭/恢复（Web 基线不覆盖；Electron `--smoke-window` 已覆盖“关窗=隐藏、再显示”）
 - 自动分类的真实模型链路（由 `--smoke-classify` 打包冒烟覆盖，不放入 Web 基线）
 
 测试同时发现一处界面实现与属性不一致：`#drTabBody` 的 `data-tab` 之前是写死的 `req`，已改为随 `drSyncTabs()` 同步。

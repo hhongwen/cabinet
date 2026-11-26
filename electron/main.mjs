@@ -17,9 +17,14 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const HOST = path.join(HERE, 'runtime-host.mjs');
 const SMOKE = process.argv.includes('--smoke');
+// 桌面层冒烟：只有这个开关会在无头窗口里建托盘并验证「关窗=隐藏」。
+const SMOKE_WINDOW = SMOKE && process.argv.includes('--smoke-window');
 
-const ICON_ICO = path.join(ROOT, 'task-inbox', 'icons', 'cabinet-dark.ico');
-const TRAY_PNG = path.join(ROOT, 'task-inbox', 'icons', 'dark.png');
+const ICON_DIR = app.isPackaged
+  ? path.join(process.resourcesPath, 'icons')
+  : path.join(ROOT, 'task-inbox', 'icons');
+const ICON_ICO = path.join(ICON_DIR, 'cabinet-dark.ico');
+const TRAY_PNG = path.join(ICON_DIR, 'dark.png');
 
 let win = null;
 let tray = null;
@@ -46,6 +51,9 @@ ipcMain.on('cabinet:token', (e) => {
 // 白名单能力：选一个本地目录。参数只做长度与类型收敛，不接收任意路径语义。
 ipcMain.handle('cabinet:pick-directory', async (e, initial) => {
   if (!trustedSender(e)) return null;
+  // 冒烟模式不弹系统对话框：只验证 sender 校验、参数收敛、preload 桥接这条链路。
+  // 真实点选仍需人工一次，不能拿这里的通过冒充。
+  if (SMOKE && process.env.CABINET_SMOKE_PICK) return process.env.CABINET_SMOKE_PICK;
   const defaultPath = (typeof initial === 'string' && initial.length < 260) ? initial : undefined;
   const r = await dialog.showOpenDialog(win, {
     title: '选择项目目录',
@@ -163,7 +171,7 @@ function createWindow(url) {
   win.webContents.session.setPermissionCheckHandler(() => false);
 
   win.on('close', (e) => {
-    if (SMOKE || quitting || !tray) return;
+    if (quitting || !tray) return;
     e.preventDefault();
     win.hide();
   });
@@ -249,7 +257,8 @@ async function smokeRecover(w, taskId) {
 }
 
 function createTray() {
-  if (SMOKE || !fs.existsSync(TRAY_PNG)) return;
+  if (SMOKE && !SMOKE_WINDOW) return;
+  if (!fs.existsSync(TRAY_PNG)) return;
   tray = new Tray(nativeImage.createFromPath(TRAY_PNG));
   tray.setToolTip('Cabinet');
   tray.setContextMenu(Menu.buildFromTemplate([
@@ -366,7 +375,32 @@ app.whenReady().then(async () => {
       const ri = process.argv.indexOf('--smoke-recover');
       if (ok && ri > -1) sess = await smokeRecover(win, process.argv[ri + 1] || '');
 
-      const allOk = ok && (!cls || cls.ok) && (!sess || sess.ok);
+      // 桌面层冒烟：选目录 IPC 链路（不弹系统对话框）+ 关窗=隐藏/再显示。
+      let desk = null;
+      if (ok && process.argv.includes('--smoke-picker')) {
+        const stub = process.env.CABINET_SMOKE_PICK || '';
+        let got = '';
+        try { got = await win.webContents.executeJavaScript("window.cabinet.pickDirectory('')"); } catch { got = ''; }
+        desk = { picker: { ok: !!stub && got === stub, got, stub } };
+      }
+      if (ok && SMOKE_WINDOW) {
+        const hadTray = !!tray;
+        let hidden = false, shown = false;
+        if (hadTray) {
+          win.close();
+          await new Promise((r) => setTimeout(r, 300));
+          hidden = !win.isVisible() && !win.isDestroyed();
+          win.show(); win.focus();
+          await new Promise((r) => setTimeout(r, 300));
+          shown = win.isVisible();
+        }
+        desk = Object.assign(desk || {}, {
+          window: { ok: hadTray && hidden && shown, tray: hadTray, hidden, shown }
+        });
+      }
+
+      const deskOk = (!desk || !desk.picker || desk.picker.ok) && (!desk || !desk.window || desk.window.ok);
+      const allOk = ok && (!cls || cls.ok) && (!sess || sess.ok) && deskOk;
       const bridge = await win.webContents.executeJavaScript(
         "Boolean(window.cabinet && typeof window.cabinet.pickDirectory === 'function')"
       );
@@ -374,12 +408,14 @@ app.whenReady().then(async () => {
         + ' bridge=' + (bridge ? 'pick' : 'missing')
         + (cls ? ' classify=' + (cls.ok ? 'OK' : 'FAILED:' + (cls.why || '')) : '')
         + (sess ? ' session=' + (sess.ok ? 'OK task=' + sess.task + ' turns=' + sess.turns + ' ext=' + sess.external
-          : 'FAILED:' + (sess.why || '')) : ''));
+          : 'FAILED:' + (sess.why || '')) : '')
+        + (desk && desk.picker ? ' picker=' + (desk.picker.ok ? 'OK' : 'FAILED') : '')
+        + (desk && desk.window ? ' window=' + (desk.window.ok ? 'OK' : 'FAILED') : ''));
       // 打包后的 GUI 进程没有可读的控制台，冒烟结果写一个临时文件给验收脚本读。
       try {
         fs.writeFileSync(path.join(app.getPath('temp'), 'cabinet-smoke.json'),
           JSON.stringify({ at: new Date().toISOString(), ok: allOk, port: runtimeReady.port,
-            dataDir: runtimeReady.dataDir, classify: cls, session: sess, bridge }));
+            dataDir: runtimeReady.dataDir, classify: cls, session: sess, desk, bridge }));
       } catch { /* 写不了文件不影响退出码 */ }
       await shutdownRuntime();
       app.exit(allOk ? 0 : 1);

@@ -12,6 +12,9 @@ files:
   - task-inbox/icons/**
   - package.json
 asar: true
+extraResources:
+  - from: task-inbox/icons
+    to: icons
 win:
   target:
     - nsis
