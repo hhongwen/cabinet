@@ -25,7 +25,9 @@ const fired = [];
 const off = core.onTurnFinished((e) => fired.push(e));
 
 const t1 = core.startTurn(session.id, '第一轮');
+ok('执行中的 Turn 计入 open 数', core.countOpenTurns() === 1, String(core.countOpenTurns()));
 core.finishTurn(t1.id, { status: 'completed', resultText: '完成' });
+ok('结束后 open 数归零', core.countOpenTurns() === 0, String(core.countOpenTurns()));
 ok('一轮结束触发一次事件', fired.length === 1, String(fired.length));
 ok('事件带 Turn 终态', fired[0] && fired[0].turn.status === 'completed');
 ok('事件带会话与任务', fired[0] && fired[0].session.task_id === task.id && fired[0].task.title === '事件冒烟任务');

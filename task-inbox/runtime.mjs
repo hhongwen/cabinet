@@ -3,7 +3,9 @@
 // 分工在 D0 就固定，不允许两处都管生命周期：
 //   runtime.mjs：数据锁 / 初始化与迁移 / 归档扫描 / start / 关闭顺序 / 释放锁
 //   server.mjs ：createHandler + start(core, opts)（监听与端口回退）
-//   cli.mjs、node server.mjs、Electron 都从这里进出
+//   入口：node server.mjs 与 Electron 从这里进出。
+//   cli.mjs 是例外：普通读写直接走 core + SQLite（WAL 支持多进程），
+//   只有 init/迁移这类独占操作才拿数据锁；执行中的 Turn 一律归 Runtime。
 //
 // 这样 Node 独立模式、CLI 和桌面模式共用同一份锁、初始化和恢复逻辑，
 // 不会出现「Electron 直接调 start() 绕过锁和初始化」的分叉。

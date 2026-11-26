@@ -63,6 +63,28 @@ broken.release();
 const leftovers = fs.readdirSync(tmp).filter((n) => n.includes('.stale-'));
 ok('回收后没有残留 stale 文件', leftovers.length === 0, leftovers.join(','));
 
+// 7. 多进程同时抢锁：只能有一个成功（顺序启动测不出并发窗口）
+{
+  const { spawn } = await import('node:child_process');
+  const serverUrl = new URL('./server.mjs', import.meta.url).href;
+  const script = 'const { acquireDataLock } = await import(' + JSON.stringify(serverUrl) + ');'
+    + ' const dir = process.argv[1];'
+    + ' try { const l = acquireDataLock(dir); console.log("OK"); setTimeout(() => { l.release(); }, 800); }'
+    + ' catch (e) { console.log(e.code || "ERR"); }';
+  const runOne = () => new Promise((resolve) => {
+    const c = spawn(process.execPath, ['--input-type=module', '-e', script, tmp], {
+      stdio: ['ignore', 'pipe', 'ignore']
+    });
+    let out = '';
+    c.stdout.on('data', (d) => { out += String(d); });
+    c.on('exit', () => resolve(out.trim()));
+  });
+  const results = await Promise.all(Array.from({ length: 6 }, runOne));
+  ok('6 个进程同时抢锁只有一个成功', results.filter((r) => r === 'OK').length === 1, results.join(','));
+  ok('其余进程都被 ELOCKED 拒绝', results.filter((r) => r === 'ELOCKED').length === results.length - 1, results.join(','));
+  ok('竞争结束后没有残留锁', !fs.existsSync(lockFile));
+}
+
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
 
 console.log(`\n${pass} 通过，${fail} 失败`);

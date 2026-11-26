@@ -80,6 +80,13 @@ export function createCore(dataDir) {
     turnFinishListeners.add(fn);
     return () => turnFinishListeners.delete(fn);
   }
+  // 还在跑（或排队）的 Turn 数：退出确认和「是否有任务在跑」都看这个。
+  function countOpenTurns() {
+    const d = conn();
+    try {
+      return Number(d.get("SELECT COUNT(*) AS c FROM session_turns WHERE status IN ('queued', 'running')")?.c || 0);
+    } catch { return 0; }
+  }
   function emitTurnFinished(payload) {
     for (const fn of turnFinishListeners) {
       try { fn(payload); } catch (e) { console.warn('[task-inbox] Turn 事件监听器失败：' + e.message); }
@@ -2729,7 +2736,7 @@ export function createCore(dataDir) {
     dataFile: dbFile,   // 兼容旧调用方的命名，指向的已经是 .db
     imagesDir, filesDir, settingsFile,
     conn, init, close,
-    onTurnFinished,
+    onTurnFinished, countOpenTurns,
     add, getTask, patch, move, remove, list, state, count, revision, archiveStale,
     linkTasks, unlinkTasks, deleteLink, listLinks, linksOf,
     blockedBy, reachable,

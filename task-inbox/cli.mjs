@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createCore, PRIORITY_LABEL, KIND_LABEL } from './core.mjs';
+import { acquireDataLock } from './server.mjs';
 
 // 文件名用的时间戳：2026-11-23T10-59-00
 function stamp() {
@@ -180,8 +181,23 @@ try {
   }
 
   if (cmd === 'init') {
-    // 建库建表；目录里如果有老的 tasks.json，顺手迁进来
-    const r = core.init();
+    // 建库建表；目录里如果有老的 tasks.json，顺手迁进来。
+    // 初始化/迁移是独占操作：服务在跑时先拿锁，拿不到就明确拒绝，
+    // 避免「服务正在跑、CLI 同时在迁移」这种两个实例改同一份库的情况。
+    let lock;
+    try {
+      lock = acquireDataLock(DATA_DIR);
+    } catch (e) {
+      console.error('数据目录被占用，不能初始化/迁移：' + e.message);
+      console.error('先停止 Cabinet（stop.cmd / serve.cmd 对应的进程），再运行 init。');
+      process.exit(1);
+    }
+    let r;
+    try {
+      r = core.init();
+    } finally {
+      lock.release();
+    }
     console.log('数据目录已就绪: ' + core.dbFile);
     if (r.migration?.migrated) {
       console.log('已从 tasks.json 迁移: ' + r.migration.tasks + ' 个任务 / '
