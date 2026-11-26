@@ -488,13 +488,14 @@ D1B 验收：关窗再开、Renderer 崩溃、杀壳、杀 Runtime、系统休�
 
 保持无构建工具的原生 ESM；复杂任务树、依赖图、多 Session 并排、共享状态的维护成本确实超过当前模式时，才评估 React/Vue 等方案。若决定迁移，按功能垂直切片、独立回归、逐项引入状态库/拖拽/表格/图组件，而不是一次性替换全部 UI。
 
-### D2 实施进展（2026-11-26，第一批 6/10）
+### D2 实施进展（2026-11-26，15/15 条 Web 门禁）
 
 已建立可重复的 UI 基线：
 
-- `tests/e2e/serve.mjs`：临时数据目录 + 关闭自动分类，起独立 Runtime（端口 46300），不依赖真实模型。
+- `tests/e2e/serve.mjs`：临时数据目录 + 关闭自动分类 + **假 Agent Adapter**（250ms 回复，含 `slow` 的 5 秒且可中止），不依赖真实模型。
 - `playwright.config.mjs`：单 worker、Chromium headless、1440×900。
-- `tests/e2e/board.spec.mjs`：6 条用例，`npm run test:e2e`，实测 6/6 通过（约 7 秒）。
+- 首次运行：`npm install` → `npx playwright install chromium`；之后 `npm run test:e2e`。
+- 实测：15 条用例全部通过（约 16 秒）。
 
 | 已覆盖 | 断言方式 |
 | --- | --- |
@@ -504,16 +505,24 @@ D1B 验收：关窗再开、Renderer 崩溃、杀壳、杀 Runtime、系统休�
 | 抽屉页签切换 | 按钮切到「挂载 AGENTS」→ 内容区/页签状态同步 |
 | 表格行内编辑负责人 | 点单元格 → 输入 → Enter → 单元格与 API 均为「张工」 |
 | 归档取回 | 归档视图可见 → 点取回 → API `archived_at=null` |
+| 合并 | 产物带【合】；来源边 `merge_parent` 指向原卡 |
+| 拆分 | 原卡带【拆】；两条子卡进入看板 |
+| 层级 | 父卡显示子项进度；`parent_id` 指向父卡 |
+| 依赖 | 前置未完成时拖进「进行中」被拦，状态仍为 `todo` |
+| Agent 会话发送 | 假 Adapter 返回结果；`last_turn.status=completed` |
+| Agent 会话停止 | 运行中可见「停止」→ `status=interrupted` |
+| 图片附件 | 底栏贴图 → 卡片缩略图 → `naturalWidth>0` |
+| 文件附件 | 卡片显示「1 个附件」→ 抽屉能看到文件名 |
+| 项目筛选 | 点侧栏项目只显示该项目任务，切回「全部任务」恢复 |
 
-尚未覆盖（下一批）：
+尚未覆盖（属桌面层或已有其它验证）：
 
-- 拆分/合并/层级/依赖四条关系路径
-- Agent Session 发送/停止/恢复（需要假 Adapter 或真实 OpenCode）
-- 项目切换与原生选目录（原生对话框需桌面层验证）
-- 附件上传与预览（图片 + 文件）
-- 桌面窗口关闭/恢复（Electron 层，不属 Web 基线）
+- 原生目录选择（`dialog.showOpenDialog`，只能在桌面窗口里人工验证）
+- 桌面窗口关闭/恢复
+- 自动分类的真实模型链路（由 `--smoke-classify` 打包冒烟覆盖，不放入 Web 基线）
 
 测试同时发现一处界面实现与属性不一致：`#drTabBody` 的 `data-tab` 之前是写死的 `req`，已改为随 `drSyncTabs()` 同步。
+
 
 
 ### 6.5 D3：安装与分发
