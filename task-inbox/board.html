@@ -2211,11 +2211,27 @@ function ago(iso){
   return new Date(iso).toLocaleDateString();
 }
 
+function authToken(){
+  return (window.cabinet && window.cabinet.authToken) || '';
+}
+
+// 桌面模式下 <img src> 和附件链接没法自己带 header，只能用查询参数。
+// Node 独立模式没有凭据，authUrl 原样返回。
+function authUrl(u){
+  const t = authToken();
+  if (!t) return u;
+  return u + (u.includes('?') ? '&' : '?') + 't=' + encodeURIComponent(t);
+}
+
+function fileUrl(name){
+  return authUrl('/files/' + encodeURIComponent(name));
+}
+
 function imgUrl(p){
   if (!p) return '';
   if (/^https?:/i.test(p)) return p;
   const name = String(p).split(/[\\/]/).pop();
-  return '/images/' + encodeURIComponent(name);
+  return authUrl('/images/' + encodeURIComponent(name));
 }
 
 /* ---------------- 左下角状态条 ----------------
@@ -3779,9 +3795,12 @@ function bindDrag(){
 }
 
 async function api(method, url, body){
+  const headers = body ? { 'content-type': 'application/json' } : {};
+  const t = authToken();
+  if (t) headers['x-cabinet-token'] = t;
   const res = await fetch(url, {
     method,
-    headers: body ? { 'content-type': 'application/json' } : undefined,
+    headers: Object.keys(headers).length ? headers : undefined,
     body: body ? JSON.stringify(body) : undefined
   });
   const data = await res.json().catch(() => ({}));
@@ -4488,7 +4507,7 @@ function buildSections(t){
   if (t.payload?.files?.length) {
     const links = t.payload.files.map(f => {
       const name = String(f).split(/[\\/]/).pop();
-      return '<a href="/files/' + encodeURIComponent(name) + '" target="_blank">' + esc(name) + '</a>';
+      return '<a href="' + esc(fileUrl(name)) + '" target="_blank">' + esc(name) + '</a>';
     }).join('');
     secs.push({ key: 'files', title: '附件 ' + t.payload.files.length, body: '<div class="files">' + links + '</div>' });
   }
@@ -5305,7 +5324,7 @@ function attsHTML(att){
     '<img src="' + esc(imgUrl(src)) + '" alt="" loading="lazy">').join('');
   const links = (att.files || []).map(f => {
     const name = String(f).split(/[\\/]/).pop();
-    return '<a href="/files/' + encodeURIComponent(name) + '" target="_blank" rel="noopener">'
+    return '<a href="' + esc(fileUrl(name)) + '" target="_blank" rel="noopener">'
       + esc(name) + '</a>';
   }).join('');
   return (imgs || links) ? '<div class="atts">' + imgs + links + '</div>' : '';

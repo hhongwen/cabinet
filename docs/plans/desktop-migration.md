@@ -351,11 +351,12 @@ flowchart TD
 - Windows x64 NSIS 安装包可构建（`release/Cabinet Setup 0.2.0.exe`），未签名；`release/` 不入库。
 - 打包后的 `Cabinet.exe` 实测：自带 Node v24.22.3，`node:sqlite` 可读写建库；用热备份的老库启动得到 29 条任务，与在跑服务一致；重复启动只激活已有实例，不产生第二个 Runtime；加载看板后 `/api/ping` 成功，退出无遗留进程。
 - 默认数据目录被独立 Node 服务占用时，桌面端按 `ELOCKED` 安全拒绝，不落 46002。
+- 本地接口认证已实现：桌面 Runtime 每进程生成高熵 token，`/api`、`/images`、`/files` 需 header 或 `?t=`；页面本身可匿名加载；独立 Node 模式不传 token，行为与现在完全一样。实测未带凭据 `401`、页面 `200`，打包冒烟通过。
 
 仍待验收：
 
 - D0-04 Magpie 分类、D0-05/06 OpenCode 两轮对话与重启定位，尚未在桌面包内实测。
-- D0-09 的 HTTP 认证与 IPC 白名单未实现；原生目录选择未接入；macOS DMG 未构建；代码签名未做。
+- IPC 只建立了凭据与平台两项白名单，目录选择等能力型 IPC 未新增；macOS DMG 未构建；代码签名未做。
 - 附件与 `sessions/` 事件文件只验证了随目录迁移，未逐项打开核对。
 
 

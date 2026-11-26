@@ -92,7 +92,7 @@ export async function openRuntime(opts = {}) {
       log('[task-inbox] 归档扫描失败：' + e.message);
     }
 
-    started = await start(core, { port, ...opts.startOptions });
+    started = await start(core, { port, ...opts.startOptions, authToken: opts.authToken || '' });
     if (!started) {
       throw new RuntimeError('端口都被占用了：' + [port, ...FALLBACK_PORTS].join(', '), 'EPORTS');
     }

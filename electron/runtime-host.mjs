@@ -1,7 +1,8 @@
 // runtime-host.mjs —— UtilityProcess 里的业务 Runtime
 //
-// 只做三件事：起 Runtime、把 ready/日志报给 Electron 主进程、收到 shutdown
-// 时按 Runtime 的关闭顺序收尾。业务规则一行都不在这里，保证桌面壳可替换。
+// 只做三件事：等主进程下发凭据、起 Runtime、把 ready/日志报回去；
+// 收到 shutdown 时按 Runtime 的关闭顺序收尾。业务规则一行都不在这里，
+// 保证桌面壳可替换。
 
 import { openRuntime } from '../task-inbox/runtime.mjs';
 
@@ -16,20 +17,27 @@ const parentPort = process.parentPort;
 const send = (msg) => { try { parentPort?.postMessage(msg); } catch { /* 壳没了 */ } };
 
 let rt = null;
+let booted = false;
 
-try {
-  rt = await openRuntime({ log: (line) => send({ type: 'log', line }) });
-  send({ type: 'ready', port: rt.port, url: rt.url, dataDir: rt.dataDir });
-} catch (e) {
-  send({ type: 'fatal', message: e.message, code: e.code || '' });
-  process.exit(0);
+async function boot(token) {
+  booted = true;
+  try {
+    rt = await openRuntime({ authToken: token, log: (line) => send({ type: 'log', line }) });
+    send({ type: 'ready', port: rt.port, url: rt.url, dataDir: rt.dataDir });
+  } catch (e) {
+    send({ type: 'fatal', message: e.message, code: e.code || '' });
+  }
 }
 
 parentPort?.on('message', async (e) => {
   const msg = e?.data;
-  if (msg?.type === 'shutdown') {
+  if (msg?.type === 'init' && !booted) { await boot(msg.token); return; }
+  if (msg?.type === 'shutdown' && rt) {
     try { await rt.stop(); } catch (err) { send({ type: 'shutdown-error', message: err.message }); }
     send({ type: 'stopped' });
     process.exit(0);
   }
 });
+
+// 告诉主进程「可以下发凭据了」；之前的 postMessage 不保证已经被排队。
+send({ type: 'hello' });

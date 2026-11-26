@@ -6,10 +6,11 @@
 //   不在这里实现任何任务规则或数据库操作。
 
 import {
-  app, BrowserWindow, Tray, Menu, nativeImage, utilityProcess, shell
+  app, BrowserWindow, Tray, Menu, nativeImage, utilityProcess, shell, ipcMain
 } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -27,6 +28,11 @@ let runtimeReady = null;
 let quitting = false;
 
 app.setName('Cabinet');
+
+// 本地接口凭据：每个进程一份，只经 preload 交给本应用的渲染层。
+// 不下发到 URL、日志，也不传给 Runtime 的子进程。
+const AUTH_TOKEN = crypto.randomBytes(32).toString('hex');
+ipcMain.on('cabinet:token', (e) => { e.returnValue = AUTH_TOKEN; });
 
 // 单实例：第二个进程只激活已有窗口，不起第二个 Runtime。
 if (!SMOKE && !app.requestSingleInstanceLock()) {
@@ -55,6 +61,7 @@ function startRuntime() {
 
     runtime.on('message', (msg) => {
       if (!msg || typeof msg !== 'object') return;
+      if (msg.type === 'hello') { runtime?.postMessage({ type: 'init', token: AUTH_TOKEN }); return; }
       if (msg.type === 'log') { log('[runtime]', msg.line); return; }
       if (msg.type === 'ready') { done(resolve, msg); return; }
       if (msg.type === 'fatal') { done(reject, new Error(msg.message)); return; }
@@ -159,7 +166,8 @@ app.whenReady().then(async () => {
     win.webContents.once('did-finish-load', async () => {
       clearTimeout(failTimer);
       const ok = await win.webContents.executeJavaScript(
-        "fetch('/api/ping').then(r => r.json()).then(j => Boolean(j && j.ok)).catch(() => false)"
+        "fetch('/api/ping', { headers: { 'x-cabinet-token': (window.cabinet && window.cabinet.authToken) || '' } })"
+        + ".then(r => r.status === 200 ? r.json() : null).then(j => Boolean(j && j.ok)).catch(() => false)"
       );
       log('SMOKE ' + (ok ? 'OK' : 'FAILED') + ' port=' + runtimeReady.port + ' data=' + runtimeReady.dataDir);
       await shutdownRuntime();

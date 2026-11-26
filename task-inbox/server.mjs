@@ -8,6 +8,7 @@
 // 端口被占时不报错，直接退出（说明已经有一个在跑了）。
 
 import http from 'node:http';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -477,6 +478,18 @@ export function createHandler(core, opts = {}) {
   const webDir = opts.webDir || HERE;
   const queue = opts.queue || null;
   const runner = opts.runner || null;
+  const authToken = opts.authToken || '';
+
+  // 桌面模式才有凭据。独立 Node 模式不传 authToken，行为与现在完全一样。
+  // 页面本身（/ 与 /quick）不含数据，允许匿名加载；数据与文件必须带凭据。
+  const tokenOk = (got) => {
+    if (!authToken) return true;
+    const s = String(got || '');
+    if (s.length !== authToken.length) return false;
+    try {
+      return crypto.timingSafeEqual(Buffer.from(s), Buffer.from(authToken));
+    } catch { return false; }
+  };
 
   const needRunner = () => {
     if (!runner) throw new HttpError(400, 'Agent 未启用');
@@ -505,6 +518,17 @@ export function createHandler(core, opts = {}) {
   return async function handle(req, res) {
     const url = new URL(req.url || '/', 'http://127.0.0.1');
     const p = url.pathname;
+
+    // 认证在路由之前：/api、/images、/files 一律先验凭据。
+    // 允许 header 或 ?t= 查询参数 —— <img src> 和附件链接没法自己带 header。
+    if (authToken && (p.startsWith('/api/') || p.startsWith('/images/') || p.startsWith('/files/'))) {
+      const got = req.headers['x-cabinet-token'] || url.searchParams.get('t');
+      if (!tokenOk(Array.isArray(got) ? got[0] : got)) {
+        if (p.startsWith('/api/')) return json(res, 401, { error: '未授权：缺少或错误的访问凭据' });
+        res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+        return res.end('未授权');
+      }
+    }
 
     try {
       if (p === '/' || p === '/index.html') {
