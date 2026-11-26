@@ -2215,24 +2215,48 @@ function authToken(){
   return (window.cabinet && window.cabinet.authToken) || '';
 }
 
-// 桌面模式下 <img src> 和附件链接没法自己带 header，只能用查询参数。
-// Node 独立模式没有凭据，authUrl 原样返回。
-function authUrl(u){
+function authHeaders(){
   const t = authToken();
-  if (!t) return u;
-  return u + (u.includes('?') ? '&' : '?') + 't=' + encodeURIComponent(t);
-}
-
-function fileUrl(name){
-  return authUrl('/files/' + encodeURIComponent(name));
+  return t ? { 'x-cabinet-token': t } : {};
 }
 
 function imgUrl(p){
   if (!p) return '';
   if (/^https?:/i.test(p)) return p;
   const name = String(p).split(/[\\/]/).pop();
-  return authUrl('/images/' + encodeURIComponent(name));
+  return '/images/' + encodeURIComponent(name);
 }
+
+// 附件链接：桌面模式靠一次认证后的 HttpOnly Cookie 也打不开新窗口（导航被限制），
+// 所以改成点击后带 Header 拉取再下载；浏览器模式保持原来的新窗口打开。
+function fileHref(name){
+  return authToken() ? '#' : '/files/' + encodeURIComponent(name);
+}
+
+function fileAttrs(name){
+  if (!authToken()) return ' target="_blank" rel="noopener"';
+  return ' data-file="' + esc(name) + '"';
+}
+
+// 桌面模式的附件下载：Header 带凭据，URL 里不出现 token。
+document.addEventListener('click', async (e) => {
+  const el = e.target && e.target.closest ? e.target.closest('[data-file]') : null;
+  if (!el) return;
+  e.preventDefault();
+  const name = el.getAttribute('data-file') || '';
+  try {
+    const r = await fetch('/files/' + encodeURIComponent(name), { headers: authHeaders() });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  } catch (err) {
+    toast('附件打开失败：' + err.message);
+  }
+});
 
 /* ---------------- 左下角状态条 ----------------
    以前这里是 150px 高的卡：标题、大号文案、模型名、七段进度条、整行设置按钮。
@@ -3805,8 +3829,7 @@ async function pickDirectory(initial){
 
 async function api(method, url, body){
   const headers = body ? { 'content-type': 'application/json' } : {};
-  const t = authToken();
-  if (t) headers['x-cabinet-token'] = t;
+  Object.assign(headers, authHeaders());
   const res = await fetch(url, {
     method,
     headers: Object.keys(headers).length ? headers : undefined,
@@ -4516,7 +4539,7 @@ function buildSections(t){
   if (t.payload?.files?.length) {
     const links = t.payload.files.map(f => {
       const name = String(f).split(/[\\/]/).pop();
-      return '<a href="' + esc(fileUrl(name)) + '" target="_blank">' + esc(name) + '</a>';
+      return '<a href="' + esc(fileHref(name)) + '"' + fileAttrs(name) + '>' + esc(name) + '</a>';
     }).join('');
     secs.push({ key: 'files', title: '附件 ' + t.payload.files.length, body: '<div class="files">' + links + '</div>' });
   }
@@ -5333,7 +5356,7 @@ function attsHTML(att){
     '<img src="' + esc(imgUrl(src)) + '" alt="" loading="lazy">').join('');
   const links = (att.files || []).map(f => {
     const name = String(f).split(/[\\/]/).pop();
-    return '<a href="' + esc(fileUrl(name)) + '" target="_blank" rel="noopener">'
+    return '<a href="' + esc(fileHref(name)) + '"' + fileAttrs(name) + '>'
       + esc(name) + '</a>';
   }).join('');
   return (imgs || links) ? '<div class="atts">' + imgs + links + '</div>' : '';

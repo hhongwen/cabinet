@@ -506,6 +506,21 @@ export function createHandler(core, opts = {}) {
   const queue = opts.queue || null;
   const runner = opts.runner || null;
   const authToken = opts.authToken || '';
+  const listenPort = Number(opts.port) || 0;
+  const BROWSER_COOKIE = 'cabinet_sid';
+  // Cookie 里放的是由 token 派生的会话标识，不是 token 本身。
+  const BROWSER_SID = authToken
+    ? crypto.createHash('sha256').update('cabinet-cookie:' + authToken).digest('hex').slice(0, 32)
+    : '';
+  const readCookie = (req, name) => {
+    const raw = req.headers.cookie || '';
+    for (const part of raw.split(';')) {
+      const i = part.indexOf('=');
+      if (i < 0) continue;
+      if (part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
+    }
+    return '';
+  };
 
   // 桌面模式才有凭据。独立 Node 模式不传 authToken，行为与现在完全一样。
   // 页面本身（/ 与 /quick）不含数据，允许匿名加载；数据与文件必须带凭据。
@@ -547,18 +562,44 @@ export function createHandler(core, opts = {}) {
     const p = url.pathname;
 
     // 认证在路由之前：/api、/images、/files 一律先验凭据。
-    // 允许 header 或 ?t= 查询参数 —— <img src> 和附件链接没法自己带 header。
+    // 凭据只走 Header，或由第一次 Header 认证后下发的 HttpOnly Cookie。
+    // URL 里不接受凭据：查询串会进历史、日志和诊断信息。
+    if (authToken) {
+      // Host / Origin 校验：挡住 DNS rebinding 与跨站请求，端口参与身份判定。
+      const host = String(req.headers.host || '');
+      const okHost = !listenPort || host === '127.0.0.1:' + listenPort || host === 'localhost:' + listenPort;
+      const origin = String(req.headers.origin || '');
+      const okOrigin = !listenPort || !origin
+        || origin === 'http://127.0.0.1:' + listenPort || origin === 'http://localhost:' + listenPort;
+      if (!okHost || !okOrigin) {
+        return json(res, 403, { error: '拒绝访问：Host/Origin 不匹配' });
+      }
+    }
+
     if (authToken && (p.startsWith('/api/') || p.startsWith('/images/') || p.startsWith('/files/'))) {
-      const got = req.headers['x-cabinet-token'] || url.searchParams.get('t');
-      if (!tokenOk(Array.isArray(got) ? got[0] : got)) {
+      const got = req.headers['x-cabinet-token'];
+      const headerOk = tokenOk(Array.isArray(got) ? got[0] : got);
+      const sid = readCookie(req, BROWSER_COOKIE);
+      const cookieOk = !!sid && sid === BROWSER_SID;
+      if (!headerOk && !cookieOk) {
         if (p.startsWith('/api/')) return json(res, 401, { error: '未授权：缺少或错误的访问凭据' });
         res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
         return res.end('未授权');
+      }
+      // 第一次 Header 认证后给浏览器发一个 HttpOnly 同站 Cookie：
+      // <img src> 和附件这类没法自己带 Header 的请求靠它，凭据不进 URL。
+      if (headerOk && !cookieOk) {
+        res.setHeader('Set-Cookie',
+          BROWSER_COOKIE + '=' + BROWSER_SID + '; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400');
       }
     }
 
     try {
       if (p === '/' || p === '/index.html') {
+        res.setHeader('content-security-policy',
+          "default-src 'self' data: blob:; img-src 'self' data: blob: https:; "
+          + "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
+          + "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'");
         return serveFile(res, path.join(webDir, 'board.html'), 'text/html; charset=utf-8');
       }
       if (p === '/quick' || p === '/quick.html') {
