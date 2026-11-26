@@ -99,8 +99,10 @@ function npmGlobalDirs() {
   // Intel mac / Linux：/usr/local/lib/node_modules
   // Apple Silicon（Homebrew）：/opt/homebrew/lib/node_modules
   // 用户自己配的：~/.npm-global/lib/node_modules
+  // NPM_GLOBAL_DIR 语义与 Windows 一致：给的是 npm 全局前缀（下面还有
+  // node_modules），这样两平台的测试夹具可以共用同一份目录结构。
   const dirs = ['/opt/homebrew/lib/node_modules', '/usr/local/lib/node_modules'];
-  if (process.env.NPM_GLOBAL_DIR) dirs.unshift(process.env.NPM_GLOBAL_DIR);
+  if (process.env.NPM_GLOBAL_DIR) dirs.unshift(path.join(process.env.NPM_GLOBAL_DIR, 'node_modules'));
   dirs.push(path.join(home, '.npm-global', 'lib', 'node_modules'));
   return dirs;
 }
