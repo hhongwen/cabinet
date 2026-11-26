@@ -342,6 +342,23 @@ flowchart TD
 
 补充实测：从 Windows 桌面图标、macOS Finder/Dock 启动的 PATH；中文路径、带空格路径；JS CLI 与二进制；数据目录中旧库与附件的真实备份/恢复；应用自身在没有系统 Node 的机器运行。D0 未通过不进行前端框架迁移、目录大搬迁或业务重写。
 
+### D0 实施进展（2026-11-26，仅 Windows，部分验收）
+
+已完成并实测：
+
+- Electron 壳与 `UtilityProcess` Runtime 已落地（`electron/main.mjs`、`runtime-host.mjs`）：单实例、托盘、关窗隐藏、退出前协调 shutdown。
+- 共享 Runtime 入口 `task-inbox/runtime.mjs` 已抽出：数据锁、初始化/迁移、归档扫描、恢复、关闭顺序只此一处；`node server.mjs`、CLI 与原测试行为不变。
+- Windows x64 NSIS 安装包可构建（`release/Cabinet Setup 0.2.0.exe`），未签名；`release/` 不入库。
+- 打包后的 `Cabinet.exe` 实测：自带 Node v24.22.3，`node:sqlite` 可读写建库；用热备份的老库启动得到 29 条任务，与在跑服务一致；重复启动只激活已有实例，不产生第二个 Runtime；加载看板后 `/api/ping` 成功，退出无遗留进程。
+- 默认数据目录被独立 Node 服务占用时，桌面端按 `ELOCKED` 安全拒绝，不落 46002。
+
+仍待验收：
+
+- D0-04 Magpie 分类、D0-05/06 OpenCode 两轮对话与重启定位，尚未在桌面包内实测。
+- D0-09 的 HTTP 认证与 IPC 白名单未实现；原生目录选择未接入；macOS DMG 未构建；代码签名未做。
+- 附件与 `sessions/` 事件文件只验证了随目录迁移，未逐项打开核对。
+
+
 ### 6.2 D1A：桌面运行时基础契约
 
 D0 通过后，将验证代码固化成稳定机制。

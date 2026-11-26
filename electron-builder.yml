@@ -1,0 +1,27 @@
+appId: app.cabinet.task-inbox
+productName: Cabinet
+directories:
+  output: release
+files:
+  - electron/**
+  - task-inbox/**/*.mjs
+  - "!task-inbox/test-*.mjs"
+  - "!task-inbox/style-audit.mjs"
+  - task-inbox/board.html
+  - task-inbox/manifest.json
+  - task-inbox/icons/**
+  - package.json
+asar: true
+win:
+  target:
+    - nsis
+  icon: task-inbox/icons/cabinet-dark.ico
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+mac:
+  target:
+    - dmg
+  category: public.app-category.productivity
