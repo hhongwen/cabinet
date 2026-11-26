@@ -6,7 +6,7 @@
 //   不在这里实现任何任务规则或数据库操作。
 
 import {
-  app, BrowserWindow, Tray, Menu, nativeImage, utilityProcess, shell, ipcMain
+  app, BrowserWindow, Tray, Menu, nativeImage, utilityProcess, shell, ipcMain, dialog
 } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -33,6 +33,18 @@ app.setName('Cabinet');
 // 不下发到 URL、日志，也不传给 Runtime 的子进程。
 const AUTH_TOKEN = crypto.randomBytes(32).toString('hex');
 ipcMain.on('cabinet:token', (e) => { e.returnValue = AUTH_TOKEN; });
+
+// 白名单能力：选一个本地目录。参数只做长度与类型收敛，不接收任意路径语义。
+ipcMain.handle('cabinet:pick-directory', async (e, initial) => {
+  if (!win) return null;
+  const defaultPath = (typeof initial === 'string' && initial.length < 260) ? initial : undefined;
+  const r = await dialog.showOpenDialog(win, {
+    title: '选择项目目录',
+    properties: ['openDirectory'],
+    defaultPath
+  });
+  return r.canceled ? null : (r.filePaths[0] || null);
+});
 
 // 单实例：第二个进程只激活已有窗口，不起第二个 Runtime。
 if (!SMOKE && !app.requestSingleInstanceLock()) {
@@ -206,7 +218,11 @@ app.whenReady().then(async () => {
       }
 
       const allOk = ok && (!cls || cls.ok);
+      const bridge = await win.webContents.executeJavaScript(
+        "Boolean(window.cabinet && typeof window.cabinet.pickDirectory === 'function')"
+      );
       log('SMOKE ' + (allOk ? 'OK' : 'FAILED') + ' port=' + runtimeReady.port + ' data=' + runtimeReady.dataDir
+        + ' bridge=' + (bridge ? 'pick' : 'missing')
         + (cls ? ' classify=' + (cls.ok ? 'OK' : 'FAILED:' + (cls.why || '')) : ''));
       await shutdownRuntime();
       app.exit(allOk ? 0 : 1);

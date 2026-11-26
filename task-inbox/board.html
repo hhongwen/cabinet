@@ -3794,6 +3794,15 @@ function bindDrag(){
   });
 }
 
+async function pickDirectory(initial){
+  // 桌面模式直接走 IPC 的原生对话框；Node/浏览器模式仍用服务端 PowerShell / osascript。
+  const d = window.cabinet;
+  if (d && typeof d.pickDirectory === 'function') {
+    return { path: await d.pickDirectory(String(initial || '')) };
+  }
+  return await api('POST', '/api/pickdir', { initial: initial || '' });
+}
+
 async function api(method, url, body){
   const headers = body ? { 'content-type': 'application/json' } : {};
   const t = authToken();
@@ -5004,7 +5013,7 @@ async function drStartAgent(t) {
   dlg.querySelector('[data-pick-dir]')?.addEventListener('click', async () => {
     const input = dlg.querySelector('.agent-dir');
     try {
-      const r = await api('POST', '/api/pickdir', { initial: input.value });
+      const r = await pickDirectory(input.value);
       if (r.path) input.value = r.path;
     } catch (e) {
       toast('选目录失败：' + e.message);
@@ -6173,7 +6182,7 @@ function dirRow(d = {}){
     btn.disabled = true;
     btn.classList.add('busy');
     try {
-      const r = await api('POST', '/api/pickdir', { initial: current });
+      const r = await pickDirectory(current);
       if (r.path) { input.value = r.path; return; }
       return;                       // 用户取消了，什么都不做
     } catch (e) {

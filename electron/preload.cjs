@@ -12,5 +12,7 @@ try { authToken = ipcRenderer.sendSync('cabinet:token') || ''; } catch { /* 主�
 contextBridge.exposeInMainWorld('cabinet', {
   platform: process.platform,
   desktop: true,
-  authToken
+  authToken,
+  // 只暴露一个语义化能力：选目录。Main 侧限制参数并用系统对话框。
+  pickDirectory: (initial) => ipcRenderer.invoke('cabinet:pick-directory', initial)
 });

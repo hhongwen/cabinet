@@ -352,11 +352,14 @@ flowchart TD
 - 打包后的 `Cabinet.exe` 实测：自带 Node v24.22.3，`node:sqlite` 可读写建库；用热备份的老库启动得到 29 条任务，与在跑服务一致；重复启动只激活已有实例，不产生第二个 Runtime；加载看板后 `/api/ping` 成功，退出无遗留进程。
 - 默认数据目录被独立 Node 服务占用时，桌面端按 `ELOCKED` 安全拒绝，不落 46002。
 - 本地接口认证已实现：桌面 Runtime 每进程生成高熵 token，`/api`、`/images`、`/files` 需 header 或 `?t=`；页面本身可匿名加载；独立 Node 模式不传 token，行为与现在完全一样。实测未带凭据 `401`、页面 `200`，打包冒烟通过。
+- D0-04 已在桌面包内跑通：`--smoke-classify` 真收一条任务、经 Magpie 分类落库后删除，`classify=OK`。
+- D0-05/06 已跑通（Runtime 同一入口，Node 模式）：OpenCode 两轮都返回预期原文，`turn_count=2`；强杀进程重启后 `external_session_id` 不变，`reconcile` 能对回原 Session 且末轮为 `completed`。
+- 原生目录选择已接入：`preload` 暴露 `pickDirectory()`，Main 用 `dialog.showOpenDialog`，页面优先走 IPC、失败再退回 `/api/pickdir`；冒烟确认 bridge 存在，真实点选仍需人工一次。
 
 仍待验收：
 
-- D0-04 Magpie 分类、D0-05/06 OpenCode 两轮对话与重启定位，尚未在桌面包内实测。
-- IPC 只建立了凭据与平台两项白名单，目录选择等能力型 IPC 未新增；macOS DMG 未构建；代码签名未做。
+- 原生目录选择的实际点选、macOS DMG、代码签名未做。
+- IPC 目前只有凭据与选目录两项；通知、开机自启等能力未新增。
 - 附件与 `sessions/` 事件文件只验证了随目录迁移，未逐项打开核对。
 
 
