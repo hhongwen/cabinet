@@ -540,7 +540,12 @@ h1{
 .icon-btn, .rail-toggle, .side-add,
 .mini, .mini-btn, .flt-reset, .dir-row .pick,
 .dlg button, .dr-row button, .pick-bar button, .dock .go, .doc-tab,
-.dr-cta button, .card-act {
+.dr-cta button, .card-act,
+/* 浮层/抽屉里的对话框页脚。这两个上下文以前**不在**池里：
+   "挂一个 Agent 会话"的「挂上」只从主按钮那条规则拿到橙色渐变，
+   形状（圆角/内边距/边框宽度）全落回浏览器默认 —— 实测圆角 0px、
+   边框 2px、padding 1px 6px，和旁边「取消」的 9px/1px 并排就是两种按钮。 */
+.rel-dlg button, .agent-act button {
   display:inline-flex;align-items:center;justify-content:center;
   font-family:var(--font-ui);
   color:var(--text-2);
@@ -554,23 +559,26 @@ h1{
 .icon-btn:hover, .rail-toggle:hover,
 .mini-btn:hover, .dir-row .pick:hover,
 .dlg button:hover, .dr-row button:hover, .pick-bar button:hover,
-.doc-tab:hover, .dr-cta button:hover {
+.doc-tab:hover, .dr-cta button:hover,
+.rel-dlg button:hover, .agent-act button:hover {
   border-color:var(--ctl-edge-hi); color:var(--ink);
   box-shadow:inset 0 1px 0 #fff, var(--shadow-2);
 }
 .icon-btn:active, .rail-toggle:active,
 .dlg button:active, .dr-row button:active, .pick-bar button:active,
-.doc-tab:active {
+.doc-tab:active, .rel-dlg button:active, .agent-act button:active {
   transform:translateY(.5px); box-shadow:inset 0 2px 4px rgba(120,136,142,.22);
 }
 .icon-btn:focus-visible, .rail-toggle:focus-visible,
 .mini:focus-visible, .mini-btn:focus-visible,
 .dlg button:focus-visible, .dr-row button:focus-visible,
 .pick-bar button:focus-visible, .dock .go:focus-visible,
-.doc-tab:focus-visible {
+.doc-tab:focus-visible, .rel-dlg button:focus-visible,
+.agent-act button:focus-visible {
   outline:none; border-color:var(--orange); box-shadow:var(--ctl-focus-ring);
 }
-.icon-btn:disabled, .dlg button:disabled, .dr-row button:disabled {
+.icon-btn:disabled, .dlg button:disabled, .dr-row button:disabled,
+.rel-dlg button:disabled, .agent-act button:disabled {
   opacity:.45; cursor:default; transform:none; box-shadow:none;
 }
 
@@ -833,9 +841,33 @@ body select.sel-native{
 .rel-warn .mini-btn{flex:0 0 auto;padding:2px 7px;font-size:10px}
 /* 合并 / 拆分的输入浮层：加在 .links-pick 上的差量。
    它要摆一个勾选列表或一段 textarea，所以比关系浮层高一点、铺满宽。 */
-.rel-dlg{padding:11px 11px 10px;gap:8px}
-.rel-dlg-h{font-size:12.5px;font-weight:700;color:var(--text-1)}
-.rel-dlg-hint{font:10.5px/1.6 var(--font-mono);color:var(--text-3)}
+/* 「挂一个 Agent 会话」要摆 4 个字段 + 一段路径，330px 塞不下：
+   说明折成四行、路径被截断。它不是小浮层，是表单弹窗。
+   （合并/拆分那些仍然用 .links-pick 的 330px，没被牵连。）
+
+   ⚠️ max-height 也要一并放开。.links-pick 给的是 360px + overflow:auto，
+   表单内容实测 414px —— 结果「取消 / 挂上」被压到面板下方（实测 514px，
+   面板底 508px），得先在弹窗里滚动才看得见提交按钮。
+   而且 overflow:auto 还会裁掉下拉菜单。
+
+   所以这一档：不设上限、不裁内容（overflow:visible）。表单高度是固定的，
+   正常窗口放得下；真放不下时宁可溢出到面板外（看得见、点得到），
+   也不要裁成一条滚动条。 */
+.rel-dlg--wide{
+  width:min(430px,92vw);max-width:min(430px,92vw);
+  max-height:min(620px,calc(100vh - 40px));
+  overflow:visible;
+}
+/* 标题 / 说明 / 页脚的尺寸都按「弹窗」那一档来，不按「小浮层」：
+   这是要人做决定的地方，和 .dlg 里长得一样才好认。 */
+.rel-dlg{padding:14px 14px 12px;gap:9px}
+.rel-dlg-h{font-size:14px;font-weight:750;color:var(--text-1);letter-spacing:-.2px}
+.rel-dlg-hint{font:11px/1.65 var(--font-ui);color:var(--text-3)}
+/* 页脚：和 .dlg .dlg-foot 一样靠右。抽屉里那个 .rel-act（四个工具按钮）
+   仍然左对齐换行 —— 所以只加在弹窗壳上，不改 .rel-act 本身。 */
+.rel-dlg .rel-act{justify-content:flex-end;margin-top:11px;flex-wrap:nowrap}
+/* 弹窗页脚的按钮尺寸：材质见「按钮总则」，这里只写差量。 */
+.rel-dlg button{font-size:12px;padding:7px 14px}
 /* 勾选列表：内容层，实底，逐条 —— 不能是玻璃，字要贴在稳定底色上 */
 .rel-picks{
   display:flex;flex-direction:column;gap:3px;
@@ -849,9 +881,13 @@ body select.sel-native{
   transition:background .16s, border-color .16s;
 }
 .rel-pick:hover{background:#fff;border-color:var(--ctl-edge)}
-.rel-pick > span:first-of-type{overflow:hidden;text-overflow:ellipsis}
-.rel-pick .sub{margin-left:auto;flex:0 0 auto;font:10px var(--font-mono);color:var(--text-4)}
-.rel-pick input{flex:0 0 auto;margin:0}
+/* 标题是唯一可伸缩的那一段（.sub 靠右固定），别用 :first-of-type —— 加了
+   自绘方块之后第一个 span 就是 .box 了，省略号会落到方块上。 */
+.rel-pick .pick-name{overflow:hidden;text-overflow:ellipsis}
+/* 右侧的项目名：压在浮层玻璃上，--text-4 在这里只有 4.1，用 --text-3 */
+.rel-pick .sub{margin-left:auto;flex:0 0 auto;font:10px var(--font-mono);color:var(--text-3)}
+/* 原生控件的隐藏与 .box 的画法在「复选框 / 单选」那一节，和 .chk 共用一套 ——
+   这里不再自己写一遍（写两遍必然改一处忘一处）。 */
 /* 拆分输入：内凹材质走「输入框总则」，这里只写尺寸 */
 .rel-split{
   width:100%;min-height:96px;resize:vertical;font-size:12.5px;
@@ -890,10 +926,20 @@ body select.sel-native{
 }
 .agent-act{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
 .agent-empty{font:11px/1.65 var(--font-mono);color:var(--text-4)}
-.agent-form{display:flex;flex-direction:column;gap:7px}
-.agent-form label{display:flex;flex-direction:column;gap:3px;font:10px var(--font-mono);color:var(--text-3)}
-.agent-dir-row{display:flex;gap:5px}
+/* 表单字段：标签一档、控件一档，和 .dlg .field 同一套节奏。
+   ⚠️ 这里的 label 用 `font:` 简写会**连带把字号传给里面的控件** ——
+   顶部有一条全局 `input,select,textarea{font:inherit}`，所以 label 写
+   10px 等宽，输入框里的路径就变成 10px 等宽。实测过：路径框是
+   10px/padding 1px 2px（浏览器默认），一行字挤在 38px 高的框里。
+   所以 label 只给字号，控件各自写自己的尺寸。 */
+.agent-form{display:flex;flex-direction:column;gap:9px}
+.agent-form label{display:flex;flex-direction:column;gap:4px;font-size:10.5px;color:var(--text-3);letter-spacing:.3px}
+/* 36px 是「表单字段」那一档（.sel--field 也是 36px）。
+   同一个表单里下拉 36、输入框 32 会被看成"两个控件类型"，不是同一行。 */
+.agent-form input{font:12px var(--font-mono);padding:0 10px;height:36px}
+.agent-dir-row{display:flex;gap:6px;align-items:center}
 .agent-dir-row input{flex:1;min-width:0}
+.agent-dir-row .mini-btn{flex:0 0 auto;height:36px;padding:0 12px;font-size:11.5px}
 /* 被合并的卡：头部一行灰字，说清"为什么改不动"。只读闸门在后端，
    这行只是让人别白点 —— 灰字而不是报错色，它不是错误。 */
 .dr-lock{font:11px/1.55 var(--font-mono);color:var(--text-3);margin-top:6px}
@@ -926,10 +972,17 @@ body select.sel-native{
 .combo.open .combo-toggle svg{transform:rotate(180deg)}
 .combo .sel-menu{min-width:100%;width:100%;max-width:none;max-height:300px}
 
-/* ---------- 复选框：跟整个页面的青灰调一致 ---------- */
+/* ---------- 复选框 / 单选：跟整个页面的青灰调一致 ----------
+   ⚠️ 原生 checkbox / radio 的方块和勾是**浏览器画的**，CSS 只够得着外框。
+   它们会以 13px 直角灰块出现，和整页青灰材质完全不搭（STYLE.md 第三节）。
+   标准做法：原生 input 留作状态源和焦点目标（视觉上不可见），
+   上面盖一个自己画的 .box。
+
+   两处都要用：独立字段用 .chk，勾选列表行用 .rel-pick。方块那几条规则
+   一律写成"两个选择器共用"，别再抄第二份。 */
 .chk{display:inline-flex;align-items:flex-start;gap:9px;cursor:pointer;font-size:12.5px;color:var(--text-1)}
-.chk input{position:absolute;opacity:0;width:0;height:0}
-.chk .box{
+.chk input, .rel-pick input{position:absolute;opacity:0;width:1px;height:1px}
+.chk .box, .rel-pick .box{
   width:16px;height:16px;flex:0 0 auto;margin-top:1px;
   border-radius:var(--radius-xs);
   border:1px solid rgba(120,136,142,.42);
@@ -938,20 +991,28 @@ body select.sel-native{
   display:grid;place-items:center;
   transition:background .14s, border-color .14s, box-shadow .14s;
 }
-.chk .box::after{
+/* 勾选列表行是 align-items:center，方块不用基线偏移 */
+.rel-pick .box{margin-top:0}
+.chk .box::after, .rel-pick .box::after{
   content:"";width:9px;height:9px;opacity:0;transform:scale(.6);
   transition:opacity .14s, transform .14s cubic-bezier(.2,0,0,1);
   background:no-repeat center/9px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 6.4l2.6 2.6L10 3.4' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
-.chk input:checked + .box{
+.chk input:checked + .box, .rel-pick input:checked + .box{
   background:linear-gradient(180deg,var(--orange-cta-hi),var(--orange-cta));
   border-color:var(--orange-cta-deep);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.25);
 }
-.chk input:checked + .box::after{opacity:1;transform:none}
-.chk input:focus-visible + .box{outline:none;border-color:var(--orange);box-shadow:var(--ctl-focus-ring)}
-.chk:hover .box{border-color:rgba(120,136,142,.6)}
+.chk input:checked + .box::after, .rel-pick input:checked + .box::after{opacity:1;transform:none}
+.chk input:focus-visible + .box, .rel-pick input:focus-visible + .box{outline:none;border-color:var(--orange);box-shadow:var(--ctl-focus-ring)}
+.chk:hover .box, .rel-pick:hover .box{border-color:rgba(120,136,142,.6)}
 .chk .chk-text{line-height:1.5}
+/* 单选（挂到父卡下）：同一套方块，只是圆的和一个实心点，不用勾 */
+.rel-pick input[type=radio] + .box{border-radius:50%}
+.rel-pick input[type=radio] + .box::after{
+  width:8px;height:8px;border-radius:50%;
+  background:var(--orange-cta);            /* 压在深橙底上，不是白勾 */
+}
 .flt-reset{
   height:22px;padding:0 8px;margin-left:3px;
   font:11px/1 var(--font-ui);color:var(--text-3);
@@ -5138,6 +5199,7 @@ async function drStartAgent(t) {
     title: '挂一个 Agent 会话',
     hint: '首轮发送会自动带上任务需求；已有会话下一条补一次。会话建立后工作目录不能改，Agent 会在这个目录直接执行命令（自动批准权限）。',
     submitLabel: '挂上',
+    wide: true,
     bodyHTML: '<div class="agent-form">'
       + '<label><span>角色</span><select class="agent-role sel-native" data-sel="field">' + roleOpts + '</select></label>'
       + '<label><span>Agent</span><select class="agent-agent sel-native" data-sel="field">' + agentOpts + '</select></label>'
@@ -5771,11 +5833,12 @@ async function drUnarchive(t){
    合并的产物永远是一张**新卡**（见 docs/relations-and-table.md 1.1），
    不存在「合并进某张已有的卡」。 */
 
-function relDialog({ title, hint, submitLabel, bodyHTML, onSubmit }){
+function relDialog({ title, hint, submitLabel, bodyHTML, onSubmit, wide }){
   closeRel();
   closePicker();
   const wrap = document.createElement('div');
-  wrap.className = 'sel-menu links-pick rel-dlg';
+  // wide：表单类（4 个字段 + 路径输入）要 430px，不能用 .links-pick 那档 330px
+  wrap.className = 'sel-menu links-pick rel-dlg' + (wide ? ' rel-dlg--wide' : '');
   wrap.innerHTML = '<div class="rel-dlg-h">' + esc(title) + '</div>'
     + (hint ? '<div class="rel-dlg-hint">' + esc(hint) + '</div>' : '')
     + bodyHTML
@@ -5817,7 +5880,8 @@ async function drStartMerge(t){
 
   const rows = pool.map(x =>
     '<label class="rel-pick"><input type="checkbox" value="' + esc(x.id) + '">'
-    + '<span>' + esc(x.title) + '</span>'
+    + '<span class="box" aria-hidden="true"></span>'
+    + '<span class="pick-name">' + esc(x.title) + '</span>'
     + '<span class="sub">' + esc(x.project || '') + '</span></label>').join('');
 
   relDialog({
@@ -5943,7 +6007,8 @@ async function drAddDep(t){
 
   const rows = pool.map(x =>
     '<label class="rel-pick"><input type="checkbox" value="' + esc(x.id) + '">'
-    + '<span>' + esc(x.title) + '</span>'
+    + '<span class="box" aria-hidden="true"></span>'
+    + '<span class="pick-name">' + esc(x.title) + '</span>'
     + '<span class="sub">' + esc(x.project || '') + '</span></label>').join('');
 
   relDialog({
@@ -5986,7 +6051,8 @@ async function drSetParent(t){
 
   const rows = pool.map(x =>
     '<label class="rel-pick"><input type="radio" name="parentpick" value="' + esc(x.id) + '">'
-    + '<span>' + esc(x.title) + '</span>'
+    + '<span class="box" aria-hidden="true"></span>'
+    + '<span class="pick-name">' + esc(x.title) + '</span>'
     + '<span class="sub">' + esc(x.project || '') + '</span></label>').join('');
 
   relDialog({

@@ -224,21 +224,62 @@ node -e 'const L=h=>{h=h.replace("#","");const v=[0,2,4].map(i=>parseInt(h.slice
 
 判断标准：**选项超过 12 个，就该用组合框而不是下拉**。
 
-### 复选框
+### 复选框 / 单选
 
-不要用浏览器原生 `checkbox`（那个蓝色/白色方块和整页青灰调完全不搭）。
-用 `.chk`：
+不要用浏览器原生 `checkbox` / `radio`。它们的方块和勾是**浏览器画的**，
+CSS 只够得着外框——实际就是 13px 直角灰块，和整页青灰调完全不搭。
+实测过一次：`appearance:auto`、`13px`、`border-radius:0`。
+
+两处都要用同一套：独立字段用 `.chk`，勾选列表行用 `.rel-pick`。
+原生 input 留作状态源和焦点目标（`opacity:0` + 1px，**不是删掉**），
+`.box` 是画出来的方块：
 
 ```html
+<!-- 独立字段 -->
 <label class="chk">
   <input type="checkbox" id="x">
   <span class="box" aria-hidden="true"></span>
   <span class="chk-text">文案</span>
 </label>
+
+<!-- 勾选列表的一行（合并 / 加前置 / 挂父卡） -->
+<label class="rel-pick">
+  <input type="checkbox" value="id">
+  <span class="box" aria-hidden="true"></span>
+  <span class="pick-name">标题</span>
+  <span class="sub">项目名</span>
+</label>
 ```
 
-原生 input 被视觉隐藏（`opacity:0`），`.box` 是画出来的方块，
-选中时填充深橙 + 白勾，`focus-visible` 有焦点环，读屏仍然读到原生 input。
+方块那几条规则（尺寸、内凹材质、选中态、焦点环）**两个选择器共用一份**，
+不要各写一遍。单选（`type=radio`）只差两行：`border-radius:50%` + 实心点
+而不是白勾。标题段的省略号挂在 `.pick-name` 上，别用 `:first-of-type`——
+插进 `.box` 之后第一个 span 就变成方块了。
+
+### 浮层表单弹窗（`relDialog` 这一族）
+
+「挂一个 Agent 会话 / 合并成一张新卡 / 加前置 / 挂到父卡下 / 拆成几条」
+共用 `relDialog()` 生成的外壳（`.sel-menu.links-pick.rel-dlg`）。它一开始
+是照「小浮层」做的，后来装了表单，几处尺寸就全错了：
+
+- **宽度**：继承 `.links-pick` 的 330px。表单类要传 `wide: true` → `.rel-dlg--wide`
+  的 430px。4 个字段 + 一段路径塞进 330px 时，说明折四行、路径被截断。
+- **高度**：`.links-pick` 是 `max-height:360px` + `overflow:auto`。表单内容
+  实测 414px，于是「取消 / 挂上」被压到面板外（实测按钮在 514px、面板底
+  508px），得先在弹窗里滚动才找得到提交按钮。宽版必须同时放开
+  `max-height` 并 `overflow:visible`（`auto` 还会把下拉菜单裁掉）。
+- **标题 / 说明 / 页脚**按 `.dlg` 那一档：标题 14px 粗、说明用
+  `--font-ui`（不是等宽，中文长句等宽读起来很挤）、页脚按钮靠右。
+- **字段高度只有一档**：36px（和 `.sel--field` 对齐）。同一个表单里
+  下拉 36、输入框 32，会被看成「两种控件」，不是同一行。
+- **按钮必须进总则池**：`.rel-dlg button` / `.agent-act button`。
+  只挂主按钮那条配色规则 = 拿到橙色但圆角 0px、边框 2px、padding 1px 6px，
+  和旁边 9px/1px 的「取消」并排就是两种按钮。
+
+⚠️ **`label` 里别用 `font:` 简写**。文件顶部有一条全局
+`input,select,textarea{font:inherit}`，所以 label 上的 `font:10px mono`
+会**连带**把字号传给里面的输入框——路径框会变成 10px 等宽、padding 落回
+浏览器默认的 `1px 2px`。label 只给 `font-size`，控件各自写自己的尺寸。
 
 ---
 
@@ -495,10 +536,24 @@ node style-audit.mjs        # 必须绿
 - 用了 `var(--x)` 但 `:root` 里没声明（颜色会整个失效）
 - **`var()` 后面拼十六进制透明度**（`var(--p3)22`，静默失效）
 - **`--orange` 当字色**（3.53:1，不过 AA）
+- **按钮的「配色上下文」不在总则池里**（`.rel-dlg button` 这类：给了橙色但没有形状，
+  圆角/内边距/边框宽度全落回浏览器默认）
 - `z-index` 用了分层表以外的值
 - **圆角用了阶梯以外的值**
 - **`box-shadow` 没走 `--shadow-*`**（拟态内阴影和焦点环除外）
 - 有没有小于 10px 的字号（中文在那个尺寸下读不出来）
+
+静态审计只看得懂 CSS 文本，**看得懂渲染的只有 `tests/e2e/style.spec.mjs`**：
+
+```bash
+npx playwright test tests/e2e/style.spec.mjs
+```
+
+它量的是真实计算样式，锁两件事：
+
+- 同一个弹窗里，字段高度/圆角一致、两颗页脚按钮的内边距/边框/字号一致
+  （浏览器默认是 0px 圆角 + 2px 边框 + 1px 内边距，落回默认立刻红）
+- 提交按钮必须在面板里、点得到；勾选行不许露出原生 checkbox/radio
 
 `test-sqlite.mjs` 管数据层：改 `core.patch` 的字段语义时，先给它加一条
 用例 —— 那次「换项目没反应」就是请求 200、值没变，光看接口是看不出来的。
@@ -512,6 +567,9 @@ node style-audit.mjs        # 必须绿
 - [ ] 输入框是内凹、按钮是凸起吗？
 - [ ] 这个字会落在**哪种底**上？压在侧栏或看板列上的，用 `--text-3`
 - [ ] 圆角选的是阶梯里的哪一档？投影用的是 `--shadow-*` 吗？
+- [ ] 新做的表单控件，`label` 上是不是用了 `font:` 简写把字号传给了输入框？
+- [ ] 新弹窗的**提交按钮**在面板里吗？要不要先滚动才看得见？
+- [ ] 复选框/单选是画出来的 `.box`，还是浏览器原生的灰方块？
 - [ ] **在 JS 里改颜色品牌 token 时，有没有做字符串拼接？**
 - [ ] 新加的浮层 `z-index` 是多少？**抽屉打开时它还看得见/点得到吗？**
 - [ ] 首屏横幅出现时（长文案 + 窄窗口），抽屉标题栏和「删」还点得到吗？

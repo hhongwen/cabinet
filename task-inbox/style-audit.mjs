@@ -83,6 +83,7 @@ const topRules = rules.filter((r) => r.depth === 0 && !r.atRule && !r.sel.starts
   for (const r of topRules) {
     for (const one of r.sel.split(',').map((s) => s.trim()).filter(Boolean)) {
       if (!seen.has(one)) seen.set(one, []);
+
       seen.get(one).push({ rule: r, line: lineOf(r.start), base: isBase(r) });
     }
   }
@@ -181,6 +182,47 @@ const BUTTON_EXEMPT = new Set([
                         // 又比表里的内容抢眼；它的"凸起"语义也不对 —— 点它
                         // 改的是排序而不是提交动作
 ]);
+// ---------- 检查 3b：按钮的「配色上下文」必须挂进总则池 ----------
+//
+// BUTTON_POOL 那份名单是**手抄**的，抄漏了就等于没检查：`.rel-dlg button`
+// 一直不在池里，于是「挂一个 Agent 会话」的「挂上」只从主按钮规则拿到橙色，
+// 形状全靠浏览器默认 —— 实测圆角 0px、边框 2px、padding 1px 6px，和旁边
+// 9px/1px 的「取消」并排就是两种按钮。这类错**不报错**，只会看着别扭。
+//
+// 这里不靠名单，靠 CSS 自己：只要一条规则选择了 button 又给了外观，
+// 它（或去掉尾缀的父形式）就必须出现在总则池的选择器里。
+
+{
+  const sharedPool = rules.find((r) => r.sel.includes('.icon-btn') && /var\(--ctl-raise\)/.test(r.body));
+  if (sharedPool) {
+    const pool = new Set(sharedPool.sel.split(',').map((s) => s.trim().replace(/\s+/g, ' ')));
+    // 有意做成另一种材质的整颗按钮（和 BUTTON_EXEMPT 里的装饰性热点是两回事）
+    const CTX_EXEMPT = new Set([
+      '.boot-bar button',   // 横幅里：白字压彩色实底，挂瓷底会变成浮在色条上的白块
+    ]);
+    const hits = [];
+    for (const r of rules) {
+      if (r.atRule) continue;
+      for (const raw of r.sel.split(',')) {
+        const sel = raw.trim().replace(/\s+/g, ' ');
+        if (!/\bbutton\b/.test(sel)) continue;
+        // 只看「给了外观」的规则：纯几何差量（width/height/padding）不算
+        if (!/(?:^|[;\s])(color|background|border|border-color|box-shadow)\s*:/.test(r.body)) continue;
+        if (pool.has(sel) || CTX_EXEMPT.has(sel) || BUTTON_EXEMPT.has(sel)) continue;
+        // 「.rel-dlg button.primary」「button:hover」→ 去掉尾缀看父形式
+        const base = sel.replace(/(?:[:.][\w-]+)+$/, '').trim();
+        if (pool.has(base) || CTX_EXEMPT.has(base) || BUTTON_EXEMPT.has(base)) continue;
+        hits.push({ sel, base, line: lineOf(r.start) });
+      }
+    }
+    for (const h of hits) {
+      err('button-context-offbase',
+        `"${h.sel}" 给按钮上了颜色/描边，但 "${h.base}" 不在按钮总则池里——形状（圆角/内边距/边框宽度）会落回浏览器默认。把 "${h.base}" 加进总则，这里只写差量`,
+        h.line);
+    }
+  }
+}
+
 
 {
   const shared = rules.find((r) =>
