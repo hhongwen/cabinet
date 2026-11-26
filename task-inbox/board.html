@@ -4798,6 +4798,8 @@ function drRenderTabs() {
 function drSyncTabs() {
   const detail = $('#drDetail');
   if (!detail) return;
+  const tabBody = $('#drTabBody');
+  if (tabBody) tabBody.dataset.tab = drTab;
   const req = drTab === 'req';
   const agents = $('#drAgents');
   const chat = $('#drBody');
